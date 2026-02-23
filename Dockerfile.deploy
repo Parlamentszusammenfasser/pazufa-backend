@@ -55,10 +55,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
 
-COPY --from=builder /usr/lib/x86_64-linux-gnu/libssl.so.* /usr/lib/
-COPY --from=builder /usr/lib/x86_64-linux-gnu/libcrypto.so.* /usr/lib/
-COPY --from=builder /usr/lib/x86_64-linux-gnu/libpq.so.* /usr/lib/
-COPY --from=builder /usr/lib/x86_64-linux-gnu/libgcc_s.so.* /usr/lib
+COPY --from=builder /usr/lib/*-linux-gnu/libssl.so.* /usr/lib/
+COPY --from=builder /usr/lib/*-linux-gnu/libcrypto.so.* /usr/lib/
+COPY --from=builder /usr/lib/*-linux-gnu/libpq.so.* /usr/lib/
+COPY --from=builder /usr/lib/*-linux-gnu/libgcc_s.so.* /usr/lib
 
 RUN mkdir -p /var/log/ltzf-backend && chmod 0766 /var/log/ltzf-backend && chown ltzf-backend /var/log/ltzf-backend
 
