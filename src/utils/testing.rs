@@ -2,7 +2,6 @@ use sha256::digest;
 
 use crate::utils::tracing::Logging;
 use crate::{Configuration, LTZFServer, Result};
-pub const MASTER_URL: &str = "postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf";
 pub(crate) struct TestSetup {
     pub(crate) name: &'static str,
     pub(crate) server: LTZFServer,
@@ -19,15 +18,33 @@ impl TestSetup {
     }
 }
 async fn setup_server(dbname: &str) -> Result<LTZFServer> {
-    let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
+    let create_pool = sqlx::PgPool::connect(std::env!("DATABASE_URL"))
+        .await
+        .unwrap();
+    let hostport = std::env!("DATABASE_URL")
+        .split("@")
+        .nth(1)
+        .unwrap()
+        .split("/")
+        .next()
+        .unwrap();
+
     sqlx::query(&format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
         .execute(&create_pool)
         .await?;
-    sqlx::query(&format!("CREATE DATABASE {dbname} WITH OWNER 'ltzf-user'"))
+    sqlx::query("CREATE USER ltzf_testing WITH PASSWORD 'ltzfpass';")
         .execute(&create_pool)
-        .await?;
+        .await
+        .map(|_| ())
+        .unwrap_or_else(|_| ());
+
+    sqlx::query(&format!(
+        "CREATE DATABASE {dbname} WITH OWNER 'ltzf_testing'"
+    ))
+    .execute(&create_pool)
+    .await?;
     let pool = sqlx::PgPool::connect(&format!(
-        "postgres://ltzf-user:ltzf-pass@localhost:5432/{dbname}"
+        "postgres://ltzf_testing:ltzfpass@{hostport}/{dbname}"
     ))
     .await
     .unwrap();
@@ -52,7 +69,9 @@ async fn setup_server(dbname: &str) -> Result<LTZFServer> {
 }
 
 async fn cleanup_server(dbname: &str) -> Result<()> {
-    let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
+    let create_pool = sqlx::PgPool::connect(std::env!("DATABASE_URL"))
+        .await
+        .unwrap();
     sqlx::query(&format!("DROP DATABASE {dbname} WITH (FORCE);"))
         .execute(&create_pool)
         .await?;

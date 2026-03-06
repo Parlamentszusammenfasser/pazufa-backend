@@ -1,0 +1,63 @@
+when:
+  - event: [ push, pull_request ]
+
+variables:
+  - &version "0.2.6"
+
+labels:
+  pazufa_scope: generic
+  performance: high
+
+
+services:
+  - name: database
+    image: postgres
+    environment:
+      POSTGRES_USER: ltzf-user
+      POSTGRES_PASSWORD: ltzf-pass
+      POSTGRES_DB: ltzf
+      
+steps:
+  - name: formatting
+    image: rust:1.92-slim-bookworm
+    commands:
+      - rustup component add rustfmt
+      - nice cargo fmt --check
+    environment:
+      SQLX_OFFLINE: true
+
+  - name: linting & testing
+    image: rust:1.92-slim-bookworm
+    commands:
+      - rustup component add clippy
+      - apt update -qq && apt install maven curl pkg-config libssl-dev libpq5 -yqq --no-install-recommends > /dev/null
+      # install openapi generator + execute it
+      - curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$OPENAPI_GENERATOR_VERSION.jar 
+      - curl -o openapi.yml $SPEC_PATH
+      - java -jar openapi-generator-cli.jar generate -g rust-axum -i openapi.yml -o oapicode
+
+      # setup database
+      - cargo install sqlx-cli  --no-default-features --features postgres,native-tls
+      - sqlx database reset -yf
+      # run tests / linting
+      - nice cargo clippy --workspace -- -D warnings
+      - nice cargo test
+    environment:
+      SPEC_PATH: https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.2/docs/specs/openapi.yml
+      OPENAPI_GENERATOR_VERSION: 7.17.0
+      DATABASE_URL: postgres://ltzf-user:ltzf-pass@database:5432/ltzf
+      SQLX_OFFLINE: false
+      RUST_BACKTRACE: 1
+  - name: deploy on docker
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    settings:
+      repo: pazufa/backend
+      dockerfile: Dockerfile.deploy
+      platforms: linux/amd64
+      tag: *version
+      username: pazufa
+      password:
+        from_secret: pazufa-docker-pass
+    when:
+      - event: pull_request
+        branch: main
