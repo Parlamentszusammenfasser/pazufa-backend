@@ -32,7 +32,7 @@ pub async fn insert_vorgang(
         vg.kurztitel,
         vg.verfassungsaendernd,
         vg.wahlperiode as i32,
-        server.guard_ts(vg.typ, vg.api_id, obj)?
+        server.guard_ts(&vg.typ, vg.api_id, obj)?
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)
@@ -69,7 +69,7 @@ pub async fn insert_vorgang(
 
     let identt_list = vg.ids.as_ref().map(|x| {
         x.iter()
-            .map(|el| server.guard_ts(el.typ, vg.api_id, obj).unwrap())
+            .map(|el| server.guard_ts(&el.typ, vg.api_id, obj).unwrap())
             .collect::<Vec<_>>()
     });
 
@@ -115,7 +115,7 @@ pub async fn insert_vorgang(
         WHERE stv.vg_id=ro.vg_id AND
         stv.scraper=ro.scraper AND
         ro.rn > $1",
-        server.config.per_object_scraper_log_size as i64
+        i64::from(server.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -172,7 +172,7 @@ pub async fn insert_vorgang(
         WHERE st.stat_id=ro.stat_id AND
         st.scraper=ro.scraper AND
         ro.rn > $1",
-        server.config.per_object_scraper_log_size as i64
+        i64::from(server.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -212,8 +212,8 @@ pub async fn insert_station(
         gr_id,
         stat.link,
         stat.titel,
-        stat.trojanergefahr.map(|x| x as i32),
-        srv.guard_ts(stat.typ, sapi, obj)?,
+        stat.trojanergefahr.map(|x| i32::from(x)),
+        srv.guard_ts(&stat.typ, sapi, obj)?,
         stat.zp_start,
         vg_id,
         stat.zp_modifiziert,
@@ -286,7 +286,7 @@ pub async fn insert_dokument(
             .map(|r| r.api_id)
             .fetch_all(&mut **tx)
             .await?;
-            utils::notify::notify_ambiguous_match(api_ids, &dok, "insert_dokument", srv)?;
+            utils::notify::notify_ambiguous_match(&api_ids, &dok, "insert_dokument", srv)?;
         }
         super::merge::MatchState::NoMatch => {}
     }
@@ -300,7 +300,7 @@ pub async fn insert_dokument(
         )RETURNING id",
         dapi,
         dok.drucksnr,
-        srv.guard_ts(dok.typ, dapi, obj)?,
+        srv.guard_ts(&dok.typ, dapi, obj)?,
         dok.titel,
         dok.kurztitel,
         dok.vorwort,
@@ -311,7 +311,7 @@ pub async fn insert_dokument(
         dok.hash,
         dok.zp_referenz,
         dok.zp_erstellt,
-        dok.meinung.map(|r| r as i32)
+        dok.meinung.map(|r| i32::from(r))
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)
@@ -322,7 +322,7 @@ pub async fn insert_dokument(
     // authoren
     let mut aids = vec![];
     for a in &dok.autoren {
-        aids.push(insert_or_retrieve_autor(a, tx, srv).await?)
+        aids.push(insert_or_retrieve_autor(a, tx, srv).await?);
     }
     sqlx::query!(
         "INSERT INTO rel_dok_autor(dok_id, aut_id) 
@@ -357,7 +357,7 @@ pub async fn insert_dokument(
         WHERE st.dok_id=ro.dok_id AND
         st.scraper=ro.scraper AND
         ro.rn > $1",
-        srv.config.per_object_scraper_log_size as i64
+        i64::from(srv.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -433,7 +433,7 @@ pub async fn insert_sitzung(
         WHERE st.sid=ro.sid AND
         st.scraper=ro.scraper AND
         ro.rn > $1",
-        srv.config.per_object_scraper_log_size as i64
+        i64::from(srv.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -542,7 +542,7 @@ pub async fn insert_or_retrieve_gremium(
     })
     .fetch_all(&mut **tx)
     .await?;
-    notify_new_enum_entry(gr, similarity, srv)?;
+    notify_new_enum_entry(gr, &similarity, srv)?;
     let id = sqlx::query!(
         "INSERT INTO gremium(name, parl, wp, link) VALUES 
     ($1, (SELECT id FROM parlament p WHERE p.value = $2), $3, $4) 
@@ -617,7 +617,7 @@ pub async fn insert_or_retrieve_autor(
     })
     .fetch_all(&mut **tx)
     .await?;
-    notify_new_enum_entry(at, similarity, srv)?;
+    notify_new_enum_entry(at, &similarity, srv)?;
     let id = sqlx::query!(
         "INSERT INTO autor(person, organisation, lobbyregister, fachgebiet) 
         VALUES ($1, $2, $3, $4) RETURNING autor.id",

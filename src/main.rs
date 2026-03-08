@@ -102,7 +102,7 @@ pub struct Configuration {
 }
 
 impl Configuration {
-    pub async fn build_mailer(&self) -> Result<SmtpTransport> {
+    pub fn build_mailer(&self) -> Result<SmtpTransport> {
         if self.mail_server.is_none()
             || self.mail_user.is_none()
             || self.mail_password.is_none()
@@ -123,9 +123,6 @@ impl Configuration {
             ))
             .build();
         Ok(mailer)
-    }
-    pub fn init() -> Self {
-        Configuration::parse()
     }
 }
 async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
@@ -168,14 +165,14 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let config = Configuration::init();
+    let config = Configuration::parse();
     if config.dump_config {
-        println!("{:#?}", config);
+        println!("{config:#?}");
         exit(0);
     }
     let logging = Logging::new(
         config.error_log_path.clone().into(),
-        config.object_log_path.as_ref().map(|x| x.into()),
+        config.object_log_path.as_ref().map(Into::into),
     );
     tracing_subscriber::registry()
         .with(logging.error_layer())
@@ -212,14 +209,14 @@ async fn main() -> Result<()> {
     .execute(&mut *tx).await?;
 
     tx.commit().await?;
-    let mailbundle = crate::utils::notify::MailBundle::new(&config).await?;
+    let mailbundle = crate::utils::notify::MailBundle::new(&config)?;
 
     let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle, logging));
     tracing::debug!("Constructed Server State");
 
     // Init Axum router
     let (iv, cnt) = (
-        state.config.req_limit_interval as u64,
+        u64::from(state.config.req_limit_interval),
         state.config.req_limit_count,
     );
     let rl_config = Arc::new(

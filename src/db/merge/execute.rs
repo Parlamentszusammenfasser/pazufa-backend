@@ -50,7 +50,7 @@ pub async fn execute_merge_dokument(
         model.zp_modifiziert,
         model.link,
         model.hash,
-        model.meinung.map(|x| x as i32)
+        model.meinung.map(|x| i32::from(x))
     )
     .execute(&mut **tx)
     .await?;
@@ -95,7 +95,7 @@ pub async fn execute_merge_dokument(
         WHERE st.dok_id=ro.dok_id AND
         st.scraper=ro.scraper AND
         ro.rn > $1",
-        srv.config.per_object_scraper_log_size as i64
+        i64::from(srv.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -154,7 +154,7 @@ pub async fn insert_or_merge_dok(
                     .map(|r| r.api_id)
                     .fetch_all(&mut **tx)
                     .await?;
-                    notify_ambiguous_match(api_ids, &dok, "execute merge station.dokumente", srv)?;
+                    notify_ambiguous_match(&api_ids, &dok, "execute merge station.dokumente", srv)?;
                     Err(DataValidationError::AmbiguousMatch {
                         message: "Ambiguous document match(station), see notification".to_string(),
                     }
@@ -194,11 +194,11 @@ pub async fn execute_merge_station(
         WHERE station.id = $1",
         db_id,
         gr_id,
-        srv.guard_ts(model.typ, sapi, obj)?,
+        srv.guard_ts(&model.typ, sapi, obj)?,
         model.titel,
         model.zp_start,
         model.zp_modifiziert,
-        model.trojanergefahr.map(|x| x as i32),
+        model.trojanergefahr.map(|x| i32::from(x)),
         model.link,
         model.gremium_federf
     )
@@ -222,7 +222,7 @@ pub async fn execute_merge_station(
     // dokumente::UNION
     let mut insert_ids = vec![];
 
-    for dok in model.dokumente.iter() {
+    for dok in &model.dokumente {
         // if id & not in database: fail.
         // if id & in database: add to list of associated documents
         // if document: match & integrate or insert.
@@ -277,7 +277,7 @@ pub async fn execute_merge_station(
         WHERE st.stat_id=ro.stat_id AND
         st.scraper=ro.scraper AND
         ro.rn > $1",
-        srv.config.per_object_scraper_log_size as i64
+        i64::from(srv.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -307,7 +307,7 @@ pub async fn execute_merge_vorgang(
         model.kurztitel,
         model.verfassungsaendernd,
         model.wahlperiode as i32,
-        srv.guard_ts(model.typ, vapi, obj)?,
+        srv.guard_ts(&model.typ, vapi, obj)?,
         db_id
     )
     .execute(&mut **tx)
@@ -345,7 +345,7 @@ pub async fn execute_merge_vorgang(
 
     let identt_list = model.ids.as_ref().map(|x| {
         x.iter()
-            .map(|el| srv.guard_ts(el.typ, model.api_id, obj).unwrap())
+            .map(|el| srv.guard_ts(&el.typ, model.api_id, obj).unwrap())
             .collect::<Vec<_>>()
     });
 
@@ -371,7 +371,7 @@ pub async fn execute_merge_vorgang(
             }
             MatchState::ExactlyOne(_) => {
                 // can be ignored bc same as db_id
-                execute_merge_station(stat, db_id, scraper_id, collector_key, tx, srv).await?
+                execute_merge_station(stat, db_id, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::Ambiguous(matches) => {
                 let mids = sqlx::query!(
@@ -381,7 +381,7 @@ pub async fn execute_merge_vorgang(
                 .map(|r| r.api_id)
                 .fetch_all(&mut **tx)
                 .await?;
-                notify_ambiguous_match(mids, stat, "exec_merge_vorgang: station matching", srv)?;
+                notify_ambiguous_match(&mids, stat, "exec_merge_vorgang: station matching", srv)?;
             }
         }
     }
@@ -440,7 +440,7 @@ pub async fn execute_merge_vorgang(
         WHERE stv.vg_id=ro.vg_id AND
         stv.scraper=ro.scraper AND
         ro.rn > $1",
-        srv.config.per_object_scraper_log_size as i64
+        i64::from(srv.config.per_object_scraper_log_size)
     )
     .execute(&mut **tx)
     .await?;
@@ -505,7 +505,7 @@ pub async fn run_integration(
             .map(|r| r.api_id)
             .fetch_all(&mut *tx)
             .await?;
-            notify_ambiguous_match(api_ids, model, "merging vorgang", server)?;
+            notify_ambiguous_match(&api_ids, model, "merging vorgang", server)?;
             tx.rollback().await?;
             return Err(DataValidationError::AmbiguousMatch {
                 message: format!(

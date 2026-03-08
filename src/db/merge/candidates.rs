@@ -25,7 +25,7 @@ pub async fn vorgang_merge_candidates(
         .as_ref()
         .unwrap_or(&vec![])
         .iter()
-        .map(|x| srv.guard_ts(x.typ, model.api_id, obj).unwrap())
+        .map(|x| srv.guard_ts(&x.typ, model.api_id, obj).unwrap())
         .collect();
 
     let result = sqlx::query!(
@@ -56,7 +56,7 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
 		)
 	);",
     model.api_id, &ident_t[..], &identt_t[..], model.wahlperiode as i32,
-    srv.guard_ts(model.typ, model.api_id, obj)?)
+    srv.guard_ts(&model.typ, model.api_id, obj)?)
     .fetch_all(executor).await?;
 
     tracing::debug!(
@@ -124,7 +124,7 @@ pub async fn station_merge_candidates(
 	))",
         model.api_id,
         vorgang,
-        srv.guard_ts(model.typ, api_id, obj)?,
+        srv.guard_ts(&model.typ, api_id, obj)?,
         gr_name,
         gr_parl,
         gr_wp,
@@ -170,7 +170,7 @@ pub async fn dokument_merge_candidates(
         model.api_id,
         model.drucksnr,
         srv.guard_ts(
-            model.typ,
+            &model.typ,
             model.api_id.unwrap_or(Uuid::nil()),
             "dok_merge_candidates"
         )?,
@@ -274,7 +274,7 @@ mod candid_test {
     #[tokio::test]
     async fn station_test() {
         let setup = TestSetup::new("test_station_candidates").await;
-        let srv = &setup.server;
+        let _srv = &setup.server;
 
         setup.teardown().await;
     }

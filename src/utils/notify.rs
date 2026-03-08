@@ -26,8 +26,8 @@ pub struct MailBundle {
     cache: Arc<RwLock<Vec<Mail>>>,
 }
 impl MailBundle {
-    pub async fn new(config: &crate::Configuration) -> Result<Option<Self>> {
-        let cm = config.build_mailer().await;
+    pub fn new(config: &crate::Configuration) -> Result<Option<Self>> {
+        let cm = config.build_mailer();
         if let Err(e) = cm {
             tracing::warn!(
                 "Failed to create mailer: {}\nMailer will not be available",
@@ -96,7 +96,7 @@ impl MailBundle {
 
                 if s_am != 0 {
                     let ambiguous_match_body =
-                        ambiguous_match.iter().fold("".to_string(), |a, n| {
+                        ambiguous_match.iter().fold(String::new(), |a, n| {
                             format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                         });
                     let email = Message::builder()
@@ -110,7 +110,7 @@ impl MailBundle {
                     tracing::info!("Sent Mail about {} new ambiguos matches", s_am);
                 }
                 if s_va != 0 {
-                    let variant_added_body = variant_added.iter().fold("".to_string(), |a, n| {
+                    let variant_added_body = variant_added.iter().fold(String::new(), |a, n| {
                         format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                     });
                     let email = Message::builder()
@@ -125,7 +125,7 @@ impl MailBundle {
                 }
                 if s_su != 0 {
                     let sonstig_unwrapped_body =
-                        sonstig_unwrapped.iter().fold("".to_string(), |a, n| {
+                        sonstig_unwrapped.iter().fold(String::new(), |a, n| {
                             format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                         });
                     let email = Message::builder()
@@ -139,7 +139,7 @@ impl MailBundle {
                     tracing::info!("Sent Mail about {s_su} new sonstig variants");
                 }
                 if s_ot != 0 {
-                    let other_body = other.iter().fold("".to_string(), |a, n| {
+                    let other_body = other.iter().fold(String::new(), |a, n| {
                         format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                     });
                     let email = Message::builder()
@@ -177,10 +177,10 @@ impl Drop for MailBundle {
 
 impl LTZFServer {
     /// guarded to String conversion
-    pub fn guard_ts<T: ToString>(&self, input: T, api_id: Uuid, object: &str) -> Result<String> {
+    pub fn guard_ts<T: ToString>(&self, input: &T, api_id: Uuid, object: &str) -> Result<String> {
         let temp = input.to_string();
         if temp == "sonstig" {
-            notify_unknown_variant::<T>(api_id, object, self)?
+            notify_unknown_variant::<T>(api_id, object, self)?;
         }
         Ok(temp)
     }
@@ -188,7 +188,7 @@ impl LTZFServer {
 
 pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     new_entry: &T,
-    similarity: Vec<(f32, T)>,
+    similarity: &[(f32, T)],
     server: &LTZFServer,
 ) -> Result<()> {
     if server.mailbundle.is_none() {
@@ -203,7 +203,7 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     let simstr = similarity
         .iter()
         .map(|(p, t)| format!("{p}: {t}"))
-        .fold("".to_string(), |a, n| format!("{a}\n{n}"));
+        .fold(String::new(), |a, n| format!("{a}\n{n}"));
 
     let body = format!("Es gibt {} ähnliche Einträge: {simstr}", similarity.len());
     tracing::warn!("Notify: New Enum Entry: {subject}\n{body}!");
@@ -216,7 +216,7 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     Ok(())
 }
 pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
-    api_ids: Vec<Uuid>,
+    api_ids: &[Uuid],
     object: &T,
     during_operation: &str,
     server: &LTZFServer,
@@ -254,7 +254,7 @@ pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str, server: &LTZFServer
     tracing::warn!("Notify: Unknown Variant in Guarded Enumeration Field");
     server.mailbundle.as_ref().unwrap().send(Mail {
         subject,
-        body: "".to_string(),
+        body: String::new(),
         tp: MailNotificationType::SonstigUnwrapped,
     })?;
     Ok(())

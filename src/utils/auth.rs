@@ -56,9 +56,9 @@ pub(crate) async fn find_new_key(
             .await?;
         if found.is_some() {
             return Ok((new_key, new_salt));
-        } else {
-            new_key = crate::utils::auth::generate_api_key();
-            new_salt = crate::utils::auth::generate_salt();
         }
+
+        new_key = crate::utils::auth::generate_api_key();
+        new_salt = crate::utils::auth::generate_salt();
     }
 }

@@ -85,7 +85,7 @@ pub async fn vorgang_by_id(
                         organisation: models::Autor {
                             fachgebiet: None,
                             lobbyregister: None,
-                            organisation: "".to_string(),
+                            organisation: String::new(),
                             person: None,
                         },
                         link: r.link,
@@ -532,7 +532,7 @@ pub(crate) async fn count_existing_gremien(
     gremien: &[models::Gremium],
 ) -> Result<usize> {
     let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
-    for gr in gremien.iter() {
+    for gr in gremien {
         names.push(gr.name.clone());
         pvalues.push(gr.parlament.to_string());
         wps.push(gr.wahlperiode as i32);
@@ -562,7 +562,7 @@ pub(crate) async fn count_existing_authors(
     autoren: &[models::Autor],
 ) -> Result<usize> {
     let (mut person, mut organisation) = (vec![], vec![]);
-    for a in autoren.iter() {
+    for a in autoren {
         person.push(a.person.clone());
         organisation.push(a.organisation.clone());
     }

@@ -83,7 +83,7 @@ async fn internal_extract_claims(
             r.deleted_by,
             r.expires_at,
             r.scope,
-            r.salt.to_string(),
+            r.salt.clone(),
             r.key_hash,
         )
     })
@@ -273,7 +273,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             INNER JOIN dokument d ON d.id = tb.dok_id
 			INNER JOIN api_keys ak ON ak.id = tb.collector_key
             WHERE ak.keytag = $1",
-            path_params.keytag.to_string()
+            path_params.keytag.clone()
         )
         .fetch_all(&self.sqlx_db)
         .await?;
@@ -315,10 +315,10 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         let r = &result;
         info!(
             "Successfully fetched {}/{}/{}/{} (d/v/si/st) entries",
-            r.dokumente.as_ref().map(|x| x.len()).unwrap_or(0),
-            r.vorgaenge.as_ref().map(|x| x.len()).unwrap_or(0),
-            r.sitzungen.as_ref().map(|x| x.len()).unwrap_or(0),
-            r.stationen.as_ref().map(|x| x.len()).unwrap_or(0),
+            r.dokumente.as_ref().map_or(0, Vec::len),
+            r.vorgaenge.as_ref().map_or(0, Vec::len),
+            r.sitzungen.as_ref().map_or(0, Vec::len),
+            r.stationen.as_ref().map_or(0, Vec::len),
         );
         return Ok(AuthListingKeytagResponse::Status200_OK {
             body: result,
@@ -394,7 +394,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             claims.1,
             body.expires_at
                 .unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
-            body.scope.to_string(),
+            body.scope.clone(),
             salt,
             tag
         )

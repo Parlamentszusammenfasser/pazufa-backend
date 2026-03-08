@@ -1,7 +1,14 @@
 use sha256::digest;
+use std::sync::LazyLock;
 
 use crate::utils::tracing::Logging;
 use crate::{Configuration, LTZFServer, Result};
+
+static MASTER_URL: LazyLock<String> = LazyLock::new(|| {
+    dotenv::dotenv().ok();
+    std::env::var("DATABASE_URL").unwrap()
+});
+
 pub(crate) struct TestSetup {
     pub(crate) name: &'static str,
     pub(crate) server: LTZFServer,
@@ -18,36 +25,37 @@ impl TestSetup {
     }
 }
 async fn setup_server(dbname: &str) -> Result<LTZFServer> {
-    let create_pool = sqlx::PgPool::connect(std::env!("DATABASE_URL"))
-        .await
-        .unwrap();
-    let hostport = std::env!("DATABASE_URL")
-        .split("@")
-        .nth(1)
-        .unwrap()
-        .split("/")
-        .next()
-        .unwrap();
-
+    let create_pool = sqlx::PgPool::connect(&MASTER_URL).await.unwrap();
+    let user: String = sqlx::query_scalar::<_, String>("SELECT CURRENT_ROLE;")
+        .fetch_one(&create_pool)
+        .await?;
+    let testuser = format!("test_{user}");
     sqlx::query(&format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
         .execute(&create_pool)
         .await?;
-    sqlx::query("CREATE USER ltzf_testing WITH PASSWORD 'ltzfpass';")
+    let _ = sqlx::query(&format!("CREATE USER \"{testuser}\" with PASSWORD 'test';"))
         .execute(&create_pool)
-        .await
-        .map(|_| ())
-        .unwrap_or_else(|_| ());
+        .await;
+    sqlx::query(&format!("CREATE DATABASE {dbname} WITH OWNER '{testuser}'"))
+        .execute(&create_pool)
+        .await?;
 
-    sqlx::query(&format!(
-        "CREATE DATABASE {dbname} WITH OWNER 'ltzf_testing'"
-    ))
-    .execute(&create_pool)
-    .await?;
-    let pool = sqlx::PgPool::connect(&format!(
-        "postgres://ltzf_testing:ltzfpass@{hostport}/{dbname}"
-    ))
-    .await
-    .unwrap();
+    let new_pool = match (MASTER_URL.rfind("/"), MASTER_URL.rfind("@")) {
+        (Some(slash_pos), Some(at_pos)) => format!(
+            "postgres://{testuser}:test@{}/{dbname}",
+            &MASTER_URL[at_pos + 1..slash_pos]
+        ),
+        (Some(slash_pos), None) => {
+            let double_slash_pos = MASTER_URL.find("//").unwrap();
+            format!(
+                "postgres://{testuser}:test@{}/{dbname}",
+                &MASTER_URL[double_slash_pos + 2..slash_pos]
+            )
+        }
+        (None, _) => unreachable!(),
+    };
+
+    let pool = sqlx::PgPool::connect(&new_pool).await.unwrap();
     sqlx::migrate!().run(&pool).await?;
     let hash = digest("total-nutzloser-wert");
     sqlx::query!(
@@ -69,9 +77,7 @@ async fn setup_server(dbname: &str) -> Result<LTZFServer> {
 }
 
 async fn cleanup_server(dbname: &str) -> Result<()> {
-    let create_pool = sqlx::PgPool::connect(std::env!("DATABASE_URL"))
-        .await
-        .unwrap();
+    let create_pool = sqlx::PgPool::connect(&MASTER_URL).await.unwrap();
     sqlx::query(&format!("DROP DATABASE {dbname} WITH (FORCE);"))
         .execute(&create_pool)
         .await?;

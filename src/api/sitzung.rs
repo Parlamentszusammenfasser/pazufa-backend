@@ -114,14 +114,13 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
                     x_rate_limit_reset: None,
                 });
             }
-            match delete::delete_sitzung_by_api_id(api_id, self).await? {
-                SitzungDeleteResponse::Status204_NoContent { .. } => {
-                    insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
-                }
-                _ => {
-                    error!("Delete was unsuccessful despite session being in the database");
-                    unreachable!("If this is reached, some assumptions did not hold")
-                }
+            if let SitzungDeleteResponse::Status204_NoContent { .. } =
+                delete::delete_sitzung_by_api_id(api_id, self).await?
+            {
+                insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
+            } else {
+                error!("Delete was unsuccessful despite session being in the database");
+                unreachable!("If this is reached, some assumptions did not hold")
             }
         } else {
             insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;

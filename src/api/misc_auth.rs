@@ -180,14 +180,14 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         ",
             query_params.gr,
             query_params.wp,
-            query_params.p.as_ref().map(|x| x.to_string())
+            query_params.p.as_ref().map(ToString::to_string)
         )
         .execute(&mut *tx)
         .await?
         .rows_affected();
         tx.commit().await?;
         info!(target: "obj", "Deleted {} Gremien matching gr:{:?} wp:{:?} pa:{:?}",
-            n_del, query_params.gr, query_params.wp, query_params.p.as_ref().map(|x| x.to_string())
+            n_del, query_params.gr, query_params.wp, query_params.p.as_ref().map(ToString::to_string)
         );
         info!("Deleted the requested Gremien");
         return Ok(GremienDeleteByParamResponse::Status204_NoContent {
@@ -207,6 +207,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         path_params: &models::EnumDeletePathParams,
     ) -> Result<EnumDeleteResponse> {
+        use models::EnumerationNames;
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
             warn!("Permission level too low");
             return Ok(EnumDeleteResponse::Status403_Forbidden {
@@ -215,16 +216,15 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        use models::EnumerationNames::*;
         let mut tx = self.sqlx_db.begin().await?;
-        let enum_tables = std::collections::BTreeMap::from_iter(
+        let enum_tables: BTreeMap<EnumerationNames, &str> = FromIterator::from_iter(
             vec![
-                (Schlagworte, "schlagwort"),
-                (Stationstypen, "stationstyp"),
-                (Parlamente, "parlament"),
-                (Vorgangstypen, "vorgangstyp"),
-                (Dokumententypen, "dokumententyp"),
-                (Vgidtypen, "vg_ident_typ"),
+                (EnumerationNames::Schlagworte, "schlagwort"),
+                (EnumerationNames::Stationstypen, "stationstyp"),
+                (EnumerationNames::Parlamente, "parlament"),
+                (EnumerationNames::Vorgangstypen, "vorgangstyp"),
+                (EnumerationNames::Dokumententypen, "dokumententyp"),
+                (EnumerationNames::Vgidtypen, "vg_ident_typ"),
             ]
             .drain(..),
         );
@@ -267,11 +267,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         // if replacing contains an index larger than the object list: Bad Request
         // if replacing contains circular references (meaning a replacing object is identifiable with an object in the object list): Bad Request
-        let seen = std::collections::BTreeSet::from_iter(
-            body.objects.iter().map(|x| WrappedAutor { autor: x }),
-        );
+        let seen: BTreeSet<WrappedAutor> =
+            FromIterator::from_iter(body.objects.iter().map(|x| WrappedAutor { autor: x }));
         if let Some(replc) = &body.replacing {
-            for rpl in replc.iter() {
+            for rpl in replc {
                 if rpl.replaced_by as usize >= body.objects.len()
                     || rpl
                         .values
@@ -296,7 +295,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // check if none of the replacing authors are in the database
         // if both: NotModified
         let (mut person, mut organisation, mut fach, mut lobby) = (vec![], vec![], vec![], vec![]);
-        for a in body.objects.iter() {
+        for a in &body.objects {
             person.push(a.person.clone());
             organisation.push(a.organisation.clone());
             fach.push(a.fachgebiet.clone());
@@ -362,9 +361,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // for each replacing autor:
         // for each table referencing it: Update those tables with the new id
         let mut replacement_tuples = vec![];
-        for entry in body.replacing.as_ref().unwrap().iter() {
+        for entry in body.replacing.as_ref().unwrap() {
             let (mut vperson, mut vorga) = (vec![], vec![]);
-            for value in entry.values.iter() {
+            for value in &entry.values {
                 vperson.push(value.person.clone());
                 vorga.push(value.organisation.clone());
             }
@@ -493,7 +492,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // check if replacing contain an index larger than the object list
         // if so: Bad Request
         if let Some(replc) = &body.replacing {
-            for rpl in replc.iter() {
+            for rpl in replc {
                 if rpl.replaced_by as usize >= body.objects.len() {
                     info!(
                         "Semantically bad request: Either a circular replacement was detected or 
@@ -514,7 +513,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // if both: NotModified
 
         let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
-        for gr in body.objects.iter() {
+        for gr in &body.objects {
             names.push(gr.name.clone());
             pvalues.push(gr.parlament.to_string());
             wps.push(gr.wahlperiode as i32);
@@ -578,9 +577,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // for each replacing gremium:
         // for each table referencing it: Update those tables with the new id
         let mut replacement_tuples = vec![];
-        for entry in body.replacing.as_ref().unwrap().iter() {
+        for entry in body.replacing.as_ref().unwrap() {
             let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
-            for value in entry.values.iter() {
+            for value in &entry.values {
                 vnames.push(value.name.clone());
                 vwps.push(value.wahlperiode as i32);
                 vpvals.push(value.parlament.to_string());
@@ -671,7 +670,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // check if replacing contain an index larger than the object list
         // if so: Bad Request
         if let Some(replc) = &body.replacing {
-            for rpl in replc.iter() {
+            for rpl in replc {
                 if rpl.replaced_by as usize >= body.objects.len() {
                     return Ok(EnumPutResponse::Status400_BadRequest {
                         x_rate_limit_limit: None,
@@ -685,7 +684,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // check if all gremien are existent in the database
         // check if none of the replacing gremien are in the database or replacing is None
         // if both: NotModified
-        let enum_tables = std::collections::BTreeMap::from_iter(
+        let enum_tables: BTreeMap<models::EnumerationNames, &str> = FromIterator::from_iter(
             vec![
                 (models::EnumerationNames::Schlagworte, "schlagwort"),
                 (models::EnumerationNames::Stationstypen, "stationstyp"),
@@ -762,7 +761,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // for each replacing gremium:
         // for each table referencing it: Update those tables with the new id
         let mut replacement_tuples = vec![];
-        for entry in body.replacing.as_ref().unwrap().iter() {
+        for entry in body.replacing.as_ref().unwrap() {
             // first, delete potentially conflicting entries
             // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
 
@@ -790,75 +789,75 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // vg_ident_typ: rel_vorgang_ident(typ)
         // vorgangstyp: vorgang(typ)
         // schlagwort: rel_station_schlagwort(sw_id) / rel_dok_schlagwort(sw_id)
-        let enum_table_refs = BTreeMap::from_iter(
+        let enum_table_refs: BTreeMap<
+            models::EnumerationNames,
+            BTreeSet<(&'static str, &'static str, Option<&'static str>)>,
+        > = FromIterator::from_iter(
             vec![
                 (
                     models::EnumerationNames::Parlamente,
                     // not a key component
-                    BTreeSet::from_iter(vec![("gremium", "parl", None)].drain(..)),
+                    vec![("gremium", "parl", None)].drain(..).collect(),
                 ),
                 (
                     models::EnumerationNames::Dokumententypen,
-                    BTreeSet::from_iter(vec![("dokument", "typ", None)].drain(..)), // not a key component
+                    vec![("dokument", "typ", None)].drain(..).collect(), // not a key component
                 ),
                 (
                     models::EnumerationNames::Stationstypen,
-                    BTreeSet::from_iter(vec![("station", "typ", None)].drain(..)), // not a key component
+                    vec![("station", "typ", None)].drain(..).collect(), // not a key component
                 ),
                 (
                     models::EnumerationNames::Vgidtypen,
-                    BTreeSet::from_iter(
-                        vec![(
+                    vec![(
+                        "rel_vorgang_ident",
+                        "typ",
+                        Some(conflict_resolve_query!(
                             "rel_vorgang_ident",
-                            "typ",
-                            Some(conflict_resolve_query!(
-                                "rel_vorgang_ident",
-                                "rvi",
-                                "vg_id",
-                                "typ"
-                            )),
-                        )]
-                        .drain(..),
-                    ), // a key component
+                            "rvi",
+                            "vg_id",
+                            "typ"
+                        )),
+                    )]
+                    .drain(..)
+                    .collect(),
                 ),
                 (
                     models::EnumerationNames::Vorgangstypen,
-                    BTreeSet::from_iter(vec![("vorgang", "typ", Some(""))].drain(..)), // not a key component
+                    vec![("vorgang", "typ", Some(""))].drain(..).collect(), // not a key component
                 ),
                 (
                     models::EnumerationNames::Schlagworte,
                     // a key component, a key component
-                    BTreeSet::from_iter(
-                        vec![
-                            (
+                    vec![
+                        (
+                            "rel_dok_schlagwort",
+                            "sw_id",
+                            Some(conflict_resolve_query!(
                                 "rel_dok_schlagwort",
-                                "sw_id",
-                                Some(conflict_resolve_query!(
-                                    "rel_dok_schlagwort",
-                                    "rds",
-                                    "dok_id",
-                                    "sw_id"
-                                )),
-                            ),
-                            (
+                                "rds",
+                                "dok_id",
+                                "sw_id"
+                            )),
+                        ),
+                        (
+                            "rel_station_schlagwort",
+                            "sw_id",
+                            Some(conflict_resolve_query!(
                                 "rel_station_schlagwort",
-                                "sw_id",
-                                Some(conflict_resolve_query!(
-                                    "rel_station_schlagwort",
-                                    "rss",
-                                    "stat_id",
-                                    "sw_id"
-                                )),
-                            ),
-                        ]
-                        .drain(..),
-                    ),
+                                "rss",
+                                "stat_id",
+                                "sw_id"
+                            )),
+                        ),
+                    ]
+                    .drain(..)
+                    .collect(),
                 ),
             ]
             .drain(..),
         );
-        for (table, column, conflict_resolution_query) in enum_table_refs[&path_params.name].iter()
-        {
+        for (table, column, conflict_resolution_query) in &enum_table_refs[&path_params.name] {
             if let Some(crq) = conflict_resolution_query {
                 sqlx::query(crq)
                     .bind(&rep_new[..])

@@ -111,11 +111,10 @@ impl PaginationResponsePart {
     pub const DEFAULT_PER_PAGE: i32 = 32;
     pub const MAX_PER_PAGE: i32 = 256;
     pub fn new(x_total_count: i32, x_page: Option<i32>, x_per_page: Option<i32>) -> Self {
-        let x_per_page = x_per_page
-            .map(|x| x.clamp(0, Self::MAX_PER_PAGE))
-            .unwrap_or(Self::DEFAULT_PER_PAGE);
-        let x_total_pages = ((x_total_count as f32) / x_per_page as f32).ceil().max(1.) as i32;
-        let x_page = x_page.map(|x| x.clamp(1, x_total_pages)).unwrap_or(1);
+        let x_per_page =
+            x_per_page.map_or(Self::DEFAULT_PER_PAGE, |x| x.clamp(0, Self::MAX_PER_PAGE));
+        let x_total_pages = (x_total_count + x_per_page - 1) / x_per_page;
+        let x_page = x_page.map_or(1, |x| x.clamp(1, x_total_pages));
 
         Self {
             x_total_count,
@@ -125,17 +124,17 @@ impl PaginationResponsePart {
         }
     }
     pub fn limit(&self) -> i64 {
-        self.x_per_page as i64
+        i64::from(self.x_per_page)
     }
     pub fn offset(&self) -> i64 {
-        ((self.x_page - 1) * self.x_per_page) as i64
+        i64::from((self.x_page - 1) * self.x_per_page)
     }
     pub fn start(&self) -> usize {
         ((self.x_page - 1) * self.x_per_page) as usize
     }
     pub fn end(&self) -> usize {
         (self.offset() + self.limit())
-            .min(self.x_total_count as i64)
+            .min(i64::from(self.x_total_count))
             .max(0) as usize
     }
     pub fn generate_link_header(&self, link_first_part: &str) -> String {
@@ -284,11 +283,9 @@ impl Display for DateRange {
             f,
             "[{}, {}]",
             self.since
-                .map(|x| format!("{}", x))
-                .unwrap_or("-∞".to_string()),
+                .map_or_else(|| "-∞".to_string(), |x| format!("{x}")),
             self.until
-                .map(|x| format!("{}", x))
-                .unwrap_or("∞".to_string())
+                .map_or_else(|| "∞".to_string(), |x| format!("{x}"))
         )
     }
 }
@@ -532,19 +529,19 @@ mod test_applicable_date_range {
 pub(crate) struct WrappedAutor<'wrapped> {
     pub autor: &'wrapped models::Autor,
 }
-impl<'wrapped> PartialEq for WrappedAutor<'wrapped> {
+impl PartialEq for WrappedAutor<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.autor.organisation == other.autor.organisation
             && self.autor.person == other.autor.person
     }
 }
-impl<'wrapped> Eq for WrappedAutor<'wrapped> {}
-impl<'wrapped> PartialOrd for WrappedAutor<'wrapped> {
+impl Eq for WrappedAutor<'_> {}
+impl PartialOrd for WrappedAutor<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(std::cmp::Ord::cmp(self, other))
     }
 }
-impl<'wrapped> Ord for WrappedAutor<'wrapped> {
+impl Ord for WrappedAutor<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.autor
             .organisation
@@ -752,7 +749,9 @@ impl RoundTimestamp for models::Station {
                         models::StationDokumenteInner::Dokument(d) => {
                             models::StationDokumenteInner::Dokument(d.with_round_timestamps())
                         }
-                        x => x.clone(),
+                        models::StationDokumenteInner::String(x) => {
+                            models::StationDokumenteInner::String(x.clone())
+                        }
                     })
                     .collect()
             }),
@@ -763,7 +762,9 @@ impl RoundTimestamp for models::Station {
                     models::StationDokumenteInner::Dokument(d) => {
                         models::StationDokumenteInner::Dokument(d.with_round_timestamps())
                     }
-                    x => x.clone(),
+                    models::StationDokumenteInner::String(x) => {
+                        models::StationDokumenteInner::String(x.clone())
+                    }
                 })
                 .collect(),
 
@@ -778,7 +779,7 @@ impl RoundTimestamp for models::Vorgang {
             stationen: self
                 .stationen
                 .iter()
-                .map(|s| s.with_round_timestamps())
+                .map(RoundTimestamp::with_round_timestamps)
                 .collect(),
             ..self.clone()
         }
@@ -794,7 +795,9 @@ impl RoundTimestamp for models::Sitzung {
                         models::StationDokumenteInner::Dokument(d) => {
                             models::StationDokumenteInner::Dokument(d.with_round_timestamps())
                         }
-                        x => x.clone(),
+                        models::StationDokumenteInner::String(x) => {
+                            models::StationDokumenteInner::String(x.clone())
+                        }
                     })
                     .collect()
             }),

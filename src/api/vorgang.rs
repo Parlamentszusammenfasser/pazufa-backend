@@ -68,32 +68,28 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
             .map(|x| x.id)
             .fetch_optional(&mut *tx)
             .await?;
-        match db_id {
-            Some(db_id) => {
-                debug!("Match found: {db_id}");
-                let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
+        if let Some(db_id) = db_id {
+            debug!("Match found: {db_id}");
+            let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
 
-                if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
-                    return Ok(VorgangIdPutResponse::Status304_NotModified {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-                match delete::delete_vorgang_by_api_id(api_id, self).await? {
-                    VorgangDeleteResponse::Status204_NoContent { .. } => {
-                        insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
-                    }
-                    _ => {
-                        error!("After successful delete an insert cannot fail");
-                        unreachable!("If this is reached, some assumptions did not hold")
-                    }
-                }
+            if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
+                return Ok(VorgangIdPutResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
             }
-            None => {
-                debug!("No Match found");
+            if let VorgangDeleteResponse::Status204_NoContent { .. } =
+                delete::delete_vorgang_by_api_id(api_id, self).await?
+            {
                 insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
+            } else {
+                error!("After successful delete an insert cannot fail");
+                unreachable!("If this is reached, some assumptions did not hold");
             }
+        } else {
+            debug!("No Match found");
+            insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
         info!(target: "obj", "PUT by ID Vorgang {}", path_params.vorgang_id);
@@ -136,7 +132,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
         let rval =
             merge::execute::run_integration(body, header_params.x_scraper_id, claims.1, self).await;
         match rval {
-            Ok(_) => {
+            Ok(()) => {
                 info!("Integration Successful");
                 Ok(VorgangPutResponse::Status201_Created {
                     x_rate_limit_limit: None,

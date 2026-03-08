@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::{LTZFError, LTZFServer, Result};
@@ -157,16 +158,15 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         let contains = query_params
             .contains
             .as_ref()
-            .map(|x| {
+            .map_or_else(String::new, |x| {
                 if path_params.name == models::EnumerationNames::Parlamente {
                     x.to_uppercase()
                 } else {
                     x.to_lowercase()
                 }
-            })
-            .unwrap_or("".to_string());
+            });
         let mut tx = self.sqlx_db.begin().await?;
-        let enum_tables = std::collections::BTreeMap::from_iter(
+        let enum_tables: BTreeMap<models::EnumerationNames, &str> = FromIterator::from_iter(
             vec![
                 (models::EnumerationNames::Schlagworte, "schlagwort"),
                 (models::EnumerationNames::Stationstypen, "stationstyp"),

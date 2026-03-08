@@ -25,8 +25,8 @@ pub async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-    _ = ctrl_c => {},
-    _ = terminate => {},
+    () = ctrl_c => {},
+    () = terminate => {},
     }
 }
 pub fn as_option<T>(v: Vec<T>) -> Option<Vec<T>> {
