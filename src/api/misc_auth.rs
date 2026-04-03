@@ -7,7 +7,7 @@ use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
-use axum_extra::extract::Host;
+use headers::Host;
 use openapi::apis::data_administration_miscellaneous::*;
 use openapi::models;
 use sqlx::Row;
@@ -988,13 +988,13 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 }
 
 #[cfg(test)]
-mod test_authorisiert {
+mod test_authorisierte_sonstige {
     use std::str::FromStr;
 
     use crate::api::auth::APIScope;
     use crate::db::merge::execute::run_integration;
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use openapi::apis::data_administration_miscellaneous::{
         AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
         EnumDeleteResponse, EnumPutResponse, GremienDeleteByParamResponse, GremienPutResponse,
@@ -1007,13 +1007,18 @@ mod test_authorisiert {
 
     use crate::LTZFServer;
     use crate::utils::testing::{TestSetup, generate};
+    use tracing_test::traced_test;
 
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
     async fn insert_default_vorgang(server: &LTZFServer) {
         let vorgang = generate::default_vorgang();
         let rsp = server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -1029,7 +1034,7 @@ mod test_authorisiert {
         let autoren = server
             .autoren_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::AutorenGetQueryParams {
                     page: None,
@@ -1047,10 +1052,10 @@ mod test_authorisiert {
         }
     }
     async fn fetch_all_gremien(server: &LTZFServer) -> Vec<models::Gremium> {
-        let autoren = server
+        let gremien = server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     page: None,
@@ -1062,7 +1067,7 @@ mod test_authorisiert {
             )
             .await
             .unwrap();
-        match autoren {
+        match gremien {
             GremienGetResponse::Status200_Success { body, .. } => body,
             _ => vec![],
         }
@@ -1071,7 +1076,7 @@ mod test_authorisiert {
         let entries = server
             .enum_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::EnumGetPathParams { name },
                 &models::EnumGetQueryParams {
@@ -1097,7 +1102,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::DELETE,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1122,7 +1127,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1151,7 +1156,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1180,7 +1185,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1212,7 +1217,7 @@ mod test_authorisiert {
         server
             .enum_delete(
                 &Method::DELETE,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 pp,
@@ -1226,7 +1231,7 @@ mod test_authorisiert {
             .server
             .enum_delete(
                 &Method::DELETE,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::EnumDeletePathParams {
@@ -1261,13 +1266,13 @@ mod test_authorisiert {
     }
 
     #[tokio::test]
-    async fn test_gremien_delete() {
-        let scenario = TestSetup::new("test_gremien_delete").await;
+    async fn test_gremien_delete_forbidden() {
+        let scenario = TestSetup::new("test_gremien_delete_forbidden").await;
         let r = scenario
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1282,35 +1287,46 @@ mod test_authorisiert {
             r,
             GremienDeleteByParamResponse::Status403_Forbidden { .. }
         ));
+        scenario.teardown().await;
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_gremien_delete() {
+        let scenario = TestSetup::new("test_gremien_delete").await;
 
         let mut vorgang = generate::default_vorgang();
         let std_station = generate::default_station();
-        vorgang.stationen.push(models::Station {
-            api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-aaaa-deadbeef106e").unwrap()),
-            gremium: models::Gremium {
-                link: None,
-                name: "abc123".to_string(),
-                parlament: models::Parlament::Br,
-                wahlperiode: 17,
+        vorgang.stationen = vec![
+            models::Station {
+                api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-aaaa-deadbeef106e").unwrap()),
+                gremium: models::Gremium {
+                    link: None,
+                    name: "abc123".to_string(),
+                    parlament: models::Parlament::Br,
+                    wahlperiode: 17,
+                },
+                typ: models::Stationstyp::ParlInitiativ,
+                ..std_station.clone()
             },
-            ..std_station.clone()
-        });
-        vorgang.stationen.push(models::Station {
-            api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-bbbb-deadbeef106e").unwrap()),
-            gremium: models::Gremium {
-                link: None,
-                name: "rrrrrr".to_string(),
-                parlament: models::Parlament::Bt,
-                wahlperiode: 12,
+            models::Station {
+                api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-bbbb-deadbeef106e").unwrap()),
+                gremium: models::Gremium {
+                    link: None,
+                    name: "rrrrrr".to_string(),
+                    parlament: models::Parlament::Bt,
+                    wahlperiode: 12,
+                },
+                typ: models::Stationstyp::PreparlRegent,
+                ..std_station.clone()
             },
-            ..std_station.clone()
-        });
+        ];
 
         let rsp = scenario
             .server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -1324,13 +1340,13 @@ mod test_authorisiert {
             rsp,
             openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }
         ));
-
+        // and now retrival and checks
         let gremien = fetch_all_gremien(&scenario.server).await;
         let r = scenario
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1345,15 +1361,21 @@ mod test_authorisiert {
             r,
             GremienDeleteByParamResponse::Status204_NoContent { .. }
         ));
-        let new_gremien = fetch_all_gremien(&scenario.server).await;
-        assert!(gremien.len() > new_gremien.len());
-        let gremien = new_gremien;
+
+        let gremien_after_delete = fetch_all_gremien(&scenario.server).await;
+        assert!(
+            gremien.len() == 2 && gremien_after_delete.len() == 1,
+            "vorher {:?} nachher {:?}",
+            gremien,
+            gremien_after_delete
+        );
+        let gremien = gremien_after_delete;
 
         let r = scenario
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1368,31 +1390,9 @@ mod test_authorisiert {
             r,
             GremienDeleteByParamResponse::Status204_NoContent { .. }
         ));
-        let new_gremien = fetch_all_gremien(&scenario.server).await;
-        assert!(gremien.len() > new_gremien.len());
-        let gremien = new_gremien;
+        let gremien_after_delete = fetch_all_gremien(&scenario.server).await;
+        assert!(gremien.len() == 1 && gremien_after_delete.is_empty());
 
-        let r = scenario
-            .server
-            .gremien_delete_by_param(
-                &Method::GET,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::GremienDeleteByParamQueryParams {
-                    gr: None,
-                    p: None,
-                    wp: Some(20),
-                },
-            )
-            .await
-            .unwrap();
-        assert!(matches!(
-            r,
-            GremienDeleteByParamResponse::Status204_NoContent { .. }
-        ));
-        let new_gremien = fetch_all_gremien(&scenario.server).await;
-        assert!(gremien.len() > new_gremien.len());
         scenario.teardown().await;
     }
 
@@ -1403,7 +1403,7 @@ mod test_authorisiert {
         server
             .gremien_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 gpr,
@@ -1420,7 +1420,7 @@ mod test_authorisiert {
             .server
             .gremien_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::GremienPutRequest {
@@ -1540,7 +1540,7 @@ mod test_authorisiert {
         server
             .autoren_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 apr,
@@ -1557,7 +1557,7 @@ mod test_authorisiert {
             .server
             .autoren_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::AutorenPutRequest {
@@ -1732,7 +1732,7 @@ mod test_authorisiert {
         server
             .enum_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::EnumPutPathParams { name: tp },
@@ -1751,7 +1751,7 @@ mod test_authorisiert {
             .server
             .enum_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::EnumPutPathParams {
@@ -1768,7 +1768,7 @@ mod test_authorisiert {
             response,
             EnumPutResponse::Status403_Forbidden { .. }
         ));
-        let testcases = vec![
+        let testcases = [
             (
                 models::EnumerationNames::Parlamente,
                 "EP".to_string(),

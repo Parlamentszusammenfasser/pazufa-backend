@@ -1,8 +1,8 @@
 #!/bin/bash
 
-OPENAPI_GENERATOR_VERSION="7.17.0"
+OPENAPI_GENERATOR_VERSION="7.20.0"
 DIRECTORY="oapi-generator"
-SPEC_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.2/docs/specs/openapi.yml"
+SPEC_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3/docs/specs/openapi.yml"
 
 echo "Checking for openapi-generator-cli"
 

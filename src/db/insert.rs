@@ -2,6 +2,8 @@ use super::*;
 use std::str::FromStr;
 
 use crate::db::merge::candidates::dokument_merge_candidates;
+#[cfg(feature = "track-validation")]
+use crate::db::validate;
 use crate::{
     LTZFServer, Result,
     utils::{self, notify::notify_new_enum_entry},
@@ -19,6 +21,10 @@ pub async fn insert_vorgang(
     server: &LTZFServer,
 ) -> Result<i32> {
     tracing::info!("Inserting Complete Vorgang into the database");
+    #[cfg(feature = "track-validation")]
+    validate::validate_vorgang(vg, server).await?;
+    tracing::trace!("Validation successful");
+
     let obj = "vorgang";
     // master insert
     let vg_id = sqlx::query!(
@@ -36,6 +42,32 @@ pub async fn insert_vorgang(
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        vg_id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT vg_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY vg_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_vorgang
+        )
+        DELETE FROM scraper_touched_vorgang stv
+        USING ranked_objects ro
+        WHERE stv.vg_id=ro.vg_id AND
+        stv.scraper=ro.scraper AND
+        ro.rn > $1",
+        server.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
     .await?;
 
     // insert links
@@ -67,17 +99,17 @@ pub async fn insert_vorgang(
         .as_ref()
         .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
 
-    let identt_list = vg.ids.as_ref().map(|x| {
-        x.iter()
-            .map(|el| server.guard_ts(&el.typ, vg.api_id, obj).unwrap())
-            .collect::<Vec<_>>()
-    });
+    let identt_list = vg
+        .ids
+        .as_ref()
+        .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
 
     sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator) 
     SELECT $1, t.id, ident.ident FROM 
     UNNEST($2::text[], $3::text[]) as ident(ident, typ)
-    INNER JOIN vg_ident_typ t ON t.value = ident.typ",
+    INNER JOIN vg_ident_typ t ON t.value = ident.typ
+    ON CONFLICT DO NOTHING",
         vg_id,
         ident_list.as_ref().map(|x| &x[..]),
         identt_list.as_ref().map(|x| &x[..])
@@ -119,6 +151,7 @@ pub async fn insert_vorgang(
     )
     .execute(&mut **tx)
     .await?;
+    tracing::trace!("Inserted stations: {:?}", stat_ids);
 
     // insert Lobbyregister
     if let Some(lobbyr) = &vg.lobbyregister {

@@ -20,6 +20,11 @@ pub enum DataValidationError {
     #[snafu(display("Unauthorized because: {reason}"))]
     Unauthorized { reason: String },
 
+    #[snafu(display("Deliberate Conflict: {reason}"))]
+    Conflict { reason: String },
+    #[snafu(display("The Vorgang could not be validated: {reason}"))]
+    MalformedVorgang { reason: String },
+
     #[snafu(display("Required field missing: {field}"))]
     MissingField { field: String },
 

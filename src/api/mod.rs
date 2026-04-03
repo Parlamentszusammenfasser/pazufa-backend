@@ -1,19 +1,22 @@
 use chrono::DurationRound;
 use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum_extra::extract::Host;
+use axum::response::IntoResponse;
+use axum_extra::extract::CookieJar;
+use headers::Host;
 use openapi::models;
-use tracing::debug;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use crate::Configuration;
 use crate::Result;
+#[cfg(feature = "track-validation")]
+use crate::db::validate::Tracks;
 use crate::error::LTZFError;
 use crate::utils::notify;
+use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
 use openapi::apis::unauthorisiert::*;
 
@@ -31,6 +34,9 @@ pub struct LTZFServer {
     pub mailbundle: Option<Arc<notify::MailBundle>>,
     pub config: Configuration,
     pub logging: Logging,
+    pub statistics: Arc<Statistics>,
+    #[cfg(feature = "track-validation")]
+    pub tracks: Arc<Tracks>,
 }
 pub type LTZFArc = std::sync::Arc<LTZFServer>;
 impl LTZFServer {
@@ -40,11 +46,22 @@ impl LTZFServer {
         mailbundle: Option<notify::MailBundle>,
         logging: Logging,
     ) -> Self {
+        #[cfg(feature = "track-validation")]
+        let track = Tracks::new(&config.track_path);
+        #[cfg(feature = "track-validation")]
+        let stats = Statistics::new(&config.track_path);
+
+        #[cfg(not(feature = "track-validation"))]
+        let stats = Statistics::new();
+
         Self {
             config,
             sqlx_db,
             mailbundle: mailbundle.map(Arc::new),
             logging,
+            statistics: Arc::new(stats),
+            #[cfg(feature = "track-validation")]
+            tracks: Arc::new(track),
         }
     }
 }
@@ -56,11 +73,27 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
         &self,
         method: &axum::http::Method,
         _host: &Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _cookies: &CookieJar,
         error: LTZFError,
     ) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
         tracing::error!("An error occurred during {method} that was not expected: {error}\n");
-        return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        match error {
+            LTZFError::Validation { source } => match *source {
+                crate::error::DataValidationError::MalformedVorgang { reason } => {
+                    Ok((axum::http::StatusCode::BAD_REQUEST, reason).into_response())
+                }
+                res => Ok((
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    res.to_string(),
+                )
+                    .into_response()),
+            },
+            res => Ok((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                res.to_string(),
+            )
+                .into_response()),
+        }
     }
 }
 
@@ -71,7 +104,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         &self,
         _method: &axum::http::Method,
         _host: &Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _cookies: &CookieJar,
         query_params: &models::PingQueryParams,
     ) -> Result<PingResponse> {
         if let Some(t) = query_params.t {
@@ -89,11 +122,13 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         &self,
         _method: &axum::http::Method,
         _host: &Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _cookies: &CookieJar,
     ) -> Result<StatusResponse> {
         debug!("Status Requested");
         // TODO: implement "API is not running for some reason" markers
+        let body = self.statistics.output().await;
         Ok(StatusResponse::Status200_APIIsRunning {
+            body,
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
@@ -661,7 +696,7 @@ impl SortArrays for models::Vorgang {
         self.initiatoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
         if let Some(x) = self.ids.as_mut() {
-            x.sort_by(|a, b| (a.typ, &a.id).cmp(&(b.typ, &b.id)));
+            x.sort_by(|a, b| (&a.typ, &a.id).cmp(&(&b.typ, &b.id)));
         }
         if let Some(x) = self.links.as_mut() {
             x.sort();

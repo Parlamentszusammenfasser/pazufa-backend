@@ -60,11 +60,16 @@
       },
       {
         "ordinal": 11,
+        "name": "exceptional",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
         "name": "parlv",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "stattyp",
         "type_info": "Varchar"
       }
@@ -84,6 +89,7 @@
       true,
       false,
       true,
+      false,
       false,
       false,
       false,

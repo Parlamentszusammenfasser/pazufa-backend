@@ -1,8 +1,11 @@
 use super::MatchState;
 use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor};
+#[cfg(feature = "track-validation")]
+use crate::db::validate;
 use crate::error::DataValidationError;
 use crate::utils::notify::notify_ambiguous_match;
+
 /// Handles merging of two datasets.
 /// vorgang, station and dokument are mergeable, meaning their data is not atomic.
 /// Stellungnahme is handled like dokument with the rest being overridable data points
@@ -299,9 +302,9 @@ pub async fn execute_merge_vorgang(
     // master insert
     sqlx::query!(
         "UPDATE vorgang SET
-        titel = $1, kurztitel = $2,
-        verfaend = $3, wahlperiode = $4,
-        typ = (SELECT id FROM vorgangstyp WHERE value = $5)
+            titel = $1, kurztitel = $2,
+            verfaend = $3, wahlperiode = $4,
+            typ = (SELECT id FROM vorgangstyp WHERE value = $5)
         WHERE vorgang.id = $6",
         model.titel,
         model.kurztitel,
@@ -343,11 +346,10 @@ pub async fn execute_merge_vorgang(
         .as_ref()
         .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
 
-    let identt_list = model.ids.as_ref().map(|x| {
-        x.iter()
-            .map(|el| srv.guard_ts(&el.typ, model.api_id, obj).unwrap())
-            .collect::<Vec<_>>()
-    });
+    let identt_list = model
+        .ids
+        .as_ref()
+        .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
 
     sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator)
@@ -364,7 +366,7 @@ pub async fn execute_merge_vorgang(
     .await?;
 
     for stat in &model.stationen {
-        match station_merge_candidates(stat, db_id, &mut **tx, srv).await? {
+        match station_merge_candidates(stat, db_id, tx, srv).await? {
             MatchState::NoMatch => {
                 insert::insert_station(stat.clone(), db_id, scraper_id, collector_key, tx, srv)
                     .await?;
@@ -444,6 +446,12 @@ pub async fn execute_merge_vorgang(
     )
     .execute(&mut **tx)
     .await?;
+
+    #[cfg(feature = "track-validation")]
+    {
+        let merged_state = crate::db::retrieve::vorgang_by_id(candidate, &mut *tx).await?;
+        validate::validate_vorgang(&merged_state, srv).await?;
+    }
 
     info!(
         "Merging of Vg Successful: Merged `{}`(ext) with  `{}`(db)",
@@ -576,6 +584,7 @@ mod scenariotest {
         }
     }
     impl Scenario {
+        #[allow(clippy::new_ret_no_self)]
         fn new(name: &'static str) -> ScenarioBuilder {
             ScenarioBuilder {
                 context: vec![],
@@ -693,7 +702,7 @@ mod scenariotest {
             }
         }
         vg.sort_arrays();
-        return vg;
+        vg
     }
     // one in, again one in, one out
     #[tokio::test]
@@ -714,12 +723,11 @@ mod scenariotest {
         let mut vg2 = generate::default_vorgang();
         vg2.api_id = Uuid::nil(); // take out api id matching
         vg2.titel = "Anderer Titel".to_string();
-        vg2.stationen = vec![generate::random::station(12)]; // take out vorwort matching
+        vg2.stationen = vec![]; // take out vorwort matching
 
         let mut vg_exp = vg.clone();
         vg_exp.titel = vg2.titel.clone();
         vg_exp.stationen = vg.stationen.clone();
-        vg_exp.stationen.push(generate::random::station(12));
 
         let scenario = Scenario::new("merge_matching_ids")
             .with_context(vec![vg])
@@ -736,7 +744,7 @@ mod scenariotest {
         vg_mod.links = Some(vec!["https://example.com".to_string()]);
         vg_mod.ids = Some(vec![models::VgIdent {
             id: "einzigartig und anders".to_string(),
-            typ: models::VgIdentTyp::Initdrucks,
+            typ: "initdrucks".to_owned(),
         }]);
         vg_mod.initiatoren = vec![generate::random::autor(0)];
 
@@ -801,7 +809,7 @@ mod scenariotest {
 
         let mut stat = generate::default_station();
         stat.api_id = Some(Uuid::from_str("b18bee64-c0ff-eeee-ff1c-deadbeef4732").unwrap());
-        stat.typ = models::Stationstyp::PostparlGsblt;
+        stat.typ = models::Stationstyp::PreparlRegent;
         stat.dokumente = vec![];
         vg2.stationen = vec![stat];
 

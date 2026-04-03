@@ -69,6 +69,7 @@ async fn setup_server(dbname: &str) -> Result<LTZFServer> {
         pool,
         Configuration {
             per_object_scraper_log_size: 5,
+            track_path: "tracks.toml".to_owned(),
             ..Default::default()
         },
         None,
@@ -423,9 +424,7 @@ pub(crate) mod generate {
                 stellungnahmen,
             }
         }
-
         pub(crate) fn random_vorgang(rng: &mut StdRng) -> models::Vorgang {
-            // Generate the main vorgang
             let vorgangstyp_variants = [
                 models::Vorgangstyp::GgZustimmung,
                 models::Vorgangstyp::GgEinspruch,
@@ -434,13 +433,42 @@ pub(crate) mod generate {
                 models::Vorgangstyp::BwEinsatz,
                 models::Vorgangstyp::Sonstig,
             ];
+            let typ = random_enum(rng, &vorgangstyp_variants);
+            vorgang_of_type(rng, typ)
+        }
+        pub(crate) fn vorgang_of_type(
+            rng: &mut StdRng,
+            typ: models::Vorgangstyp,
+        ) -> models::Vorgang {
+            // Generate the main vorgang
+            let stat_parls = {
+                match typ {
+                    models::Vorgangstyp::GgZustimmung | models::Vorgangstyp::GgEinspruch => {
+                        vec![models::Parlament::Bt, models::Parlament::Br]
+                    }
+                    models::Vorgangstyp::BwEinsatz => vec![models::Parlament::Bt],
+                    _ => vec![
+                        models::Parlament::Bb,
+                        models::Parlament::Be,
+                        models::Parlament::Bw,
+                        models::Parlament::By,
+                        models::Parlament::Hb,
+                        models::Parlament::He,
+                        models::Parlament::Hh,
+                        models::Parlament::Mv,
+                        models::Parlament::Ni,
+                        models::Parlament::Nw,
+                        models::Parlament::Rp,
+                        models::Parlament::Sl,
+                        models::Parlament::Sn,
+                        models::Parlament::Sh,
+                        models::Parlament::St,
+                        models::Parlament::Th,
+                    ],
+                }
+            };
 
-            let vgident_typ_variants = [
-                models::VgIdentTyp::Initdrucks,
-                models::VgIdentTyp::Vorgnr,
-                models::VgIdentTyp::ApiId,
-                models::VgIdentTyp::Sonstig,
-            ];
+            let vgident_typ_variants = ["initdrucks", "vorgnr", "api-id", "sonstig"];
 
             let has_kurztitel = rng.random_bool(0.6);
             let has_links = rng.random_bool(0.7);
@@ -457,7 +485,14 @@ pub(crate) mod generate {
             let num_stationen = rng.random_range(1..=5);
             let mut stationen = Vec::new();
             for _ in 0..num_stationen {
-                stationen.push(random_station(rng));
+                let rstat = random_station(rng);
+                stationen.push(models::Station {
+                    gremium: models::Gremium {
+                        parlament: random_enum(rng, &stat_parls),
+                        ..rstat.gremium
+                    },
+                    ..rstat
+                });
             }
 
             let links_count = if has_links {
@@ -485,7 +520,8 @@ pub(crate) mod generate {
                 for _ in 0..ids_count {
                     id_list.push(models::VgIdent {
                         id: random_string(rng, "id_", 5, 15),
-                        typ: random_enum(rng, &vgident_typ_variants),
+                        typ: vgident_typ_variants[rng.random_range(0..vgident_typ_variants.len())]
+                            .to_owned(),
                     });
                 }
                 Some(id_list)
@@ -546,7 +582,7 @@ pub(crate) mod generate {
                 },
                 wahlperiode: rng.random_range(15..=25),
                 verfassungsaendernd: rng.random_bool(0.2),
-                typ: random_enum(rng, &vorgangstyp_variants),
+                typ,
                 ids,
                 links,
                 initiatoren,
@@ -610,27 +646,42 @@ pub(crate) mod generate {
         }
 
         pub(crate) fn autor(seed: u64) -> models::Autor {
-            use rand::rngs::StdRng;
-            use rand::{Rng, SeedableRng};
             let mut rng = StdRng::seed_from_u64(seed);
             random_autor(&mut rng)
         }
         pub(crate) fn station(seed: u64) -> models::Station {
-            use rand::rngs::StdRng;
-            use rand::{Rng, SeedableRng};
             let mut rng = StdRng::seed_from_u64(seed);
             random_station(&mut rng)
         }
+        use std::collections::BTreeMap;
+        pub(crate) fn vorgang_with_stations(
+            seed: u64,
+            t: models::Vorgangstyp,
+            stypes: &str,
+            map: &BTreeMap<models::Stationstyp, char>,
+        ) -> models::Vorgang {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let vorgang = vorgang_of_type(&mut rng, t);
+            let dates: Vec<_> = vorgang.stationen.iter().map(|x| x.zp_start).collect();
 
+            models::Vorgang {
+                stationen: stypes
+                    .chars()
+                    .map(|c| models::Station {
+                        typ: *map.iter().find(|(k, v)| *v == &c).unwrap().0,
+                        gremium: vorgang.stationen[0].gremium.clone(),
+                        zp_start: dates[0].checked_add_days(chrono::Days::new(14)).unwrap(),
+                        ..random_station(&mut rng)
+                    })
+                    .collect(),
+                ..vorgang
+            }
+        }
         pub(crate) fn vorgang(seed: u64) -> models::Vorgang {
-            use rand::rngs::StdRng;
-            use rand::{Rng, SeedableRng};
             let mut rng = StdRng::seed_from_u64(seed);
             random_vorgang(&mut rng)
         }
         pub(crate) fn dokument(seed: u64) -> models::Dokument {
-            use rand::rngs::StdRng;
-            use rand::{Rng, SeedableRng};
             let mut rng = StdRng::seed_from_u64(seed);
             random_dokument(&mut rng)
         }
@@ -662,7 +713,7 @@ pub(crate) mod generate {
     pub(crate) fn default_station() -> models::Station {
         models::Station {
             api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeefeeee").unwrap()),
-            typ: models::Stationstyp::ParlAusschber,
+            typ: models::Stationstyp::ParlInitiativ,
             link: Some("https://an.example.com/leckmichfett".to_string()),
             gremium_federf: Some(false),
             titel: Some("rattlesnakes!".to_string()),
@@ -691,7 +742,7 @@ pub(crate) mod generate {
         models::Gremium {
             link: Some("https://a.xyz".to_string()),
             name: "Ausschuss für Inneres und Gemüsaufläufe".to_string(),
-            parlament: models::Parlament::Bb,
+            parlament: models::Parlament::Bt,
             wahlperiode: 20,
         }
     }
@@ -820,7 +871,7 @@ pub(crate) mod generate {
             initiatoren: at,
             ids: Some(vec![models::VgIdent {
                 id: "einzigartig".to_string(),
-                typ: models::VgIdentTyp::Initdrucks,
+                typ: "initdrucks".to_owned(),
             }]),
             lobbyregister: Some(vec![models::Lobbyregeintrag {
                 betroffene_drucksachen: vec!["20/2014".to_string()],

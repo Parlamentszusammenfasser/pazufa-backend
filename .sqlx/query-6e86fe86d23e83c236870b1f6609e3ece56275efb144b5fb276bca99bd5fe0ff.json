@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT v.api_id vapi FROM station s, vorgang v\n            WHERE\n            s.api_id = $1 AND s.vg_id <> $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "vapi",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6e86fe86d23e83c236870b1f6609e3ece56275efb144b5fb276bca99bd5fe0ff"
+}

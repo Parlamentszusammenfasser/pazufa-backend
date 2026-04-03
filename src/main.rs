@@ -7,7 +7,7 @@ pub(crate) mod utils;
 
 use std::sync::Arc;
 
-use axum::{extract::DefaultBodyLimit, http::Method};
+use axum::{extract::DefaultBodyLimit, http::Method, routing::get};
 use clap::Parser;
 
 use error::LTZFError;
@@ -81,8 +81,15 @@ pub struct Configuration {
 
     #[arg(
         long,
+        env = "PAZUFA_TRACKFILE",
+        default_value = "tracks.toml",
+        help = "The Trackfile describing which tracks are applicable. Usually hosted next to the tracks."
+    )]
+    track_path: String,
+    #[arg(
+        long,
         env = "LTZF_ERROR_LOG",
-        default_value = "/var/log/ltzf-backend/error.log"
+        default_value = "/var/log/pazufa-backend/error.log"
     )]
     pub error_log_path: String,
 
@@ -125,6 +132,16 @@ impl Configuration {
         Ok(mailer)
     }
 }
+async fn handle_root() -> impl axum::response::IntoResponse {
+    let s = include_str!("index.html");
+    (axum::http::StatusCode::OK, s)
+}
+
+async fn swagger_ui() -> impl axum::response::IntoResponse {
+    let s = include_str!("swagger-ui.html");
+    (axum::http::StatusCode::OK, s)
+}
+
 async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
     let sqlx_db = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
@@ -252,6 +269,8 @@ async fn main() -> Result<()> {
         .zstd(true);
 
     let app = openapi::server::new(state.clone())
+        .route("/", get(handle_root))
+        .route("/api/v2", get(swagger_ui))
         .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)
         .layer(rate_limiter)

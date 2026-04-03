@@ -4,7 +4,8 @@ use crate::utils::as_option;
 use crate::{LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
-use axum_extra::extract::{CookieJar, Host};
+use axum_extra::extract::CookieJar;
+use headers::Host;
 use openapi::apis::{
     collector_schnittstellen_vorgang::*, data_administration_vorgang::*, unauthorisiert_vorgang::*,
 };
@@ -79,13 +80,16 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
                     x_rate_limit_reset: None,
                 });
             }
-            if let VorgangDeleteResponse::Status204_NoContent { .. } =
-                delete::delete_vorgang_by_api_id(api_id, self).await?
-            {
-                insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
-            } else {
-                error!("After successful delete an insert cannot fail");
-                unreachable!("If this is reached, some assumptions did not hold");
+            debug!("Found to be different enough to not be exactly the same. Deleting...");
+            match delete::delete_vorgang_by_api_id(api_id, self).await? {
+                VorgangDeleteResponse::Status204_NoContent { .. } => {
+                    debug!("Delete successful, now inserting...");
+                    insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
+                }
+                _ => {
+                    error!("After successful delete an insert cannot fail");
+                    unreachable!("If this is reached, some assumptions did not hold")
+                }
             }
         } else {
             debug!("No Match found");
@@ -144,7 +148,8 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
                 warn!("Unsuccessful Integration Attempt: {e}");
                 match &e {
                     LTZFError::Validation { source } => match **source {
-                        DataValidationError::AmbiguousMatch { .. } => {
+                        DataValidationError::Conflict { .. }
+                        | DataValidationError::AmbiguousMatch { .. } => {
                             Ok(VorgangPutResponse::Status409_Conflict {
                                 x_rate_limit_limit: None,
                                 x_rate_limit_remaining: None,
@@ -336,7 +341,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
 mod test_endpoints {
 
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use chrono::Utc;
     use openapi::apis::collector_schnittstellen_vorgang::*;
     use openapi::apis::data_administration_vorgang::*;
@@ -350,7 +355,10 @@ mod test_endpoints {
     use crate::api::auth;
     use crate::api::auth::APIScope;
     use crate::utils::testing::{TestSetup, generate};
-
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
     // Procedure (Vorgang) tests
     #[tokio::test]
     async fn test_vorgang_get_by_id_endpoints() {
@@ -362,7 +370,7 @@ mod test_endpoints {
         let create_response = server
             .vorgang_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(auth::APIScope::Collector, 1),
                 &models::VorgangPutHeaderParams {
@@ -387,7 +395,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
@@ -413,7 +421,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
@@ -440,7 +448,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
@@ -463,7 +471,7 @@ mod test_endpoints {
         let response = server
             .vorgang_get_by_id(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::VorgangGetByIdHeaderParams {
                     if_modified_since: Some(chrono::Utc::now()),
@@ -495,7 +503,7 @@ mod test_endpoints {
             let create_response = server
                 .vorgang_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Collector, 1),
                     &models::VorgangPutHeaderParams {
@@ -522,7 +530,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::VorgangGetHeaderParams {
                         if_modified_since: None,
@@ -553,7 +561,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::VorgangGetHeaderParams {
                         if_modified_since: None,
@@ -589,13 +597,22 @@ mod test_endpoints {
     async fn test_vorgang_get_filtered_endpoints_success() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_success").await;
         let server = &scenario.server;
-        let test_vorgang = generate::default_vorgang();
+        let test_vorgang = models::Vorgang {
+            stationen: vec![models::Station {
+                gremium: models::Gremium {
+                    parlament: models::Parlament::Bt,
+                    ..generate::default_gremium()
+                },
+                ..generate::default_station()
+            }],
+            ..generate::default_vorgang()
+        };
         {
             // First create a procedure with specific parameters
             let create_response = server
                 .vorgang_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Collector, 1),
                     &models::VorgangPutHeaderParams {
@@ -613,14 +630,13 @@ mod test_endpoints {
                     x_rate_limit_reset: None,
                 }
             );
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         }
         {
             // Then get it with matching filters
             let response = server
                 .vorgang_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::VorgangGetHeaderParams {
                         if_modified_since: None,
@@ -628,7 +644,7 @@ mod test_endpoints {
                     &models::VorgangGetQueryParams {
                         page: Some(0),
                         per_page: Some(32),
-                        p: Some(models::Parlament::Bb),
+                        p: Some(models::Parlament::Bt),
                         since: None,
                         until: None,
                         vgtyp: Some(test_vorgang.typ),
@@ -657,7 +673,7 @@ mod test_endpoints {
         // Setup test server and database
         let scenario = TestSetup::new("test_vorgang_put").await;
         let server = &scenario.server;
-        let host = Host("localhost".to_string());
+        let host = localhost();
         let cookies = CookieJar::new();
 
         // Test cases for vorgang_id_put:
@@ -833,7 +849,7 @@ mod test_endpoints {
             let create_response = server
                 .vorgang_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Collector, 1),
                     &models::VorgangPutHeaderParams {
@@ -856,7 +872,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_delete(
                     &Method::DELETE,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Admin, 1),
                     &models::VorgangDeletePathParams {
@@ -883,7 +899,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_delete(
                     &Method::DELETE,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Admin, 1),
                     &models::VorgangDeletePathParams {
@@ -908,7 +924,7 @@ mod test_endpoints {
             let response = server
                 .vorgang_delete(
                     &Method::DELETE,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Collector, 1),
                     &models::VorgangDeletePathParams {
@@ -945,7 +961,7 @@ mod test_endpoints {
 mod test_failed_irl_scenarios {
     use crate::{api::auth::APIScope, utils::testing::TestSetup};
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use openapi::{
         apis::collector_schnittstellen_vorgang::{
             CollectorSchnittstellenVorgang, VorgangPutResponse,
@@ -954,7 +970,13 @@ mod test_failed_irl_scenarios {
     };
     use std::path::{Path, PathBuf};
     use tokio::io::{AsyncBufReadExt, BufReader};
+    use tracing_test::traced_test;
     use uuid::Uuid;
+
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
 
     async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
         let file = tokio::fs::File::open(path).await.unwrap();
@@ -964,20 +986,22 @@ mod test_failed_irl_scenarios {
         while let Ok(Some(line)) = lines.next_line().await {
             records.push(serde_json::from_str(&line).unwrap())
         }
-        return records;
+        records
     }
 
     macro_rules! irl_scenario {
         ($path:expr, $name:ident) => {
+            #[traced_test]
             #[tokio::test]
             async fn $name() {
                 let path = PathBuf::from($path);
                 let test_setup =
                     TestSetup::new(&concat!("scenario_test_", stringify!($name))).await;
-                let host = Host("localhost".to_string());
+                let host = localhost();
                 let cookies = CookieJar::new();
                 let objects = read_jsonl(&path).await;
                 for obj in objects.iter() {
+                    tracing::trace!("next to be inserted: {}", obj.api_id);
                     let response = test_setup
                         .server
                         .vorgang_put(
