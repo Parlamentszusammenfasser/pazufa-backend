@@ -1,8 +1,8 @@
 when:
-  - event: [ push ]
+  - event: [ push, tag ]
 
 variables:
-  - &version "0.2.7"
+  - &version "0.2.7+1"
 
 labels:
   pazufa_scope: generic
@@ -20,6 +20,8 @@ services:
 steps:
   - name: formatting
     image: rust:1.92-slim-bookworm
+    when:
+      - event: push
     commands:
       - rustup component add rustfmt
       - nice cargo fmt --check
@@ -28,6 +30,8 @@ steps:
 
   - name: linting & testing
     image: rust:1.92-slim-bookworm
+    when:
+      - event: push
     commands:
       - rustup component add clippy
       - apt update -qq && apt install git maven curl pkg-config libssl-dev libpq5 -yqq --no-install-recommends > /dev/null

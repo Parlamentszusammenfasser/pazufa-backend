@@ -371,9 +371,8 @@ pub async fn execute_merge_vorgang(
                 insert::insert_station(stat.clone(), db_id, scraper_id, collector_key, tx, srv)
                     .await?;
             }
-            MatchState::ExactlyOne(_) => {
-                // can be ignored bc same as db_id
-                execute_merge_station(stat, db_id, scraper_id, collector_key, tx, srv).await?;
+            MatchState::ExactlyOne(statid) => {
+                execute_merge_station(stat, statid, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::Ambiguous(matches) => {
                 let mids = sqlx::query!(

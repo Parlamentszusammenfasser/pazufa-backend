@@ -1,6 +1,6 @@
 [package]
 name = "pazufa-backend"
-version = "0.2.7"
+version = "0.2.7+1"
 edition = "2024"
 rust-version = "1.86"
 authors = ["Benedikt Schäfer"]

@@ -1029,4 +1029,5 @@ mod test_failed_irl_scenarios {
         "tests/scenarios/on_onflict_upd_nodouble.jsonl",
         test_scenario_on_onflict_upd_nodouble
     );
+    irl_scenario!("tests/scenarios/500_sqlx_query.jsonl", test_500_sqlx_query);
 }
