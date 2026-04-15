@@ -1,18 +1,16 @@
-use std::{
-    fmt::Display,
-    sync::{Arc, RwLock},
-};
+use std::fmt::{Display, Write};
+
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::{LTZFServer, Result, error::DataValidationError};
 use lettre::{Message, Transport, message::header::ContentType};
 use uuid::Uuid;
 
-#[allow(unused)]
+#[non_exhaustive]
 enum MailNotificationType {
     EnumAdded,
     SonstigUnwrapped,
     AmbiguousMatch,
-    Other,
 }
 struct Mail {
     subject: String,
@@ -20,169 +18,151 @@ struct Mail {
     tp: MailNotificationType,
 }
 
-pub struct MailBundle {
-    mailthread: Option<tokio::task::JoinHandle<()>>,
-    kill: Arc<RwLock<bool>>,
-    cache: Arc<RwLock<Vec<Mail>>>,
-}
+pub struct MailBundle(UnboundedSender<Mail>);
+
 impl MailBundle {
     pub fn new(config: &crate::Configuration) -> Result<Option<Self>> {
-        let cm = config.build_mailer();
-        if let Err(e) = cm {
+        let mailer = match config.build_mailer() {
+            Ok(cm) => cm,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to create mailer: {}\nMailer will not be available",
+                    e
+                );
+                return Ok(None);
+            }
+        };
+
+        let Some(mail_sender) = &config.mail_sender else {
             tracing::warn!(
-                "Failed to create mailer: {}\nMailer will not be available",
-                e
+                "Failed to create mailer: Missing Mail Sender.\nMailer will not be available",
             );
             return Ok(None);
-        }
-        let kill = Arc::new(RwLock::new(false));
-        let kclone = kill.clone();
-
-        let cache: Arc<RwLock<Vec<Mail>>> = Arc::new(RwLock::new(vec![]));
-        let cclone = cache.clone();
-        let sender: lettre::message::Mailbox = format!(
-            "Landtagszusammenfasser <{}>",
-            config.mail_sender.as_ref().unwrap(),
-        )
-        .parse()
-        .map_err(|e| DataValidationError::InvalidFormat {
-            field: "mail address".to_string(),
-            message: format!("{e}"),
-        })?;
+        };
+        let sender = lettre::message::Mailbox::new(
+            Some("PaZuFa".to_owned()),
+            mail_sender
+                .parse()
+                .map_err(|e| DataValidationError::InvalidFormat {
+                    field: "mail address".to_string(),
+                    message: format!("{e}"),
+                })?,
+        );
+        let Some(mail_recipient) = &config.mail_recipient else {
+            tracing::warn!(
+                "Failed to create mailer: Missing Mail Recipient.\nMailer will not be available",
+            );
+            return Ok(None);
+        };
         let recipient: lettre::message::Mailbox =
-            config
-                .mail_recipient
-                .as_ref()
-                .unwrap()
+            mail_recipient
                 .parse()
                 .map_err(|e| DataValidationError::InvalidFormat {
                     field: "mail address".to_string(),
                     message: format!("{e}"),
                 })?;
 
-        let thread = tokio::spawn(async move {
-            let mref = kclone;
+        let (tx, mut rx) = unbounded_channel::<Mail>();
+
+        tokio::spawn(async move {
             let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(20));
-            let mailer = cm.unwrap();
             let sender = sender;
             let recipient = recipient;
-            while !*mref.read().unwrap() {
-                tick_interval.tick().await;
-                if *mref.read().unwrap() {
-                    break;
-                }
-                if cclone.read().unwrap().is_empty() {
-                    continue;
-                }
-                let mut ambiguous_match = vec![];
-                let mut variant_added = vec![];
-                let mut sonstig_unwrapped = vec![];
-                let mut other = vec![];
+            let mut ambiguous_match = vec![];
+            let mut variant_added = vec![];
+            let mut sonstig_unwrapped = vec![];
 
-                for mail in cclone.write().unwrap().drain(..) {
-                    match mail.tp {
-                        MailNotificationType::AmbiguousMatch => ambiguous_match.push(mail),
-                        MailNotificationType::EnumAdded => variant_added.push(mail),
-                        MailNotificationType::SonstigUnwrapped => sonstig_unwrapped.push(mail),
-                        MailNotificationType::Other => other.push(mail),
+            let send_mail_inner = |mails: &mut Vec<Mail>, typ: &str| {
+                let len = mails.len();
+                let email = match Message::builder()
+                    .from(sender.clone())
+                    .to(recipient.clone())
+                    .subject(format!("Found {len} {typ} since last check"))
+                    .header(ContentType::TEXT_PLAIN)
+                    .body(
+                        mails
+                            .drain(..)
+                            .fold(String::new(), |mut a: String, n: Mail| {
+                                // Discarding error as writeln!(String, ...) can only fail if the formatter of the
+                                // arguments fails, which cannot happen for strings.
+                                let _ = writeln!(
+                                    a,
+                                    "=======================\n{}\n\n{}",
+                                    n.subject, n.body
+                                );
+                                a
+                            }),
+                    ) {
+                    Ok(mail) => mail,
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to send Mail about {len} new {typ}: Failed to build message.\n{e}"
+                        );
+                        return;
                     }
+                };
+                match mailer.send(&email) {
+                    Ok(_) => tracing::info!("Sent Mail about {len} new {typ}"),
+                    Err(e) => tracing::error!(
+                        "Failed to send Mail about {len} new {typ}: Error during transport.\n{e}"
+                    ),
                 }
-                let (s_am, s_va, s_su, s_ot) = (
-                    ambiguous_match.len(),
-                    variant_added.len(),
-                    sonstig_unwrapped.len(),
-                    other.len(),
-                );
+            };
 
-                if s_am != 0 {
-                    let ambiguous_match_body =
-                        ambiguous_match.iter().fold(String::new(), |a, n| {
-                            format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
-                        });
-                    let email = Message::builder()
-                        .from(sender.clone())
-                        .to(recipient.clone())
-                        .subject(format!("Found {s_am} ambiguous matches since last check"))
-                        .header(ContentType::TEXT_PLAIN)
-                        .body(ambiguous_match_body)
-                        .unwrap();
-                    mailer.send(&email).unwrap();
-                    tracing::info!("Sent Mail about {} new ambiguos matches", s_am);
+            let send_mail = |ambiguous_match: &mut Vec<Mail>,
+                             variant_added: &mut Vec<Mail>,
+                             sonstig_unwrapped: &mut Vec<Mail>| {
+                if !ambiguous_match.is_empty() {
+                    send_mail_inner(ambiguous_match, "ambiguos matches");
                 }
-                if s_va != 0 {
-                    let variant_added_body = variant_added.iter().fold(String::new(), |a, n| {
-                        format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
-                    });
-                    let email = Message::builder()
-                        .from(sender.clone())
-                        .to(recipient.clone())
-                        .subject(format!("Added {s_va} new variants since last check"))
-                        .header(ContentType::TEXT_PLAIN)
-                        .body(variant_added_body)
-                        .unwrap();
-                    mailer.send(&email).unwrap();
-                    tracing::info!("Sent Mail about {} new ambiguos matches", s_va);
+                if !variant_added.is_empty() {
+                    send_mail_inner(variant_added, "new variants");
                 }
-                if s_su != 0 {
-                    let sonstig_unwrapped_body =
-                        sonstig_unwrapped.iter().fold(String::new(), |a, n| {
-                            format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
-                        });
-                    let email = Message::builder()
-                        .from(sender.clone())
-                        .to(recipient.clone())
-                        .subject(format!("{s_su} sonstig's unwrapped since last check"))
-                        .header(ContentType::TEXT_PLAIN)
-                        .body(sonstig_unwrapped_body)
-                        .unwrap();
-                    mailer.send(&email).unwrap();
-                    tracing::info!("Sent Mail about {s_su} new sonstig variants");
+                if !sonstig_unwrapped.is_empty() {
+                    send_mail_inner(sonstig_unwrapped, "sonstig's unwrapped");
                 }
-                if s_ot != 0 {
-                    let other_body = other.iter().fold(String::new(), |a, n| {
-                        format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
-                    });
-                    let email = Message::builder()
-                        .from(sender.clone())
-                        .to(recipient.clone())
-                        .subject(format!("{s_ot} Other messages since last check"))
-                        .header(ContentType::TEXT_PLAIN)
-                        .body(other_body)
-                        .unwrap();
-                    mailer.send(&email).unwrap();
-                    tracing::info!("Sent Mail about {s_ot} new other messages");
+            };
+
+            loop {
+                tokio::select! {
+                    _ = tick_interval.tick() => {
+                        send_mail(&mut ambiguous_match, &mut variant_added, &mut sonstig_unwrapped);
+                    },
+                    mail = rx.recv() => {
+                        if let Some(mail) = mail {
+                            match mail.tp {
+                                MailNotificationType::AmbiguousMatch =>
+                                    ambiguous_match.push(mail),
+                                MailNotificationType::EnumAdded =>
+                                    variant_added.push(mail),
+                                MailNotificationType::SonstigUnwrapped =>
+                                    sonstig_unwrapped.push(mail),
+                            }
+                        } else {
+                            // Either received None because all sender closed, i.e. the Bundle dropped.
+                            send_mail(&mut ambiguous_match, &mut variant_added, &mut sonstig_unwrapped);
+                            break;
+                        }
+                    }
                 }
             }
         });
-        Ok(Some(Self {
-            cache,
-            mailthread: Some(thread),
-            kill,
-        }))
+        Ok(Some(Self(tx)))
     }
-    fn send(&self, mail: Mail) -> Result<()> {
-        self.cache.write().unwrap().push(mail);
-        Ok(())
-    }
-}
-
-impl Drop for MailBundle {
-    fn drop(&mut self) {
-        *self.kill.write().unwrap() = false;
-        if let Some(handle) = self.mailthread.take() {
-            handle.abort();
-        }
+    fn send(&self, mail: Mail) {
+        // Dropping errors as this only happens, if the sender drops, which we hold.
+        let _ = self.0.send(mail);
     }
 }
 
 impl LTZFServer {
     /// guarded to String conversion
-    pub fn guard_ts<T: ToString>(&self, input: &T, api_id: Uuid, object: &str) -> Result<String> {
+    pub fn guard_ts<T: ToString>(&self, input: &T, api_id: Uuid, object: &str) -> String {
         let temp = input.to_string();
         if temp == "sonstig" {
-            notify_unknown_variant::<T>(api_id, object, self)?;
+            notify_unknown_variant::<T>(api_id, object, self);
         }
-        Ok(temp)
+        temp
     }
 }
 
@@ -190,10 +170,10 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     new_entry: &T,
     similarity: &[(f32, T)],
     server: &LTZFServer,
-) -> Result<()> {
-    if server.mailbundle.is_none() {
-        return Ok(());
-    }
+) {
+    let Some(mailbundle) = &server.mailbundle else {
+        return;
+    };
     let subject = format!(
         "Für Typ `{}` wurde ein neuer Eintrag `{:?}` erstellt. ",
         std::any::type_name::<T>(),
@@ -207,23 +187,22 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
 
     let body = format!("Es gibt {} ähnliche Einträge: {simstr}", similarity.len());
     tracing::warn!("Notify: New Enum Entry: {subject}\n{body}!");
-    server.mailbundle.as_ref().unwrap().send(Mail {
+    mailbundle.send(Mail {
         subject,
         body,
         tp: MailNotificationType::EnumAdded,
-    })?;
-
-    Ok(())
+    });
 }
+
 pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
     api_ids: &[Uuid],
     object: &T,
     during_operation: &str,
     server: &LTZFServer,
 ) -> Result<()> {
-    if server.mailbundle.is_none() {
+    let Some(mailbundle) = &server.mailbundle else {
         return Ok(());
-    }
+    };
     let subject = format!("Ambiguous Match: Während {during_operation}");
     let body = format!(
         "Während: `{during_operation}` wurde folgendes Objekt wurde hochgeladen: {}.
@@ -235,27 +214,26 @@ pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
         api_ids
     );
     tracing::error!("Notify: Ambiguous Match!");
-    server.mailbundle.as_ref().unwrap().send(Mail {
+    mailbundle.send(Mail {
         subject,
         body,
         tp: MailNotificationType::AmbiguousMatch,
-    })?;
+    });
     Ok(())
 }
 
-pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str, server: &LTZFServer) -> Result<()> {
-    if server.mailbundle.is_none() {
-        return Ok(());
-    }
+pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str, server: &LTZFServer) {
+    let Some(mailbundle) = &server.mailbundle else {
+        return;
+    };
     let subject = format!(
         "Für {object} `{api_id}` wurde `sonstig` angegeben als Wert für `{}`",
         std::any::type_name::<T>()
     );
     tracing::warn!("Notify: Unknown Variant in Guarded Enumeration Field");
-    server.mailbundle.as_ref().unwrap().send(Mail {
+    mailbundle.send(Mail {
         subject,
         body: String::new(),
         tp: MailNotificationType::SonstigUnwrapped,
-    })?;
-    Ok(())
+    });
 }

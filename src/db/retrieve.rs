@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::api::PaginationResponsePart;
-use crate::error::*;
+use crate::error::{DataValidationError, LTZFError, Result};
 use crate::utils::as_option;
 use openapi::models;
 use uuid::Uuid;
@@ -122,7 +122,9 @@ pub async fn vorgang_by_id(
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
-        wahlperiode: pre_vg.wahlperiode as u32,
+        wahlperiode: u32::try_from(pre_vg.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert vorgang wahlperiode as it is negative: {e}"),
+        })?,
         verfassungsaendernd: pre_vg.verfaend,
         typ: models::Vorgangstyp::from_str(pre_vg.value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
@@ -190,14 +192,20 @@ pub async fn station_by_id(
         WHERE g.id = $1",
         temp_stat.gr_id
     )
-    .map(|x| models::Gremium {
-        name: x.name,
-        wahlperiode: x.wp as u32,
-        parlament: models::Parlament::from_str(&x.value).unwrap(),
-        link: x.link,
+    .map(|x| {
+        Result::<models::Gremium>::Ok(models::Gremium {
+            name: x.name,
+            wahlperiode: u32::try_from(x.wp).map_err(|e| LTZFError::Other {
+                message: format!("Failed to convert gremium wahlperiode as it is negative: {e}"),
+            })?,
+            parlament: models::Parlament::from_str(&x.value).map_err(|_e| LTZFError::Other {
+                message: format!("Invalid parliament in database: {}", x.value),
+            })?,
+            link: x.link,
+        })
     })
     .fetch_one(&mut **executor)
-    .await?;
+    .await??;
 
     Ok(models::Station {
         touched_by: None,
@@ -209,7 +217,14 @@ pub async fn station_by_id(
         zp_start: temp_stat.zp_start,
         zp_modifiziert: Some(temp_stat.zp_modifiziert),
 
-        trojanergefahr: temp_stat.trojanergefahr.map(|x| x as u8),
+        trojanergefahr: temp_stat
+            .trojanergefahr
+            .map(|x| {
+                u8::try_from(x).map_err(|e| LTZFError::Other {
+                    message: format!("Failed to convert station trojanergefahr to u8: {e}"),
+                })
+            })
+            .transpose()?,
         titel: temp_stat.titel,
         gremium,
         api_id: Some(temp_stat.api_id),
@@ -273,7 +288,14 @@ pub async fn dokument_by_id(
 
         link: rec.link,
         hash: rec.hash,
-        meinung: rec.meinung.map(|x| x as u8),
+        meinung: rec
+            .meinung
+            .map(|x| {
+                u8::try_from(x).map_err(|e| LTZFError::Other {
+                    message: format!("Failed to convert meinung to u8: {e}"),
+                })
+            })
+            .transpose()?,
         zusammenfassung: rec.zusammenfassung,
         schlagworte: as_option(schlagworte),
         autoren,
@@ -325,7 +347,9 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
     .await?;
 
     Ok(models::Top {
-        nummer: scaffold.nummer as u32,
+        nummer: u32::try_from(scaffold.nummer).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert top number to u32 as it is negative: {e}"),
+        })?,
         titel: scaffold.titel,
         dokumente: as_option(doks),
         vorgang_id: as_option(vgs),
@@ -383,15 +407,25 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
         touched_by: None,
-        nummer: scaffold.nummer as u32,
+        nummer: u32::try_from(scaffold.nummer).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert sitzung number to u32 as it is negative: {e}"),
+        })?,
         titel: scaffold.titel,
         public: scaffold.public,
         termin: scaffold.termin,
         gremium: models::Gremium {
             name: scaffold.grname,
             link: scaffold.gr_link,
-            wahlperiode: scaffold.wp as u32,
-            parlament: models::Parlament::from_str(&scaffold.plm).unwrap(),
+            wahlperiode: u32::try_from(scaffold.wp).map_err(|e| LTZFError::Other {
+                message: format!(
+                    "Failed to convert gremium wahlperiode to u32 as it is negative: {e}"
+                ),
+            })?,
+            parlament: models::Parlament::from_str(&scaffold.plm).map_err(|_e| {
+                LTZFError::Other {
+                    message: format!("Invalid parliament in database: {}", scaffold.plm),
+                }
+            })?,
         },
         tops,
         link: scaffold.as_link,
@@ -408,7 +442,7 @@ pub struct SitzungFilterParameters {
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
 }
-/// returns a tuple made up of: (total_count, retrieved_items)
+/// returns a tuple made up of: (`total_count`, `retrieved_items`)
 pub async fn sitzung_by_param(
     params: &SitzungFilterParameters,
     page: Option<i32>,
@@ -443,7 +477,12 @@ lastmod < COALESCE($4, NOW()) AND
 ($6::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($6, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC",
         params.parlament.map(|p| p.to_string()),
-        params.wp.map(|x|x as i32),
+        params.wp.map(|x| i32::try_from(x).map_err(|e| LTZFError::Other {
+            message: format!(
+                "Failed to convert sitzung wahlperiode as it exceeds i32::MAX: {e}"
+            )
+        }))
+        .transpose()?,
         params.since,
         params.until,
         params.gremium_like,
@@ -452,7 +491,15 @@ ORDER BY pre_table.lastmod ASC",
     .map(|r| r.id)
     .fetch_all(&mut **tx)
     .await?;
-    let prp = PaginationResponsePart::new(as_list.len() as i32, page, per_page);
+    let prp = PaginationResponsePart::new(
+        i32::try_from(as_list.len()).map_err(|e| LTZFError::Other {
+            message: format!(
+                "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
+            ),
+        })?,
+        page,
+        per_page,
+    );
     if as_list.is_empty() {
         return Ok((prp, vec![]));
     }
@@ -510,7 +557,15 @@ params.inipsn, params.iniorg, params.inifch,
 params.lower_date, params.upper_date)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
-    let prp = PaginationResponsePart::new(vg_list.len() as i32, page, per_page);
+    let prp = PaginationResponsePart::new(
+        i32::try_from(vg_list.len()).map_err(|e| LTZFError::Other {
+            message: format!(
+                "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
+            ),
+        })?,
+        page,
+        per_page,
+    );
     if vg_list.is_empty() {
         return Ok((prp, vec![]));
     }
@@ -530,11 +585,13 @@ pub(crate) async fn count_existing_gremien(
     for gr in gremien {
         names.push(gr.name.clone());
         pvalues.push(gr.parlament.to_string());
-        wps.push(gr.wahlperiode as i32);
+        wps.push(i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}"),
+        })?);
         links.push(gr.link.clone());
     }
 
-    let existing_obj_cnt = sqlx::query!("SELECT COUNT(1) as cnt FROM 
+    let existing_obj_cnt = sqlx::query_scalar!("SELECT COUNT(1) as cnt FROM 
         UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)
         WHERE EXISTS (
             SELECT 1 FROM gremium g 
@@ -546,10 +603,11 @@ pub(crate) async fn count_existing_gremien(
             (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)
         )
         ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
-        .map(|r| r.cnt)
-        .fetch_one(&mut **tx).await?.unwrap();
+        .fetch_one(&mut **tx).await?.unwrap_or_default();
 
-    Ok(existing_obj_cnt as usize)
+    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
+        message: format!("Failed to convert object count to usize: {e}"),
+    })
 }
 
 pub(crate) async fn count_existing_authors(
@@ -575,6 +633,8 @@ pub(crate) async fn count_existing_authors(
     .map(|r| r.cnt)
     .fetch_one(&mut **tx)
     .await?
-    .unwrap();
-    Ok(existing_obj_cnt as usize)
+    .unwrap_or_default();
+    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
+        message: format!("Failed to convert object count to usize: {e}"),
+    })
 }

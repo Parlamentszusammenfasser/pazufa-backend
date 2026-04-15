@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_keys \n            SET expires_at = LEAST($2::timestamptz, expires_at), rotated_for = $3\n            WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f536a23db1fb85e358fb7037e82dc5e6d3f4d9a8f0be5094d021a0eaad0fadc"
+}

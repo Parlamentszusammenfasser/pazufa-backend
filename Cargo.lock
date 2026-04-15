@@ -1874,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "pazufa-backend"
-version = "0.2.7+1"
+version = "0.2.8"
 dependencies = [
  "async-trait",
  "axum",

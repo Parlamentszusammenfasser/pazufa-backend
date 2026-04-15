@@ -1,3 +1,7 @@
+#![allow(
+    clippy::expect_used,
+    reason = "All code runs at server startup, so cannot cause runtime failure."
+)]
 // TODO:
 // 1. DONE console logging according to RUST_LOG (already exists)
 // 2. DONE error logging for everything {warn, error}
@@ -33,14 +37,17 @@ impl Logging {
             .with_level(true)
             .with_file(true)
             .with_line_number(true);
-        if !self
-            .error_log
-            .parent()
-            .expect("File should not be a root node")
-            .exists()
+        if let Some(parent) = self.error_log.parent()
+            && !parent.exists()
         {
-            info!("{:?} does not exist, creating...", self.error_log.parent());
-            std::fs::create_dir_all(self.error_log.parent().unwrap()).unwrap();
+            info!("{} does not exist, creating...", parent.display());
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                panic!(
+                    "Insufficient permissions to create error log directory at {}: {}",
+                    parent.display(),
+                    e
+                );
+            }
         }
 
         let file = fs::OpenOptions::new()
@@ -49,8 +56,8 @@ impl Logging {
             .open(&self.error_log)
             .unwrap_or_else(|_| {
                 panic!(
-                    "Expected to be able to open this file: {:?}",
-                    &self.error_log
+                    "Expected to be able to open this file: {}",
+                    &self.error_log.display()
                 )
             });
 
@@ -70,13 +77,17 @@ impl Logging {
                 .with_level(true)
                 .with_file(true)
                 .with_line_number(true);
-            if !object_log
-                .parent()
-                .expect("File should not be a root node")
-                .exists()
+            if let Some(parent) = object_log.parent()
+                && !parent.exists()
             {
-                info!("{:?} does not exist, creating...", object_log.parent());
-                std::fs::create_dir_all(object_log.parent().unwrap()).unwrap();
+                info!("{} does not exist, creating...", parent.display());
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    panic!(
+                        "Insufficient permissions to create object log directory at {}: {}",
+                        parent.display(),
+                        e
+                    );
+                }
             }
 
             let file = fs::OpenOptions::new()

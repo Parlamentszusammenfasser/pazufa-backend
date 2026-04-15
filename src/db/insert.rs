@@ -1,9 +1,10 @@
-use super::*;
+use super::KeyIndex;
 use std::str::FromStr;
 
 use crate::db::merge::candidates::dokument_merge_candidates;
 #[cfg(feature = "track-validation")]
 use crate::db::validate;
+use crate::error::LTZFError;
 use crate::{
     LTZFServer, Result,
     utils::{self, notify::notify_new_enum_entry},
@@ -37,8 +38,10 @@ pub async fn insert_vorgang(
         vg.titel,
         vg.kurztitel,
         vg.verfassungsaendernd,
-        vg.wahlperiode as i32,
-        server.guard_ts(&vg.typ, vg.api_id, obj)?
+        i32::try_from(vg.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert vorgang wahlperiode as it exceeds i32::MAX: {e}")
+        })?,
+        server.guard_ts(&vg.typ, vg.api_id, obj)
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)
@@ -65,7 +68,9 @@ pub async fn insert_vorgang(
         WHERE stv.vg_id=ro.vg_id AND
         stv.scraper=ro.scraper AND
         ro.rn > $1",
-        server.config.per_object_scraper_log_size as i64
+        i64::try_from(server.config.per_object_scraper_log_size).map_err(|e| LTZFError::Other {
+            message: format!("i64 could not hold length of per_object_scraper_log_size: {e}")
+        })?
     )
     .execute(&mut **tx)
     .await?;
@@ -99,7 +104,7 @@ pub async fn insert_vorgang(
         .as_ref()
         .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
 
-    let identt_list = vg
+    let identtyp_list = vg
         .ids
         .as_ref()
         .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
@@ -112,7 +117,7 @@ pub async fn insert_vorgang(
     ON CONFLICT DO NOTHING",
         vg_id,
         ident_list.as_ref().map(|x| &x[..]),
-        identt_list.as_ref().map(|x| &x[..])
+        identtyp_list.as_ref().map(|x| &x[..])
     )
     .execute(&mut **tx)
     .await?;
@@ -246,7 +251,7 @@ pub async fn insert_station(
         stat.link,
         stat.titel,
         stat.trojanergefahr.map(|x| i32::from(x)),
-        srv.guard_ts(&stat.typ, sapi, obj)?,
+        srv.guard_ts(&stat.typ, sapi, obj),
         stat.zp_start,
         vg_id,
         stat.zp_modifiziert,
@@ -333,7 +338,7 @@ pub async fn insert_dokument(
         )RETURNING id",
         dapi,
         dok.drucksnr,
-        srv.guard_ts(&dok.typ, dapi, obj)?,
+        srv.guard_ts(&dok.typ, dapi, obj),
         dok.titel,
         dok.kurztitel,
         dok.vorwort,
@@ -412,13 +417,15 @@ pub async fn insert_sitzung(
     let id = sqlx::query!(
         "INSERT INTO sitzung 
         (api_id, termin, public, gr_id, link, nummer, titel)
-    VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
         api_id,
         ass.termin,
         ass.public,
         gr_id,
         ass.link,
-        ass.nummer as i32,
+        i32::try_from(ass.nummer).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert sitzung number as it exceeds i32::MAX: {e}")
+        })?,
         ass.titel
     )
     .map(|r| r.id)
@@ -509,7 +516,9 @@ pub async fn insert_top(
     let tid = sqlx::query!(
         "INSERT INTO top(titel, nummer, sid) VALUES($1, $2, $3) RETURNING id;",
         top.titel,
-        top.nummer as i32,
+        i32::try_from(top.nummer).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert top number as it exceeds i32::MAX: {e}")
+        })?,
         sid
     )
     .map(|r| r.id)
@@ -523,7 +532,7 @@ pub async fn insert_top(
     }
     sqlx::query!(
         "INSERT INTO tops_doks(top_id, dok_id)
-    SELECT $1, did FROM UNNEST($2::int4[]) as did",
+        SELECT $1, did FROM UNNEST($2::int4[]) as did",
         tid,
         &dids[..]
     )
@@ -540,12 +549,14 @@ pub async fn insert_or_retrieve_gremium(
 ) -> Result<i32> {
     let gid = sqlx::query!(
         "SELECT g.id FROM gremium g, parlament p WHERE
-    g.name = $1 AND 
-    p.id = g.parl AND  p.value = $2
-    AND g.wp = $3",
+        g.name = $1 AND 
+        p.id = g.parl AND  p.value = $2
+        AND g.wp = $3",
         gr.name,
         gr.parlament.to_string(),
-        gr.wahlperiode as i32
+        i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}"),
+        })?,
     )
     .map(|r| r.id)
     .fetch_optional(&mut **tx)
@@ -555,34 +566,42 @@ pub async fn insert_or_retrieve_gremium(
     }
 
     let similarity = sqlx::query!(
-        "SELECT g.wp,g.name, SIMILARITY(name, $1) as sim, g.link
-    FROM gremium g, parlament p
-    WHERE SIMILARITY(name, $1) > 0.66 AND 
-    g.parl = p.id AND p.value = $2",
+        r#"SELECT g.wp,g.name, SIMILARITY(name, $1) as "sim!", g.link
+        FROM gremium g, parlament p
+        WHERE SIMILARITY(name, $1) > 0.66 AND 
+        g.parl = p.id AND p.value = $2"#,
         gr.name,
         gr.parlament.to_string()
     )
     .map(|r| {
-        (
-            r.sim.unwrap(),
+        Ok((
+            r.sim,
             models::Gremium {
                 link: r.link,
                 parlament: gr.parlament,
-                wahlperiode: r.wp as u32,
+                wahlperiode: u32::try_from(r.wp).map_err(|e| LTZFError::Other {
+                    message: format!(
+                        "Failed to convert wahlperiode to u32 as the value is negative: {e}"
+                    ),
+                })?,
                 name: r.name,
             },
-        )
+        ))
     })
     .fetch_all(&mut **tx)
-    .await?;
-    notify_new_enum_entry(gr, &similarity, srv)?;
+    .await?
+    .drain(..)
+    .collect::<Result<Vec<_>>>()?;
+    notify_new_enum_entry(gr, &similarity, srv);
     let id = sqlx::query!(
         "INSERT INTO gremium(name, parl, wp, link) VALUES 
-    ($1, (SELECT id FROM parlament p WHERE p.value = $2), $3, $4) 
-    RETURNING gremium.id",
+        ($1, (SELECT id FROM parlament p WHERE p.value = $2), $3, $4) 
+        RETURNING gremium.id",
         gr.name,
         gr.parlament.to_string(),
-        gr.wahlperiode as i32,
+        i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}")
+        })?,
         gr.link
     )
     .map(|r| r.id)
@@ -613,7 +632,7 @@ pub async fn insert_or_retrieve_autor(
     }
 
     let similarity = sqlx::query!(
-        "
+        r#"
         WITH similarities AS (
             SELECT id, 
             SIMILARITY(person, $1) as p, 
@@ -623,7 +642,7 @@ pub async fn insert_or_retrieve_autor(
         )
         SELECT a.*, 
         CASE WHEN s.p IS NOT NULL THEN s.p
-        ELSE s.o END AS sim
+        ELSE s.o END AS "sim!"
         
         FROM autor a 
         INNER JOIN similarities s ON s.id = a.id
@@ -632,14 +651,14 @@ pub async fn insert_or_retrieve_autor(
         
         (($1 IS NULL AND a.person IS NULL) OR s.p > 0.66) AND 
         s.o > 0.66 AND
-        (($3 IS NULL AND a.fachgebiet IS NULL) OR s.f > 0.66)",
+        (($3 IS NULL AND a.fachgebiet IS NULL) OR s.f > 0.66)"#,
         at.person,
         at.organisation,
         at.fachgebiet
     )
     .map(|r| {
         (
-            r.sim.unwrap(),
+            r.sim,
             models::Autor {
                 fachgebiet: r.fachgebiet,
                 person: r.person,
@@ -650,7 +669,7 @@ pub async fn insert_or_retrieve_autor(
     })
     .fetch_all(&mut **tx)
     .await?;
-    notify_new_enum_entry(at, &similarity, srv)?;
+    notify_new_enum_entry(at, &similarity, srv);
     let id = sqlx::query!(
         "INSERT INTO autor(person, organisation, lobbyregister, fachgebiet) 
         VALUES ($1, $2, $3, $4) RETURNING autor.id",

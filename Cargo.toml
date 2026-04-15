@@ -1,6 +1,6 @@
 [package]
 name = "pazufa-backend"
-version = "0.2.7+1"
+version = "0.2.8"
 edition = "2024"
 rust-version = "1.86"
 authors = ["Benedikt Schäfer"]
@@ -45,3 +45,30 @@ smallvec = { version = "1.15.1", features = ["union", "const_generics"] }
 tracing-test = "0.2.5"
 similar = "2.7"
 http = "1"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+checked_conversions = "deny"
+cloned_instead_of_copied = "deny"
+copy_iterator = "deny"
+allow_attributes_without_reason = "deny"
+as_underscore = "deny"
+clone_on_ref_ptr = "deny"
+dbg_macro = "deny"
+unwrap_in_result = "deny"
+unwrap_used = "deny"
+disallowed_macros = "deny"
+disallowed_methods = "deny"
+disallowed_types = "deny"
+too_many_arguments = "warn"
+arithmetic_side_effects = "warn"
+type_complexity = "warn"
+expect_used = "warn"

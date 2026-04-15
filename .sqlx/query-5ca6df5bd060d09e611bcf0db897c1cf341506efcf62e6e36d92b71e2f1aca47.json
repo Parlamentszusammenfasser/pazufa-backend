@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT g.wp,g.name, SIMILARITY(name, $1) as sim, g.link\n    FROM gremium g, parlament p\n    WHERE SIMILARITY(name, $1) > 0.66 AND \n    g.parl = p.id AND p.value = $2",
+  "query": "SELECT g.wp,g.name, SIMILARITY(name, $1) as \"sim!\", g.link\n        FROM gremium g, parlament p\n        WHERE SIMILARITY(name, $1) > 0.66 AND \n        g.parl = p.id AND p.value = $2",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
       },
       {
         "ordinal": 2,
-        "name": "sim",
+        "name": "sim!",
         "type_info": "Float4"
       },
       {
@@ -37,5 +37,5 @@
       true
     ]
   },
-  "hash": "2f9a5245b65db08f6e30df316ef8b799edcce5c4fed437dbf2993ddb6bf46b82"
+  "hash": "5ca6df5bd060d09e611bcf0db897c1cf341506efcf62e6e36d92b71e2f1aca47"
 }

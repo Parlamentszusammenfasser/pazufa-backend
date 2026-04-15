@@ -1,4 +1,5 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(test, deny(unsafe_code))]
+#![cfg_attr(not(test), forbid(unsafe_code))]
 
 pub(crate) mod api;
 pub(crate) mod db;
@@ -13,7 +14,9 @@ use clap::Parser;
 use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use tokio::net::TcpListener;
-use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
+use tower_governor::{
+    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor,
+};
 use tower_http::{compression::CompressionLayer, cors, limit};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -110,36 +113,41 @@ pub struct Configuration {
 
 impl Configuration {
     pub fn build_mailer(&self) -> Result<SmtpTransport> {
-        if self.mail_server.is_none()
-            || self.mail_user.is_none()
-            || self.mail_password.is_none()
-            || self.mail_sender.is_none()
-            || self.mail_recipient.is_none()
-        {
-            return Err(LTZFError::Infrastructure {
+        if let (
+            Some(mail_server),
+            Some(mail_user),
+            Some(mail_password),
+            Some(_mail_sender),
+            Some(_mail_recipient),
+        ) = (
+            &self.mail_server,
+            &self.mail_user,
+            &self.mail_password,
+            &self.mail_sender,
+            &self.mail_recipient,
+        ) {
+            let mailer = SmtpTransport::relay(mail_server)?
+                .credentials(Credentials::new(mail_user.clone(), mail_password.clone()))
+                .build();
+            Ok(mailer)
+        } else {
+            Err(LTZFError::Infrastructure {
                 source: Box::new(error::InfrastructureError::Configuration {
                     message: "Mail Configuration is incomplete".into(),
                     config: Box::new(self.clone()),
                 }),
-            });
+            })
         }
-        let mailer = SmtpTransport::relay(self.mail_server.as_ref().unwrap().as_str())?
-            .credentials(Credentials::new(
-                self.mail_user.clone().unwrap(),
-                self.mail_password.clone().unwrap(),
-            ))
-            .build();
-        Ok(mailer)
     }
 }
 async fn handle_root() -> impl axum::response::IntoResponse {
     let s = include_str!("index.html");
-    (axum::http::StatusCode::OK, s)
+    (axum::http::StatusCode::OK, axum::response::Html(s))
 }
 
 async fn swagger_ui() -> impl axum::response::IntoResponse {
     let s = include_str!("swagger-ui.html");
-    (axum::http::StatusCode::OK, s)
+    (axum::http::StatusCode::OK, axum::response::Html(s))
 }
 
 async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
@@ -165,11 +173,11 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
         }
         let milliseconds = 2i32.pow(i) as u64;
         tracing::info!("DB Unavailable, Retrying in {} ms...", milliseconds);
-        std::thread::sleep(std::time::Duration::from_millis(milliseconds));
+        tokio::time::sleep(std::time::Duration::from_millis(milliseconds)).await;
     }
     if !available {
         return Err(LTZFError::Other {
-            message: Box::new("Server Connection failed after 10 retries".into()),
+            message: "Server Connection failed after 10 retries".to_owned(),
         });
     }
     tracing::debug!("Started Database Pool");
@@ -184,7 +192,10 @@ async fn main() -> Result<()> {
 
     let config = Configuration::parse();
     if config.dump_config {
-        println!("{config:#?}");
+        #[allow(clippy::disallowed_macros, reason = "Explicitly requested by user.")]
+        {
+            println!("{config:#?}");
+        }
         exit(0);
     }
     let logging = Logging::new(
@@ -220,9 +231,9 @@ async fn main() -> Result<()> {
 
     sqlx::query!(
         "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
-            VALUES
-            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
-            ON CONFLICT DO NOTHING;", hash, salt, tag)
+        VALUES
+        ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
+        ON CONFLICT DO NOTHING;", hash, salt, tag)
     .execute(&mut *tx).await?;
 
     tx.commit().await?;
@@ -236,19 +247,29 @@ async fn main() -> Result<()> {
         u64::from(state.config.req_limit_interval),
         state.config.req_limit_count,
     );
-    let rl_config = Arc::new(
-        GovernorConfigBuilder::default()
-            .const_per_second(iv)
-            .const_burst_size(cnt)
-            .key_extractor(GlobalKeyExtractor)
-            .finish()
-            .unwrap(),
-    );
-    let limiter = rl_config.limiter().clone();
+
+    let govenor_config = GovernorConfigBuilder::default()
+        .const_per_second(iv)
+        .const_burst_size(cnt)
+        .key_extractor(GlobalKeyExtractor)
+        .finish();
+
+    let rl_config = if let Some(govenor_config) = govenor_config {
+        Arc::new(govenor_config)
+    } else if iv == 0 {
+        panic!("Invalid configuration. REQUEST_LIMIT_INTERVAL is zero.");
+    } else if cnt == 0 {
+        panic!("Invalid configuration. REQUEST_LIMIT_COUNT is zero.");
+    } else {
+        panic!(
+            "Unexpected error. GovernorConfig did not build correctly, even though config seems valid."
+        )
+    };
+    let limiter = Arc::clone(rl_config.limiter());
     let interval = std::time::Duration::from_secs(60);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         loop {
-            std::thread::sleep(interval);
+            tokio::time::sleep(interval).await;
             tracing::info!("rate limiting storage size: {}", limiter.len());
             limiter.retain_recent();
         }
@@ -268,7 +289,7 @@ async fn main() -> Result<()> {
         .gzip(true)
         .zstd(true);
 
-    let app = openapi::server::new(state.clone())
+    let app = openapi::server::new(Arc::clone(&state))
         .route("/", get(handle_root))
         .route("/api/v2", get(swagger_ui))
         .layer(DefaultBodyLimit::max(body_size_limit))

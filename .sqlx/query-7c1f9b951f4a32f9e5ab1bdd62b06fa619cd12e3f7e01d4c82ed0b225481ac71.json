@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tops_doks(top_id, dok_id)\n        SELECT $1, did FROM UNNEST($2::int4[]) as did",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7c1f9b951f4a32f9e5ab1bdd62b06fa619cd12e3f7e01d4c82ed0b225481ac71"
+}

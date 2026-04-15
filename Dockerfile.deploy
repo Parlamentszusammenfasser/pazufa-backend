@@ -1,5 +1,7 @@
 FROM rust:1.92-slim-bookworm AS builder
 
+ARG RUSTFLAGS
+
 ENV SPEC_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3/docs/specs/openapi.yml"
 ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/commit/32c125523ec1831edb1fdb73de5dd99d313dae9b/docs/specs/tracks.toml"
 ENV OPENAPI_GENERATOR_VERSION="7.20.0"
@@ -52,7 +54,7 @@ FROM busybox:latest AS runner
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
-LABEL version="0.2.7+1"
+LABEL version="0.2.8"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD wget -q --spider "http://localhost:80" || exit 1

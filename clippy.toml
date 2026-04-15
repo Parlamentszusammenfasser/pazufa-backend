@@ -1,0 +1,43 @@
+msrv = "1.86"
+
+disallowed-macros = [
+    { path = "sqlx::query_unchecked",        reason = "use `sqlx::query!` for compile-time checked queries" },
+    { path = "sqlx::query_as_unchecked",     reason = "use `sqlx::query_as!` for compile-time checked queries" },
+    { path = "sqlx::query_scalar_unchecked", reason = "use `sqlx::query_scalar!` for compile-time checked queries" },
+    { path = "std::println",  reason = "use `tracing::info!` or other tracing macros instead" },
+    { path = "std::eprintln", reason = "use `tracing::warn!` / `tracing::error!` instead" },
+    { path = "std::print",    reason = "use `tracing::info!` or other tracing macros instead" },
+    { path = "std::eprint",   reason = "use `tracing::warn!` / `tracing::error!` instead" },
+    { path = "std::dbg",      reason = "remove debug macro before merging; use `tracing::debug!`" },
+    { path = "std::todo",          reason = "resolve all `todo!()` before merging" },
+    { path = "std::unimplemented", reason = "resolve all `unimplemented!()` before merging" },
+]
+
+disallowed-methods = [
+    { path = "sqlx::query",             reason = "use the `sqlx::query!` macro for compile-time verification" },
+    { path = "sqlx::query_as",          reason = "use the `sqlx::query_as!` macro for compile-time verification" },
+    { path = "sqlx::query_scalar",      reason = "use the `sqlx::query_scalar!` macro for compile-time verification" },
+    { path = "sqlx::query_with",        reason = "use the `sqlx::query!` macro for compile-time verification" },
+    { path = "sqlx::query_as_with",     reason = "use the `sqlx::query_as!` macro for compile-time verification" },
+    { path = "sqlx::query_scalar_with", reason = "use the `sqlx::query_scalar!` macro for compile-time verification" },
+    { path = "sqlx::raw_sql",           reason = "use compile-time checked `sqlx::query!` macros instead of raw SQL" },
+    { path = "std::thread::sleep",      reason = "use `tokio::time::sleep` in async code" },
+    { path = "std::env::set_var",       reason = "`set_var` is unsafe in multi-threaded programs (UB since Rust 1.80)" },
+    { path = "std::env::remove_var",    reason = "`remove_var` is unsafe in multi-threaded programs (UB since Rust 1.80)" },
+]
+
+disallowed-types = [
+    { path = "sqlx::QueryBuilder", reason = "QueryBuilder creates queries at runtime; prefer `sqlx::query!` macros" },
+    { path = "sqlx::RawSql",      reason = "use compile-time checked `sqlx::query!` macros instead of raw SQL" },
+    { path = "std::sync::Condvar",  reason = "blocks the executor thread; use `tokio::sync::Notify` or channel-based signaling" },
+    { path = "std::sync::Barrier",  reason = "blocks the executor thread; use `tokio::sync::Barrier` instead" },
+]
+
+arithmetic-side-effects-allowed-binary = [
+    ["chrono::DateTime",      "chrono::DateTime"],
+    ["chrono::DateTime",      "chrono::TimeDelta"],
+    ["chrono::NaiveDateTime",  "chrono::TimeDelta"],
+    ["chrono::NaiveDate",      "chrono::TimeDelta"],
+    ["chrono::NaiveTime",      "chrono::TimeDelta"],
+    ["chrono::TimeDelta",      "chrono::TimeDelta"],
+]

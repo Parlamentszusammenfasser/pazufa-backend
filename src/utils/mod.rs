@@ -7,6 +7,10 @@ pub mod status;
 pub mod testing;
 pub mod tracing;
 
+#[allow(
+    clippy::expect_used,
+    reason = "Run during server ramp-up. No unexpected shutdown during runtime."
+)]
 pub async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()

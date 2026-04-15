@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use headers::Host;
-use openapi::apis::miscellaneous_unauthorisiert::*;
+use openapi::apis::miscellaneous_unauthorisiert::{
+    AutorenGetResponse, DokumentGetByIdResponse, EnumGetResponse, GremienGetResponse,
+    MiscellaneousUnauthorisiert,
+};
 use openapi::models;
 use sqlx::Row;
 use tracing::info;
@@ -39,7 +42,9 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         .await?;
 
         let prp = PaginationResponsePart::new(
-            result.len() as i32,
+            i32::try_from(result.len()).map_err(|e| LTZFError::Other {
+                message: format!("Failed to convert result length: {e}"),
+            })?,
             query_params.page,
             query_params.per_page,
         );
@@ -112,25 +117,34 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             });
         }
         let prp = PaginationResponsePart::new(
-            result.len() as i32,
+            i32::try_from(result.len()).map_err(|e| LTZFError::Other {
+                message: format!("Failed to convert result length: {e}"),
+            })?,
             query_params.page,
             query_params.per_page,
         );
         let selected_ids: Vec<i32> = result.drain(prp.start()..prp.end()).collect();
         let result = sqlx::query!(
             "SELECT g.link, g.name, g.wp, p.value as parl FROM gremium g
-        INNER JOIN parlament p ON p.id = g.parl
-        WHERE g.id = ANY($1::int4[])",
+            INNER JOIN parlament p ON p.id = g.parl
+            WHERE g.id = ANY($1::int4[])",
             &selected_ids[..]
         )
-        .map(|r| models::Gremium {
-            link: r.link,
-            name: r.name,
-            parlament: models::Parlament::from_str(&r.parl).unwrap(),
-            wahlperiode: r.wp as u32,
-        })
         .fetch_all(&mut *tx)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|r| {
+            Ok(models::Gremium {
+                link: r.link,
+                name: r.name,
+                parlament: models::Parlament::from_str(&r.parl)
+                    .map_err(|e| LTZFError::Other { message: e })?,
+                wahlperiode: u32::try_from(r.wp).map_err(|e| LTZFError::Other {
+                    message: format!("Failed to convert wahlperiode: {e}"),
+                })?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
         info!("{} matching Gremien found and returned", result.len());
         Ok(GremienGetResponse::Status200_Success {
             body: result,
@@ -145,7 +159,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         })
     }
 
-    /// EnumGet - GET /api/v2/enumeration/{name}
+    /// `EnumGet` - GET /api/v2/enumeration/{name}
     #[instrument(skip_all, fields(enum=%path_params.name, contains=?query_params.contains, page=?query_params.page, per_page=?query_params.per_page))]
     async fn enum_get(
         &self,
@@ -177,6 +191,10 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             ]
             .drain(..),
         );
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Sqlx does not support dynamic table names for compile time checks."
+        )]
         let mut filtered_ids = sqlx::query(&format!(
             "SELECT v.id FROM {} v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
             enum_tables[&path_params.name]
@@ -196,11 +214,17 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         }
 
         let prp = PaginationResponsePart::new(
-            filtered_ids.len() as i32,
+            i32::try_from(filtered_ids.len()).map_err(|e| LTZFError::Other {
+                message: format!("Failed to convert result length: {e}"),
+            })?,
             query_params.page,
             query_params.per_page,
         );
         let select_few: Vec<i32> = filtered_ids.drain(prp.start()..prp.end()).collect();
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Sqlx does not support dynamic table names for compile time checks."
+        )]
         let values: Vec<String> = sqlx::query(&format!(
             "SELECT v.value FROM {} v WHERE v.id = ANY($1::int4[])",
             enum_tables[&path_params.name]
@@ -225,7 +249,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         });
     }
 
-    /// DokumentGetById - GET /api/v2/dokument/{api_id}
+    /// `DokumentGetById` - GET /`api/v2/dokument/{api_id`}
     #[instrument(skip_all, fields(dok=%path_params.api_id))]
     async fn dokument_get_by_id(
         &self,
@@ -261,6 +285,8 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         });
     }
 }
+
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_unauthorisiert {
     use axum::http::Method;
@@ -301,7 +327,7 @@ mod test_unauthorisiert {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get Autor.");
         assert!(matches!(r, AutorenGetResponse::Status204_NoContent { .. }));
         scenario.teardown().await;
     }
@@ -324,7 +350,7 @@ mod test_unauthorisiert {
                 &vorgang,
             )
             .await
-            .unwrap();
+            .expect("Failed to create Autor.");
         assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
 
         let r = scenario
@@ -342,14 +368,14 @@ mod test_unauthorisiert {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get Autor.");
         assert!(
             match &r {
                 AutorenGetResponse::Status200_Success { body, .. } => {
                     assert!(!body.is_empty(), "Body is empty, expected some object");
                     true
                 }
-                _ => false,
+                AutorenGetResponse::Status204_NoContent { .. } => false,
             },
             "Expected Successful response, got {r:?}"
         );
@@ -374,7 +400,7 @@ mod test_unauthorisiert {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get Gremium.");
         assert!(
             matches!(result, GremienGetResponse::Status204_NoContent { .. }),
             "Expected to find no entries"
@@ -399,7 +425,7 @@ mod test_unauthorisiert {
                 &vorgang,
             )
             .await
-            .unwrap();
+            .expect("Failed to create Vorgang.");
         assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
 
         let result = scenario
@@ -563,7 +589,7 @@ mod test_unauthorisiert {
                 &vorgang,
             )
             .await
-            .unwrap();
+            .expect("Failed to create Vorgang.");
         assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
 
         for (name, mtch) in test_cases_one {

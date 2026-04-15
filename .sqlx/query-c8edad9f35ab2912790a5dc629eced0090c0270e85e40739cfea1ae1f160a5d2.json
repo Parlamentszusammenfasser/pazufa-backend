@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO sitzung \n        (api_id, termin, public, gr_id, link, nummer, titel)\n    VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+  "query": "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)\n            VALUES\n            ($1, $2, $3, $4,$5, $6)\n            RETURNING id",
   "describe": {
     "columns": [
       {
@@ -11,12 +11,11 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Timestamptz",
-        "Bool",
-        "Int4",
         "Varchar",
         "Int4",
+        "Timestamptz",
+        "Int4",
+        "Varchar",
         "Varchar"
       ]
     },
@@ -24,5 +23,5 @@
       false
     ]
   },
-  "hash": "e0be6cb098e77ef59447041bbabec9a48d0a520549f843842bfe1a0b4ca851b4"
+  "hash": "c8edad9f35ab2912790a5dc629eced0090c0270e85e40739cfea1ae1f160a5d2"
 }

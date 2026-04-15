@@ -60,34 +60,31 @@ impl Statistics {
     }
     pub async fn obj_created(&self) {
         let mut r = self.objects_created.write().await;
-        *r += 1;
+        *r = r.saturating_add(1);
     }
     pub async fn put_nochange(&self) {
         let mut r = self.put_with_no_change.write().await;
-        *r += 1;
+        *r = r.saturating_add(1);
     }
     #[instrument(skip_all, fields(ua=?ua))]
     pub async fn ua_registered(&self, ua: &str) {
         let mut r = self.useragents.write().await;
         if r.len() > MAX_COUNT {
-            warn!(
-                "Too many unique user agents recorded {MAX_COUNT}, discarding {}",
-                ua
-            );
+            warn!("Too many unique user agents recorded {MAX_COUNT}, discarding {ua}");
             return;
         }
         let ua_cnt: u32 = *r.get(ua).unwrap_or(&0);
-        r.insert(ua.to_owned(), ua_cnt + 1);
+        r.insert(ua.to_owned(), ua_cnt.saturating_add(1));
     }
     #[instrument(skip_all, fields(path=?path))]
     pub async fn path_called(&self, path: &str) {
         let mut r = self.pathcounts.write().await;
         let cnt: u32 = *r.get(path).unwrap_or(&0);
-        r.insert(path.to_owned(), cnt + 1);
+        r.insert(path.to_owned(), cnt.saturating_add(1));
     }
     pub async fn output(&self) -> String {
         let out = StatOutput {
-            unique_uas: self.useragents.read().await.len() as u32,
+            unique_uas: u32::try_from(self.useragents.read().await.len()).unwrap_or(0),
             objects_created: *self.objects_created.read().await,
             up_since: self.up_since,
             most_common_ua: self
@@ -98,7 +95,7 @@ impl Statistics {
                 .max_by(|a, b| a.1.cmp(b.1))
                 .unwrap_or((&"None recorded".to_owned(), &0))
                 .0
-                .to_string(),
+                .clone(),
             commit: env!("GIT_HASH").to_owned(),
             version: crate_version!().to_owned(),
             #[cfg(feature = "track-validation")]

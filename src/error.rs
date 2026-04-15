@@ -1,3 +1,4 @@
+use crate::db::validate::Regex;
 use snafu::prelude::*;
 use uuid::Uuid;
 
@@ -22,6 +23,17 @@ pub enum DataValidationError {
 
     #[snafu(display("Deliberate Conflict: {reason}"))]
     Conflict { reason: String },
+
+    #[snafu(display(
+        "Error compiling regex {regex:?} @ index {ci} with char {c}. Parsed so far: {parsed_so_far:?}"
+    ))]
+    RegexError {
+        regex: Vec<char>,
+        ci: usize,
+        c: char,
+        parsed_so_far: Regex,
+    },
+
     #[snafu(display("The Vorgang could not be validated: {reason}"))]
     MalformedVorgang { reason: String },
 
@@ -143,9 +155,8 @@ pub enum LTZFError {
     HeaderConversion {
         source: Box<axum::http::header::ToStrError>,
     },
-    #[allow(clippy::box_collection)]
     #[snafu(display("{message}"))]
-    Other { message: Box<String> },
+    Other { message: String },
 }
 impl From<DataValidationError> for LTZFError {
     fn from(source: DataValidationError) -> Self {
@@ -180,7 +191,7 @@ impl From<axum::http::header::ToStrError> for LTZFError {
 impl LTZFError {
     pub fn other<T: Into<String>>(message: T) -> Self {
         LTZFError::Other {
-            message: Box::new(message.into()),
+            message: message.into(),
         }
     }
 }

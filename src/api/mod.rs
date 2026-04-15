@@ -1,4 +1,5 @@
-use chrono::DurationRound;
+use chrono::{DateTime, Datelike, Utc};
+use chrono::{DurationRound, NaiveDate};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use crate::error::LTZFError;
 use crate::utils::notify;
 use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
-use openapi::apis::unauthorisiert::*;
+use openapi::apis::unauthorisiert::{PingResponse, StatusResponse, Unauthorisiert};
 
 pub(crate) mod auth;
 pub(crate) mod misc;
@@ -110,7 +111,9 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         if let Some(t) = query_params.t {
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .map_err(|_| LTZFError::Other {
+                    message: "System time before unix epoch.".to_owned(),
+                })?
                 .as_secs_f64();
             debug!("Ping with one-way time: {} s", current_time - t);
         }
@@ -142,13 +145,26 @@ pub struct PaginationResponsePart {
     pub x_page: i32,
     pub x_per_page: i32,
 }
+
+fn div_ceil(dividend: i32, divisor: i32) -> Option<i32> {
+    let quotient = dividend.checked_div(divisor)?;
+    let remainder = dividend.checked_rem(divisor)?;
+    if remainder != 0 && dividend.is_positive() == divisor.is_positive() {
+        quotient.checked_add(1)
+    } else {
+        Some(quotient)
+    }
+}
+
 impl PaginationResponsePart {
     pub const DEFAULT_PER_PAGE: i32 = 32;
     pub const MAX_PER_PAGE: i32 = 256;
     pub fn new(x_total_count: i32, x_page: Option<i32>, x_per_page: Option<i32>) -> Self {
         let x_per_page =
-            x_per_page.map_or(Self::DEFAULT_PER_PAGE, |x| x.clamp(0, Self::MAX_PER_PAGE));
-        let x_total_pages = (x_total_count + x_per_page - 1) / x_per_page;
+            x_per_page.map_or(Self::DEFAULT_PER_PAGE, |x| x.clamp(1, Self::MAX_PER_PAGE));
+        let Some(x_total_pages) = div_ceil(x_total_count, x_per_page) else {
+            unreachable!("x_per_page is clamped between 1 and 256.")
+        };
         let x_page = x_page.map_or(1, |x| x.clamp(1, x_total_pages));
 
         Self {
@@ -162,15 +178,52 @@ impl PaginationResponsePart {
         i64::from(self.x_per_page)
     }
     pub fn offset(&self) -> i64 {
-        i64::from((self.x_page - 1) * self.x_per_page)
+        let page_offset = i64::from(self.x_page.saturating_sub(1));
+        let per_page = i64::from(self.x_per_page);
+
+        #[allow(clippy::arithmetic_side_effects, reason = "Wide multiplication.")]
+        {
+            page_offset * per_page
+        }
     }
     pub fn start(&self) -> usize {
-        ((self.x_page - 1) * self.x_per_page) as usize
+        let Ok(page) = usize::try_from(self.x_page.max(0)).map(|page| page.saturating_sub(1))
+        else {
+            unreachable!(
+                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
+            )
+        };
+        let Ok(per_page) = usize::try_from(self.x_per_page.max(0)) else {
+            unreachable!(
+                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
+            )
+        };
+        page.saturating_mul(per_page)
     }
+
     pub fn end(&self) -> usize {
-        (self.offset() + self.limit())
-            .min(i64::from(self.x_total_count))
-            .max(0) as usize
+        let Ok(offset) = usize::try_from(self.offset().max(0)) else {
+            #[cfg(target_pointer_width = "64")]
+            unreachable!(
+                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
+            );
+            #[cfg(not(target_pointer_width = "64"))]
+            panic!("Offset exceeded usize limit.");
+        };
+        let Ok(limit) = usize::try_from(self.limit().max(0)) else {
+            #[cfg(target_pointer_width = "64")]
+            unreachable!(
+                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
+            );
+            #[cfg(not(target_pointer_width = "64"))]
+            panic!("Offset exceeded usize limit.");
+        };
+        let Ok(total_count) = usize::try_from(self.x_total_count.max(0)) else {
+            unreachable!(
+                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
+            )
+        };
+        total_count.min(offset.saturating_add(limit))
     }
     pub fn generate_link_header(&self, link_first_part: &str) -> String {
         let mut link_string = String::new();
@@ -178,7 +231,7 @@ impl PaginationResponsePart {
             link_string = format!(
                 "<\"{}?page={}&per_page={}\">; rel=\"next\", ",
                 link_first_part,
-                self.x_page + 1,
+                self.x_page.saturating_add(1),
                 self.x_per_page
             );
         }
@@ -187,7 +240,7 @@ impl PaginationResponsePart {
                 "{}<\"{}?page={}&per_page={}\">; rel=\"previous\", ",
                 link_string,
                 link_first_part,
-                self.x_page - 1,
+                self.x_page.saturating_sub(1),
                 self.x_per_page
             );
         }
@@ -206,6 +259,7 @@ impl PaginationResponsePart {
     }
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod prp_test {
     use crate::api::PaginationResponsePart;
@@ -215,18 +269,12 @@ mod prp_test {
         let lh = prp.generate_link_header("/");
         let link_hdr_parts: Vec<_> = lh.split(", ").collect();
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{link_hdr_parts:?}"
         );
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"last\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=1&per_page=16\">; rel=\"last\""),
+            "{link_hdr_parts:?}"
         );
         assert_eq!(link_hdr_parts.len(), 2);
 
@@ -234,25 +282,16 @@ mod prp_test {
         let lh = prp.generate_link_header("/");
         let link_hdr_parts: Vec<_> = lh.split(", ").collect();
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=2&per_page=16\">; rel=\"next\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=2&per_page=16\">; rel=\"next\""),
+            "{link_hdr_parts:?}"
         );
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{link_hdr_parts:?}"
         );
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=7&per_page=16\">; rel=\"last\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=7&per_page=16\">; rel=\"last\""),
+            "{link_hdr_parts:?}"
         );
         assert_eq!(link_hdr_parts.len(), 3);
 
@@ -260,32 +299,20 @@ mod prp_test {
         let lh = prp.generate_link_header("/");
         let link_hdr_parts: Vec<_> = lh.split(", ").collect();
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=3&per_page=16\">; rel=\"next\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=3&per_page=16\">; rel=\"next\""),
+            "{link_hdr_parts:?}"
         );
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"previous\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=1&per_page=16\">; rel=\"previous\""),
+            "{link_hdr_parts:?}"
         );
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{link_hdr_parts:?}"
         );
         assert!(
-            link_hdr_parts
-                .iter()
-                .any(|x| *x == "<\"/?page=7&per_page=16\">; rel=\"last\""),
-            "{:?}",
-            link_hdr_parts
+            link_hdr_parts.contains(&"<\"/?page=7&per_page=16\">; rel=\"last\""),
+            "{link_hdr_parts:?}"
         );
         assert_eq!(link_hdr_parts.len(), 4);
     }
@@ -344,221 +371,205 @@ impl
     }
 }
 pub fn find_applicable_date_range(
-    y: Option<u32>,
+    y: Option<i32>,
     m: Option<u32>,
     d: Option<u32>,
     since: Option<chrono::DateTime<chrono::Utc>>,
     until: Option<chrono::DateTime<chrono::Utc>>,
     ifmodsince: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Option<DateRange> {
-    let ymd_date_range = if let Some(y) = y {
-        if let Some(m) = m {
-            if let Some(d) = d {
-                Some((
-                    chrono::NaiveDate::from_ymd_opt(y as i32, m, d).unwrap(),
-                    chrono::NaiveDate::from_ymd_opt(y as i32, m, d).unwrap(),
-                ))
-            } else {
-                Some((
-                    chrono::NaiveDate::from_ymd_opt(y as i32, m, 1).unwrap(),
-                    chrono::NaiveDate::from_ymd_opt(y as i32, m + 1, 1)
-                        .unwrap()
-                        .checked_sub_days(chrono::Days::new(1))
-                        .unwrap(),
-                ))
-            }
-        } else {
-            Some((
-                chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1).unwrap(),
-                chrono::NaiveDate::from_ymd_opt(y as i32, 12, 31).unwrap(),
-            ))
-        }
-    } else {
-        None
+    let (ymd_since, ymd_until) = match (y, m, d) {
+        (Some(y), Some(m), Some(d)) => Some((
+            NaiveDate::from_ymd_opt(y, m, d),
+            NaiveDate::from_ymd_opt(y, m, d),
+        )),
+        (Some(y), Some(m), None) => Some((
+            NaiveDate::from_ymd_opt(y, m, 1),
+            #[allow(
+                clippy::arithmetic_side_effects,
+                reason = "Month wrap around would result in m == 0 wich would return None anyways. Year would be caught by until being before since.")
+            ]
+            NaiveDate::from_ymd_opt(y, m + 1, 1)
+                .or_else(|| NaiveDate::from_ymd_opt(y + 1, 1, 1))
+                .and_then(|date| date.pred_opt()),
+        )),
+        (Some(y), None, _) => Some((
+            NaiveDate::from_ymd_opt(y, 1, 1),
+            NaiveDate::from_ymd_opt(y, 12, 31),
+        )),
+        _ => None,
     }
-    .map(|(a, b)| {
+    .map_or((None, None), |(ymd_since, ymd_until): (Option<NaiveDate>, Option<NaiveDate>)| {
         (
-            a.and_hms_opt(0, 0, 0).unwrap().and_utc(),
-            b.and_hms_opt(23, 59, 59).unwrap().and_utc(),
+            ymd_since.and_then(|date| date.and_hms_opt(0, 0, 0)).map(|dt| dt.and_utc()),
+            ymd_until.and_then(|date| date.and_hms_opt(23, 59, 59)).map(|dt| dt.and_utc()),
         )
     });
 
-    let mut since_min = ifmodsince;
-    let mut until_min = until;
-    if let Some(since) = since {
-        if since_min.is_some() {
-            since_min = Some(since_min.unwrap().min(since));
-        } else {
-            since_min = Some(since);
-        }
-    }
-    if let Some((ymd_s, ymd_u)) = ymd_date_range {
-        if since_min.is_some() {
-            since_min = Some(ymd_s.max(since_min.unwrap()));
-        } else {
-            since_min = Some(ymd_s);
-        }
-        if until_min.is_some() {
-            until_min = Some(ymd_u.min(until_min.unwrap()));
-        } else {
-            until_min = Some(ymd_u);
-        }
+    #[allow(unused, reason = "Temp. example")]
+    {
+        let since2 = [since, ifmodsince, ymd_since].into_iter().flatten().max();
+        let until2 = [until, ymd_until].into_iter().flatten().min();
     }
 
-    // semantic check
-    if let Some(sm) = since_min {
-        if sm < chrono::DateTime::parse_from_rfc3339("1945-01-01T00:00:00+00:00").unwrap() {
-            return None;
-        }
-        if let Some(um) = until {
-            if sm >= um {
-                return None;
-            }
-        }
+    #[rustfmt::skip]
+    let since = match (since, ifmodsince, ymd_since) {
+        (Some(since),    Some(ifmodsince), Some(ymd_since) ) => Some(since.max(ifmodsince).max(ymd_since)),
+        (Some(since),    Some(ifmodsince), None                          ) => Some(since.max(ifmodsince)),
+        (Some(since),    None,                            Some(ymd_since)) => Some(since.max(ymd_since)),
+        (None,                          Some(ifmodsince), Some(ymd_since)) => Some(ifmodsince.max(ymd_since)),
+        (Some(since),    None,                            None                          ) => Some(since),
+        (None,                          Some(ifmodsince), None                          ) => Some(ifmodsince),
+        (None,                          None,                            Some(ymd_since)) => Some(ymd_since),  
+        (None,                          None,                            None                          ) => None,
+    };
+
+    #[rustfmt::skip]
+    let until = match (until, ymd_until) {
+        (Some(until), Some(ymd_until)) => Some(until.min(ymd_until)),
+        (Some(until), None                          ) => Some(until),
+        (None,                       Some(ymd_until)) => Some(ymd_until),
+        (None,                       None                          ) => None,
+    };
+
+    if since.is_some_and(|since| since.year() < 1945) {
+        return None;
     }
 
-    if let Some((ys, yu)) = ymd_date_range {
-        if since_min.is_some() && since_min.unwrap() > yu
-            || until_min.is_some() && until_min.unwrap() < ys
-        {
-            None
-        } else {
-            Some((since_min, until_min).into())
-        }
-    } else {
-        Some((since_min, until_min).into())
+    if since.is_some_and(|since| until.is_some_and(|until| since >= until)) {
+        return None;
     }
+
+    Some(DateRange { since, until })
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_applicable_date_range {
-    use super::find_applicable_date_range;
+    use super::{DateRange, find_applicable_date_range};
     use chrono::DateTime;
 
     #[test]
     fn test_date_range_none() {
         let result = find_applicable_date_range(None, None, None, None, None, None);
         assert!(
-            result.is_some()
-                && result.as_ref().unwrap().since.is_none()
-                && result.unwrap().until.is_none(),
+            matches!(
+                result,
+                Some(DateRange {
+                    since: None,
+                    until: None
+                })
+            ),
             "None dates should not fail but produce (None, None)"
         );
     }
     #[test]
     fn test_date_range_untilsince() {
         let since = DateTime::parse_from_rfc3339("1960-01-01T00:00:00+00:00")
-            .unwrap()
+            .expect("Failed to parse static datetime string")
             .to_utc();
         let until = DateTime::parse_from_rfc3339("1960-01-02T00:00:00+00:00")
-            .unwrap()
+            .expect("Failed to parse static datetime string")
             .to_utc();
         let result = find_applicable_date_range(None, None, None, Some(since), Some(until), None);
         assert!(
-            result.is_some()
-                && result.as_ref().unwrap().since == Some(since)
-                && result.unwrap().until == Some(until),
+            matches!(
+                result,
+                Some(DateRange {
+                    since: Some(inner_since),
+                    until: Some(inner_until),
+                })
+                if inner_since == since && inner_until == until
+            ),
             "Since and until should yield (since, until)"
-        )
+        );
     }
     #[test]
     fn test_date_range_ymd() {
-        let y = 2012u32;
-        let m = 5u32;
-        let d = 12u32;
+        let y = 2012;
+        let m = 5;
+        let d = 12;
 
         // ymd
-        let result = find_applicable_date_range(Some(y), Some(m), Some(d), None, None, None);
-        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc();
-        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
-            .unwrap()
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc();
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(
-            result.since == Some(expected_since) && result.until == Some(expected_until),
-            "ymd should start and end at the date range"
-        );
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y, m, d)
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .map(|datetime| datetime.and_utc());
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y, m, d)
+            .and_then(|date| date.and_hms_opt(23, 59, 59))
+            .map(|datetime| datetime.and_utc());
+        if let Some(result) =
+            find_applicable_date_range(Some(y), Some(m), Some(d), None, None, None)
+        {
+            assert!(
+                result.since == expected_since && result.until == expected_until,
+                "ymd should start and end at the date range"
+            );
+        } else {
+            panic!("Failed to get applicable date range based on year, month and day.");
+        }
         // ym
-        let result = find_applicable_date_range(Some(y), Some(m), None, None, None, None);
-        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, 1)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc();
-        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, m, 31)
-            .unwrap()
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc();
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(
-            result.since == Some(expected_since) && result.until == Some(expected_until),
-            "ymd should start and end at the date range"
-        );
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y, m, 1)
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .map(|datetime| datetime.and_utc());
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y, m, 31)
+            .and_then(|date| date.and_hms_opt(23, 59, 59))
+            .map(|datetime| datetime.and_utc());
+        if let Some(result) = find_applicable_date_range(Some(y), Some(m), None, None, None, None) {
+            assert!(
+                result.since == expected_since && result.until == expected_until,
+                "ymd should start and end at the date range"
+            );
+        } else {
+            panic!("Failed to get applicable date range based on year and month.")
+        }
         // y
-        let result = find_applicable_date_range(Some(y), None, None, None, None, None);
-        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc();
-        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, 12, 31)
-            .unwrap()
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc();
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(
-            result.since == Some(expected_since) && result.until == Some(expected_until),
-            "ymd should start and end at the date range"
-        );
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y, 1, 1)
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .map(|datetime| datetime.and_utc());
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y, 12, 31)
+            .and_then(|date| date.and_hms_opt(23, 59, 59))
+            .map(|datetime| datetime.and_utc());
+
+        if let Some(result) = find_applicable_date_range(Some(y), None, None, None, None, None) {
+            assert!(
+                result.since == expected_since && result.until == expected_until,
+                "ymd should start and end at the date range"
+            );
+        } else {
+            panic!("Failed to get applicable date range based on year.")
+        }
     }
 
     #[test]
     fn test_minmax() {
-        let y = 2012u32;
+        let y = 2012;
 
         let since = chrono::NaiveDate::from_ymd_opt(2000, 3, 1)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc();
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .map(|datetime| datetime.and_utc())
+            .expect("Failed to build `since` datetime.");
         let until = chrono::NaiveDate::from_ymd_opt(2012, 7, 31)
-            .unwrap()
-            .and_hms_opt(15, 59, 59)
-            .unwrap()
-            .and_utc();
-
+            .and_then(|date| date.and_hms_opt(15, 59, 59))
+            .map(|datetime| datetime.and_utc())
+            .expect("Failed to build `until` datetime.");
         let expected_since = chrono::NaiveDate::from_ymd_opt(2012, 1, 1)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc();
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .map(|datetime| datetime.and_utc());
         let expected_until = chrono::NaiveDate::from_ymd_opt(2012, 7, 31)
-            .unwrap()
-            .and_hms_opt(15, 59, 59)
-            .unwrap()
-            .and_utc();
-
-        let result =
-            find_applicable_date_range(Some(y), None, None, Some(since), Some(until), None);
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(result.since.is_some() && result.since.unwrap() == expected_since);
-        assert!(result.until.is_some() && result.until.unwrap() == expected_until);
+            .and_then(|date| date.and_hms_opt(15, 59, 59))
+            .map(|datetime| datetime.and_utc());
+        if let Some(result) =
+            find_applicable_date_range(Some(y), None, None, Some(since), Some(until), None)
+        {
+            assert!(result.since == expected_since);
+            assert!(result.until == expected_until);
+        } else {
+            panic!("Failed to get applicable date range based on combined parameters.")
+        }
     }
 }
 
-/// this is here to implement a PartialEq, Eq, Ord, ...
+/// this is here to implement a `PartialEq`, Eq, Ord, ...
 /// for hashing, since we need t
 #[derive(Debug, Clone)]
 pub(crate) struct WrappedAutor<'wrapped> {
@@ -584,18 +595,21 @@ impl Ord for WrappedAutor<'_> {
             .then(self.autor.person.cmp(&other.autor.person))
     }
 }
+
 /// This trait enables sorting all arrays contained in an object
 /// to be able to compare them afterwards without caring for ordering
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 pub(crate) trait SortArrays: Clone {
     fn sort_arrays(&mut self);
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 impl SortArrays for models::Dokument {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
-        let emp = "".to_owned();
+        let emp = String::new();
         if let Some(x) = self.schlagworte.as_mut() {
             x.sort();
         }
@@ -603,17 +617,18 @@ impl SortArrays for models::Dokument {
             x.sort_by(|a, b| {
                 (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
                     .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            })
+            });
         }
         self.autoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
     }
 }
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 impl SortArrays for models::Station {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
-        let emp = "".to_owned();
+        let emp = String::new();
         if let Some(x) = self.schlagworte.as_mut() {
             x.sort();
         }
@@ -621,7 +636,7 @@ impl SortArrays for models::Station {
             x.sort_by(|a, b| {
                 (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
                     .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            })
+            });
         }
         if let Some(x) = self.additional_links.as_mut() {
             x.sort();
@@ -668,31 +683,33 @@ impl SortArrays for models::Station {
                     models::StationDokumenteInner::Dokument(y),
                 ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
             });
-            x.iter_mut().for_each(|x| {
+            for x in x {
                 if let models::StationDokumenteInner::Dokument(x) = x {
                     x.sort_arrays();
                 }
-            });
+            }
         }
     }
 }
+
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 impl SortArrays for models::Vorgang {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
-        let emp = "".to_owned();
+        let emp = String::new();
         if let Some(x) = self.touched_by.as_mut() {
             x.sort_by(|a, b| {
                 (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
                     .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            })
+            });
         }
         if let Some(x) = self.lobbyregister.as_mut() {
             x.sort_by(|a, b| a.link.cmp(&b.link));
         }
         self.stationen
             .sort_by(|a, b| (a.zp_start, a.api_id).cmp(&(b.zp_start, b.api_id)));
-        self.stationen.iter_mut().for_each(|a| a.sort_arrays());
+        self.stationen.iter_mut().for_each(SortArrays::sort_arrays);
         self.initiatoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
         if let Some(x) = self.ids.as_mut() {
@@ -703,16 +720,18 @@ impl SortArrays for models::Vorgang {
         }
     }
 }
+
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 impl SortArrays for models::Sitzung {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
-        let emp = "".to_owned();
+        let emp = String::new();
         if let Some(x) = self.touched_by.as_mut() {
             x.sort_by(|a, b| {
                 (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
                     .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            })
+            });
         }
         if let Some(x) = self.experten.as_mut() {
             x.sort_by(|a, b| a.organisation.cmp(&b.organisation));
@@ -738,11 +757,11 @@ impl SortArrays for models::Sitzung {
                 ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
             });
 
-            x.iter_mut().for_each(|x| {
+            for x in x {
                 if let models::StationDokumenteInner::Dokument(x) = x {
                     x.sort_arrays();
                 }
-            });
+            }
         }
         self.tops.sort_by(|a, b| a.nummer.cmp(&b.nummer));
     }
@@ -756,28 +775,37 @@ pub(crate) trait RoundTimestamp: Clone {
     fn with_round_timestamps(&self) -> Self;
 }
 
+fn round_to_second(datetime: DateTime<Utc>) -> DateTime<Utc> {
+    if let Ok(datetime) = datetime.duration_round(const { chrono::Duration::seconds(1) }) {
+        datetime
+    } else {
+        let mut unix_time = datetime.timestamp();
+        if datetime.timestamp_subsec_millis() >= 500 {
+            unix_time = unix_time.saturating_add(1);
+        }
+        let Some(datetime) = DateTime::from_timestamp(unix_time, 0) else {
+            unreachable!("Only returns None, if `nsecs` is greater then 999,999,999.");
+        };
+        datetime
+    }
+}
+
 impl RoundTimestamp for models::Dokument {
     fn with_round_timestamps(&self) -> Self {
-        let precision = chrono::Duration::seconds(1);
-
         Self {
-            zp_referenz: self.zp_referenz.duration_round(precision).unwrap(),
-            zp_erstellt: self
-                .zp_erstellt
-                .map(|ts| ts.duration_round(precision).unwrap()),
-            zp_modifiziert: self.zp_modifiziert.duration_round(precision).unwrap(),
+            zp_referenz: round_to_second(self.zp_referenz),
+            zp_erstellt: self.zp_erstellt.map(round_to_second),
+            zp_modifiziert: round_to_second(self.zp_modifiziert),
             ..self.clone()
         }
     }
 }
+
 impl RoundTimestamp for models::Station {
     fn with_round_timestamps(&self) -> Self {
-        let precision = chrono::Duration::seconds(1);
         Self {
-            zp_modifiziert: self
-                .zp_modifiziert
-                .map(|ts| ts.duration_round(precision).unwrap()),
-            zp_start: self.zp_start.duration_round(precision).unwrap(),
+            zp_modifiziert: self.zp_modifiziert.map(round_to_second),
+            zp_start: round_to_second(self.zp_start),
             stellungnahmen: self.stellungnahmen.as_ref().map(|v| {
                 v.iter()
                     .map(|sn| match sn {
@@ -822,7 +850,6 @@ impl RoundTimestamp for models::Vorgang {
 }
 impl RoundTimestamp for models::Sitzung {
     fn with_round_timestamps(&self) -> Self {
-        let precision = chrono::Duration::seconds(1);
         Self {
             dokumente: self.dokumente.as_ref().map(|v| {
                 v.iter()
@@ -836,7 +863,7 @@ impl RoundTimestamp for models::Sitzung {
                     })
                     .collect()
             }),
-            termin: self.termin.duration_round(precision).unwrap(),
+            termin: round_to_second(self.termin),
             ..self.clone()
         }
     }

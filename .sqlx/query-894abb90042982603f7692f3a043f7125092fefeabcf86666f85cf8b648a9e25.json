@@ -1,60 +1,80 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM \n        api_keys WHERE id = $1",
+  "query": "SELECT * FROM scraper_touched_vorgang sts\n                            INNER JOIN api_keys ON api_keys.id = sts.collector_key\n                            WHERE vg_id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
+        "name": "time_stamp",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "vg_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "scraper",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "collector_key",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
         "name": "id",
         "type_info": "Int4"
       },
       {
-        "ordinal": 1,
+        "ordinal": 5,
         "name": "key_hash",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 2,
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 7,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 8,
         "name": "created_by",
         "type_info": "Int4"
       },
       {
-        "ordinal": 5,
+        "ordinal": 9,
         "name": "last_used",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 10,
         "name": "scope",
         "type_info": "Int4"
       },
       {
-        "ordinal": 7,
+        "ordinal": 11,
         "name": "rotated_for",
         "type_info": "Int4"
       },
       {
-        "ordinal": 8,
+        "ordinal": 12,
         "name": "salt",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 9,
+        "ordinal": 13,
         "name": "keytag",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 10,
+        "ordinal": 14,
         "name": "deleted_by",
         "type_info": "Int4"
       }
@@ -65,6 +85,10 @@
       ]
     },
     "nullable": [
+      false,
+      true,
+      false,
+      false,
       false,
       false,
       false,
@@ -78,5 +102,5 @@
       true
     ]
   },
-  "hash": "897e1d9e753101f643e22bd89958d8d19a5f67cbe7e2452ee6c687c0b06729d4"
+  "hash": "894abb90042982603f7692f3a043f7125092fefeabcf86666f85cf8b648a9e25"
 }

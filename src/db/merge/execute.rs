@@ -3,13 +3,13 @@ use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor};
 #[cfg(feature = "track-validation")]
 use crate::db::validate;
-use crate::error::DataValidationError;
+use crate::error::{DataValidationError, LTZFError};
 use crate::utils::notify::notify_ambiguous_match;
 
 /// Handles merging of two datasets.
 /// vorgang, station and dokument are mergeable, meaning their data is not atomic.
 /// Stellungnahme is handled like dokument with the rest being overridable data points
-/// API_ID or other uniquely identifying information is not overridden, but preserved.
+/// `API_ID` or other uniquely identifying information is not overridden, but preserved.
 /// array-like structures are merged by a modified union operation:
 /// for each element:
 ///     - if it is mergeable and one merge candidate found, merge
@@ -20,10 +20,12 @@ use openapi::models;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use super::candidates::*;
+use super::candidates::{
+    dokument_merge_candidates, station_merge_candidates, vorgang_merge_candidates,
+};
 
 /// basic data items are to be overridden by newer information.
-/// Excempt from this is the api_id, since this is a permanent document identifier.
+/// Excempt from this is the `api_id`, since this is a permanent document identifier.
 /// All
 pub async fn execute_merge_dokument(
     model: &models::Dokument,
@@ -197,7 +199,7 @@ pub async fn execute_merge_station(
         WHERE station.id = $1",
         db_id,
         gr_id,
-        srv.guard_ts(&model.typ, sapi, obj)?,
+        srv.guard_ts(&model.typ, sapi, obj),
         model.titel,
         model.zp_start,
         model.zp_modifiziert,
@@ -309,8 +311,10 @@ pub async fn execute_merge_vorgang(
         model.titel,
         model.kurztitel,
         model.verfassungsaendernd,
-        model.wahlperiode as i32,
-        srv.guard_ts(&model.typ, vapi, obj)?,
+        i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert wahlperiode as it exceeds i32::MAX: {e}")
+        })?,
+        srv.guard_ts(&model.typ, vapi, obj),
         db_id
     )
     .execute(&mut **tx)
@@ -346,7 +350,7 @@ pub async fn execute_merge_vorgang(
         .as_ref()
         .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
 
-    let identt_list = model
+    let identtyp_list = model
         .ids
         .as_ref()
         .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
@@ -359,7 +363,7 @@ pub async fn execute_merge_vorgang(
         ON CONFLICT DO NOTHING
         ",
         db_id,
-        identt_list.as_ref().map(|x| &x[..]),
+        identtyp_list.as_ref().map(|x| &x[..]),
         ident_list.as_ref().map(|x| &x[..])
     )
     .execute(&mut **tx)
@@ -372,6 +376,7 @@ pub async fn execute_merge_vorgang(
                     .await?;
             }
             MatchState::ExactlyOne(statid) => {
+                // can be ignored bc same as db_id
                 execute_merge_station(stat, statid, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::Ambiguous(matches) => {
@@ -528,13 +533,14 @@ pub async fn run_integration(
     Ok(())
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod scenariotest {
-    use crate::api::{RoundTimestamp, SortArrays};
+    use crate::api::SortArrays;
     use crate::utils::testing::{TestSetup, generate};
     use crate::{LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
     use openapi::models::{self, StationDokumenteInner};
-    use std::str::FromStr;
+
     use uuid::Uuid;
 
     struct Scenario {
@@ -558,7 +564,9 @@ mod scenariotest {
         }
         fn with_expectation(mut self, expectation: Vec<models::Vorgang>) -> Self {
             self.expected = expectation;
-            self.expected.iter_mut().for_each(|x| x.sort_arrays());
+            self.expected
+                .iter_mut()
+                .for_each(crate::api::SortArrays::sort_arrays);
             self.expected.sort_by(|a, b| a.api_id.cmp(&b.api_id));
             self
         }
@@ -567,11 +575,12 @@ mod scenariotest {
             self
         }
 
-        #[allow(unused)]
+        #[allow(unused, reason = "Future proofing for negative test.")]
         fn with_should_fail(mut self, shouldfail: bool) -> Self {
             self.shouldfail = shouldfail;
             self
         }
+
         async fn build(self) -> Scenario {
             Scenario {
                 context: self.context,
@@ -583,8 +592,7 @@ mod scenariotest {
         }
     }
     impl Scenario {
-        #[allow(clippy::new_ret_no_self)]
-        fn new(name: &'static str) -> ScenarioBuilder {
+        fn builder(name: &'static str) -> ScenarioBuilder {
             ScenarioBuilder {
                 context: vec![],
                 object: None,
@@ -604,7 +612,7 @@ mod scenariotest {
         }
 
         async fn build_context(&self, server: &LTZFServer) -> Result<()> {
-            for obj in self.context.iter() {
+            for obj in &self.context {
                 super::run_integration(obj, Uuid::nil(), 1, server).await?;
             }
             Ok(())
@@ -624,7 +632,11 @@ mod scenariotest {
                 lower_date: None,
                 upper_date: None,
             };
-            let mut tx = server.sqlx_db.begin().await.unwrap();
+            let mut tx = server
+                .sqlx_db
+                .begin()
+                .await
+                .expect("Failed to create database transaction.");
             let mut db_vorgangs = retrieve::vorgang_by_parameter(
                 paramock,
                 None,
@@ -632,52 +644,59 @@ mod scenariotest {
                 &mut tx,
             )
             .await
-            .unwrap();
-            db_vorgangs.1.iter_mut().for_each(|x| x.sort_arrays());
+            .expect("Failed to get valid server response when trying to get vorgang by id.");
+            db_vorgangs
+                .1
+                .iter_mut()
+                .for_each(crate::api::SortArrays::sort_arrays);
             db_vorgangs.1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
 
             tx.commit().await?;
             let equality = self
                 .expected
                 .iter()
-                .map(|x| x.with_round_timestamps())
+                .map(crate::api::RoundTimestamp::with_round_timestamps)
                 .collect::<Vec<_>>()
                 == db_vorgangs
                     .1
                     .iter()
-                    .map(|x| x.with_round_timestamps())
+                    .map(crate::api::RoundTimestamp::with_round_timestamps)
                     .collect::<Vec<_>>();
             if !equality && !self.shouldfail {
                 let exp_content = self
                     .expected
                     .iter()
-                    .map(|x| serde_json::to_string_pretty(x).unwrap())
+                    .map(|x| {
+                        serde_json::to_string_pretty(x)
+                            .expect("Failed to serialize Vorgang to JSON.")
+                    })
                     .collect::<Vec<_>>()
                     .join(",");
                 let dbv_content = db_vorgangs
                     .1
                     .iter()
-                    .map(|x| serde_json::to_string_pretty(x).unwrap())
+                    .map(|x| {
+                        serde_json::to_string_pretty(x)
+                            .expect("Failed to serialize Vorgang to JSON.")
+                    })
                     .collect::<Vec<_>>()
                     .join(",");
                 std::fs::write(
                     format!("tests/{}_dump.json", self.test_setup.name),
                     format!("{{\n\"expected\": [{exp_content}],\n\"actual\": [{dbv_content}]}}"),
                 )
-                .unwrap();
+                .expect("Failed to write to file.");
                 return Err(crate::error::LTZFError::Other {
-                    message: Box::new(format!(
+                    message: format!(
                         "Expected and Actual Contents were not equal. Dump: tests/{}_dump.json",
                         self.test_setup.name
-                    )),
+                    ),
                 });
             }
             if equality && self.shouldfail {
                 return Err(crate::error::LTZFError::Other {
-                    message: Box::new(
-                        "Expected Case to fail, but actual output was equal to expectation"
-                            .to_string(),
-                    ),
+                    message: "Expected Case to fail, but actual output was equal to expectation"
+                        .to_owned(),
                 });
             }
             Ok(())
@@ -688,15 +707,22 @@ mod scenariotest {
         for s in &mut vg.stationen {
             for d in &mut s.dokumente {
                 if let StationDokumenteInner::Dokument(dok) = d {
-                    *d = StationDokumenteInner::String(dok.api_id.unwrap().to_string());
+                    *d = StationDokumenteInner::String(
+                        dok.api_id
+                            .expect("Station Dokument is missing API id.")
+                            .to_string(),
+                    );
                 }
             }
-            if s.stellungnahmen.is_none() {
-                continue;
-            }
-            for d in s.stellungnahmen.as_mut().unwrap() {
-                if let StationDokumenteInner::Dokument(dok) = d {
-                    *d = StationDokumenteInner::String(dok.api_id.unwrap().to_string());
+            if let Some(stellungnahme) = &mut s.stellungnahmen {
+                for d in stellungnahme {
+                    if let StationDokumenteInner::Dokument(dok) = d {
+                        *d = StationDokumenteInner::String(
+                            dok.api_id
+                                .expect("Station Stellungnahme is missing API id.")
+                                .to_string(),
+                        );
+                    }
                 }
             }
         }
@@ -707,13 +733,15 @@ mod scenariotest {
     #[tokio::test]
     async fn test_idempotenz() {
         let vg = generate::default_vorgang();
-        let scenario = Scenario::new("idempotenz")
+        let scenario = Scenario::builder("idempotenz")
             .with_context(vec![vg.clone()])
             .with_test_object(vg.clone())
             .with_expectation(vec![vg_to_expected_shape(&vg)])
             .build()
             .await;
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!("Scenatio \"idempotenz\" failed with the following error: {e}")
+        }
     }
     #[tokio::test]
     async fn test_merge_matching_identifier() {
@@ -728,14 +756,17 @@ mod scenariotest {
         vg_exp.titel = vg2.titel.clone();
         vg_exp.stationen = vg.stationen.clone();
 
-        let scenario = Scenario::new("merge_matching_ids")
+        let scenario = Scenario::builder("merge_matching_ids")
             .with_context(vec![vg])
             .with_test_object(vg2)
             .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
             .build()
             .await;
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!("Scenatio \"merge_matching_ids\" failed with the following error: {e}")
+        }
     }
+    #[allow(unsafe_code, reason = "Repeated acces of manually set `Option`s.")]
     #[tokio::test]
     async fn test_link_ini_ids_merging() {
         let vg = generate::default_vorgang();
@@ -750,20 +781,20 @@ mod scenariotest {
         let mut vg_exp = vg.clone();
         vg_exp.links = Some(
             [].iter()
-                .chain(vg.links.as_ref().unwrap().iter())
-                .chain(vg_mod.links.as_ref().unwrap().iter())
+                .chain(unsafe { vg.links.as_ref().unwrap_unchecked() }.iter())
+                .chain(unsafe { vg_mod.links.as_ref().unwrap_unchecked() }.iter())
                 .cloned()
                 .collect(),
         ); //merged
-        vg_exp.links.as_mut().unwrap().sort();
+        unsafe { vg_exp.links.as_mut().unwrap_unchecked() }.sort();
         vg_exp.ids = Some(
             [].iter()
-                .chain(vg.ids.as_ref().unwrap().iter())
-                .chain(vg_mod.ids.as_ref().unwrap().iter())
+                .chain(unsafe { vg.ids.as_ref().unwrap_unchecked() }.iter())
+                .chain(unsafe { vg_mod.ids.as_ref().unwrap_unchecked() }.iter())
                 .cloned()
                 .collect(),
         ); //merged
-        vg_exp.ids.as_mut().unwrap().sort_by(|a, b| a.id.cmp(&b.id));
+        unsafe { vg_exp.ids.as_mut().unwrap_unchecked() }.sort_by(|a, b| a.id.cmp(&b.id));
         vg_exp.initiatoren = []
             .iter()
             .chain(vg.initiatoren.iter())
@@ -773,14 +804,16 @@ mod scenariotest {
         vg_exp
             .initiatoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
-        let scenario = Scenario::new("link_ini_ids_merging")
+        let scenario = Scenario::builder("link_ini_ids_merging")
             .with_context(vec![vg])
             .with_test_object(vg_mod)
             .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
             .build()
             .await;
 
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!("Scenatio \"link_ini_ids_merging\" failed with the following error: {e}")
+        }
     }
     #[tokio::test]
     async fn test_vorgang_weak_property_change_override() {
@@ -790,37 +823,40 @@ mod scenariotest {
         vg_mod.kurztitel = Some("Testkurztitel".to_string());
         vg_mod.wahlperiode = 20;
         vg_mod.verfassungsaendernd = true;
-        let scenario = Scenario::new("weak_prop_change_override")
+        let scenario = Scenario::builder("weak_prop_change_override")
             .with_context(vec![vg.clone()])
             .with_test_object(vg_mod.clone())
             .with_expectation(vec![vg_to_expected_shape(&vg_mod)])
             .build()
             .await;
 
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!("Scenatio \"weak_prop_change_override\" failed with the following error: {e}")
+        }
     }
     #[tokio::test]
     async fn test_not_merged_but_separate() {
         let vg = generate::default_vorgang();
         let mut vg2 = vg.clone();
-        vg2.api_id = Uuid::from_str("b18bee64-c0ff-eeee-ff1c-deadbeef3452").unwrap();
+        vg2.api_id = uuid::uuid!("b18bee64-c0ff-eeee-ff1c-deadbeef3452");
         vg2.ids = None;
 
         let mut stat = generate::default_station();
-        stat.api_id = Some(Uuid::from_str("b18bee64-c0ff-eeee-ff1c-deadbeef4732").unwrap());
+        stat.api_id = Some(uuid::uuid!("b18bee64-c0ff-eeee-ff1c-deadbeef4732"));
         stat.typ = models::Stationstyp::PreparlRegent;
         stat.dokumente = vec![];
         vg2.stationen = vec![stat];
 
         vg2.titel = "Ich Mag Moneten und deshalb ist das ein anderes Gesetz".to_string();
-        let scenario = Scenario::new("not_merged_but_separate")
+        let scenario = Scenario::builder("not_merged_but_separate")
             .with_context(vec![vg.clone()])
             .with_test_object(vg2.clone())
             .with_expectation(vec![vg_to_expected_shape(&vg), vg_to_expected_shape(&vg2)])
             .build()
             .await;
-
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!("Scenatio \"not_merged_but_separate\" failed with the following error: {e}")
+        }
     }
     #[tokio::test]
     async fn test_schlagwort_duplicate_elimination_and_formatting() {
@@ -834,14 +870,18 @@ mod scenariotest {
 
         let mut vg_exp = vg.clone();
         vg_exp.stationen[0].schlagworte = Some(vec!["ainz".to_string()]);
-        let scenario = Scenario::new("schlagwort_duplicate_elimination_and_formatting")
+        let scenario = Scenario::builder("schlagwort_duplicate_elimination_and_formatting")
             .with_context(vec![vg])
             .with_test_object(vg2)
             .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
             .build()
             .await;
 
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!(
+                "Scenatio \"schlagwort_duplicate_elimination_and_formatting\" failed with the following error: {e}"
+            )
+        }
     }
     #[tokio::test]
     async fn test_station_merging_on_weak_property_changes() {
@@ -854,24 +894,26 @@ mod scenariotest {
         vg2.stationen[0].trojanergefahr = Some(4u8);
         vg2.stationen[0].zp_start = chrono::Utc::now();
 
-        let scenario = Scenario::new("station_weak_props_change")
+        let scenario = Scenario::builder("station_weak_props_change")
             .with_context(vec![vg])
             .with_test_object(vg2.clone())
             .with_expectation(vec![vg_to_expected_shape(&vg2)])
             .build()
             .await;
 
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!("Scenatio \"station_weak_props_change\" failed with the following error: {e}")
+        }
     }
     #[tokio::test]
     async fn test_dokument_merging_on_weak_property_changes() {
         let modified_dokument = models::Dokument {
-            api_id: Some(Uuid::from_str("b18bee64-c0ff-ff0c-ff1c-deadbeef4732").unwrap()),
+            api_id: Some(uuid::uuid!("b18bee64-c0ff-ff0c-ff1c-deadbeef4732")),
             titel: "Anderer Titel".to_string(),
             ..generate::default_dokument()
         };
         let modified_stellungnahme = models::Dokument {
-            api_id: Some(Uuid::from_str("b18bee64-c0ff-ff1c-ff1c-deadbeef4732").unwrap()),
+            api_id: Some(uuid::uuid!("b18bee64-c0ff-ff1c-ff1c-deadbeef4732")),
             titel: "Anderer Titel für ne Stellungnahme".to_string(),
             ..generate::default_stellungnahme()
         };
@@ -903,13 +945,17 @@ mod scenariotest {
             }],
             ..generate::default_vorgang()
         };
-        let scenario = Scenario::new("dokument_merging_on_weak_property_changes")
+        let scenario = Scenario::builder("dokument_merging_on_weak_property_changes")
             .with_context(vec![generate::default_vorgang()])
             .with_test_object(modified_docs_vorgang)
             .with_expectation(vec![vg_to_expected_shape(&expected_vorgang)])
             .build()
             .await;
 
-        scenario.run().await.unwrap();
+        if let Err(e) = scenario.run().await {
+            panic!(
+                "Scenatio \"dokument_merging_on_weak_property_changes\" failed with the following error: {e}"
+            )
+        }
     }
 }

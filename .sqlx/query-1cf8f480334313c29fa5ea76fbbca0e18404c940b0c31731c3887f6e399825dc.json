@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT g.id FROM gremium g, parlament p WHERE\n    g.name = $1 AND \n    p.id = g.parl AND  p.value = $2\n    AND g.wp = $3",
+  "query": "SELECT g.id FROM gremium g, parlament p WHERE\n        g.name = $1 AND \n        p.id = g.parl AND  p.value = $2\n        AND g.wp = $3",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       false
     ]
   },
-  "hash": "7dbc415f90e90ba007220a52a851e34623008c90d40b57a9991561afef80ecb2"
+  "hash": "1cf8f480334313c29fa5ea76fbbca0e18404c940b0c31731c3887f6e399825dc"
 }

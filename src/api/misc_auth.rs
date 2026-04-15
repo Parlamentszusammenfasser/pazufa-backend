@@ -8,9 +8,12 @@ use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use headers::Host;
-use openapi::apis::data_administration_miscellaneous::*;
+use openapi::apis::data_administration_miscellaneous::{
+    AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
+    DokumentDeleteIdResponse, DokumentPutIdResponse, EnumDeleteResponse, EnumPutResponse,
+    GremienDeleteByParamResponse, GremienPutResponse,
+};
 use openapi::models;
-use sqlx::Row;
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
@@ -24,8 +27,8 @@ use super::RoundTimestamp;
 // thus this query tries to find these and delete entries that are to be the same after the whole transaction
 macro_rules! conflict_resolve_query(
     ($table_name:expr, $shorthand:expr, $ident_col:expr, $element_col:expr) => {
-        concat!(
-            "WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+        concat!("
+WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
 -- assumes
 -- (1) no circular replacements (to be detected in server code)
 -- (2) uniqueness of entries
@@ -76,7 +79,7 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$i
 #[async_trait]
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    /// AutorenDeleteByParam - DELETE /api/v2/autoren
+    /// `AutorenDeleteByParam` - DELETE /api/v2/autoren
     #[instrument(skip_all, fields(query=?query_params))]
     async fn autoren_delete_by_param(
         &self,
@@ -112,12 +115,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         let mut tx = self.sqlx_db.begin().await?;
         let n_deleted = sqlx::query!(
-            "
-        DELETE FROM autor a WHERE 
-        (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND
-        a.organisation = COALESCE($2, a.organisation) AND
-        (a.fachgebiet IS NULL OR a.fachgebiet = COALESCE($3, a.fachgebiet))
-        ",
+            "DELETE FROM autor a WHERE 
+            (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND
+            a.organisation = COALESCE($2, a.organisation) AND
+            (a.fachgebiet IS NULL OR a.fachgebiet = COALESCE($3, a.fachgebiet))",
             query_params.person,
             query_params.org,
             query_params.fach
@@ -137,7 +138,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 
-    /// GremienDeleteByParam - DELETE /api/v2/gremien
+    /// `GremienDeleteByParam` - DELETE /api/v2/gremien
     #[instrument(skip_all, fields(query=?query_params, claim=%claims.0))]
     async fn gremien_delete_by_param(
         &self,
@@ -172,12 +173,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         let mut tx = self.sqlx_db.begin().await?;
         let n_del = sqlx::query!(
-            "
-        DELETE FROM gremium g WHERE 
-        g.name = COALESCE($1, g.name) AND
-        g.wp = COALESCE($2, g.wp) AND
-        g.parl = COALESCE((SELECT id FROM parlament p WHERE p.value = $3), g.parl)
-        ",
+            "DELETE FROM gremium g WHERE 
+            g.name = COALESCE($1, g.name) AND
+            g.wp = COALESCE($2, g.wp) AND
+            g.parl = COALESCE((SELECT id FROM parlament p WHERE p.value = $3), g.parl)",
             query_params.gr,
             query_params.wp,
             query_params.p.as_ref().map(ToString::to_string)
@@ -197,7 +196,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 
-    /// EnumDelete - DELETE /api/v2/enumeration/{name}/{item}
+    /// `EnumDelete` - DELETE /api/v2/enumeration/{name}/{item}
     #[instrument(skip_all, fields(name=?path_params.name, claim=%claims.0))]
     async fn enum_delete(
         &self,
@@ -228,6 +227,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             ]
             .drain(..),
         );
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Sqlx does not support dynamic table names for compile time checks."
+        )]
         let n_del = sqlx::query(&format!(
             "DELETE FROM {} x WHERE x.value = $1",
             enum_tables[&path_params.name]
@@ -247,7 +250,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// AutorenPut - PUT /api/v2/autoren
+    /// `AutorenPut` - PUT /api/v2/autoren
     #[instrument(skip_all, fields(claim=%claims.0))]
     async fn autoren_put(
         &self,
@@ -360,30 +363,33 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         // for each replacing autor:
         // for each table referencing it: Update those tables with the new id
-        let mut replacement_tuples = vec![];
-        for entry in body.replacing.as_ref().unwrap() {
-            let (mut vperson, mut vorga) = (vec![], vec![]);
-            for value in &entry.values {
-                vperson.push(value.person.clone());
-                vorga.push(value.organisation.clone());
+        let mut rep_new: Vec<_> = vec![];
+        let mut rep_old: Vec<_> = vec![];
+        if let Some(replacing) = &body.replacing {
+            for entry in replacing {
+                let (mut vperson, mut vorga) = (vec![], vec![]);
+                for value in &entry.values {
+                    vperson.push(value.person.clone());
+                    vorga.push(value.organisation.clone());
+                }
+                let repl_with = new_ids[entry.replaced_by as usize];
+                let value_ids: Vec<_> = sqlx::query_scalar!(
+                    "SELECT a.id FROM
+                    UNNEST($1::text[], $2::text[]) as iv(ps, og)
+                    INNER JOIN autor a ON 
+                    (a.person IS NULL AND iv.ps IS NULL OR a.person=iv.ps) AND 
+                    a.organisation = iv.og",
+                    &vperson[..] as &[Option<String>],
+                    &vorga[..],
+                )
+                .fetch_all(&mut *tx)
+                .await?;
+                for gid in value_ids {
+                    rep_new.push(repl_with);
+                    rep_old.push(gid);
+                }
             }
-            let value_ids: Vec<_> = sqlx::query!(
-                "SELECT $3::int4 as repl_with, a.id as origin FROM
-                UNNEST($1::text[], $2::text[]) as iv(ps, og)
-                INNER JOIN autor a ON 
-                (a.person IS NULL AND iv.ps IS NULL OR a.person=iv.ps) AND 
-                a.organisation = iv.og",
-                &vperson[..] as &[Option<String>],
-                &vorga[..],
-                entry.replaced_by as i32
-            )
-            .map(|r| (new_ids[r.repl_with.unwrap() as usize], r.origin))
-            .fetch_all(&mut *tx)
-            .await?;
-            replacement_tuples.extend(value_ids);
         }
-        let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
-        let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
 
         // tables referencing authors:
         // table in question, column that references the author, query to delete conflicts _if_ the author is part of a unique identifier. can be empty if not applicable
@@ -432,6 +438,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         for (table, column, conflict_res_query) in tables {
             // first, delete potentially conflicting entries
             if let Some(conflict_res_query) = conflict_res_query {
+                #[allow(
+                    clippy::disallowed_methods,
+                    reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
+                )]
                 sqlx::query(conflict_res_query)
                     .bind(&rep_new[..])
                     .bind(&rep_old[..])
@@ -447,6 +457,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 WHERE {column} = ANY($2::int4[])
             "
             );
+            #[allow(
+                clippy::disallowed_methods,
+                reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
+            )]
             sqlx::query(&query)
                 .bind(&rep_new[..])
                 .bind(&rep_old[..])
@@ -471,7 +485,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// GremienPut - PUT /api/v2/gremien
+    /// `GremienPut` - PUT /api/v2/gremien
     #[instrument(skip_all, fields(claim=%claims.0))]
     async fn gremien_put(
         &self,
@@ -516,7 +530,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         for gr in &body.objects {
             names.push(gr.name.clone());
             pvalues.push(gr.parlament.to_string());
-            wps.push(gr.wahlperiode as i32);
+            wps.push(i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
+                message: format!("Failed to convert Wahlperiode {}: {e}", gr.wahlperiode),
+            })?);
             links.push(gr.link.clone());
         }
         if count_existing_gremien(&mut tx, &body.objects).await? == body.objects.len() {
@@ -548,7 +564,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         debug!("Request was valid");
         // insert all gremien, fetch their IDs
-        let new_ids = sqlx::query!("
+        let new_ids = sqlx::query_scalar!("
         INSERT INTO gremium(name, parl, wp, link) 
         
         SELECT nm, p.id, wp, ln FROM UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) AS iv(nm, pname, wp, ln)
@@ -559,7 +575,6 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         RETURNING gremium.id
         ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
-        .map(|r| r.id)
         .fetch_all(&mut *tx).await?;
 
         if body.replacing.is_none() {
@@ -577,28 +592,36 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // for each replacing gremium:
         // for each table referencing it: Update those tables with the new id
         let mut replacement_tuples = vec![];
-        for entry in body.replacing.as_ref().unwrap() {
-            let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
-            for value in &entry.values {
-                vnames.push(value.name.clone());
-                vwps.push(value.wahlperiode as i32);
-                vpvals.push(value.parlament.to_string());
+        if let Some(replacing) = &body.replacing {
+            for entry in replacing {
+                let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
+                for value in &entry.values {
+                    vnames.push(value.name.clone());
+                    vwps.push(
+                        i32::try_from(value.wahlperiode).map_err(|e| LTZFError::Other {
+                            message: format!(
+                                "Failed to convert Wahlperiode {}: {e}",
+                                value.wahlperiode
+                            ),
+                        })?,
+                    );
+                    vpvals.push(value.parlament.to_string());
+                }
+                let repl_with = new_ids[entry.replaced_by as usize];
+                let value_ids: Vec<i32> = sqlx::query_scalar!(
+                    "SELECT g.id FROM
+                    UNNEST($1::text[], $2::text[], $3::int4[]) as iv(nm, pv, wp)
+                    INNER JOIN parlament p ON p.value = iv.pv
+                    INNER JOIN gremium g ON 
+                    g.name=iv.nm AND g.parl = p.id AND g.wp=iv.wp",
+                    &vnames[..],
+                    &vpvals[..],
+                    &vwps[..],
+                )
+                .fetch_all(&mut *tx)
+                .await?;
+                replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
             }
-            let value_ids: Vec<_> = sqlx::query!(
-                "SELECT $4::int4 as repl_with, g.id as origin FROM
-                UNNEST($1::text[], $2::text[], $3::int4[]) as iv(nm, pv, wp)
-                INNER JOIN parlament p ON p.value = iv.pv
-                INNER JOIN gremium g ON 
-                g.name=iv.nm AND g.parl = p.id AND g.wp=iv.wp",
-                &vnames[..],
-                &vpvals[..],
-                &vwps[..],
-                new_ids[entry.replaced_by as usize] as i32
-            )
-            .map(|r| (r.repl_with.unwrap(), r.origin))
-            .fetch_all(&mut *tx)
-            .await?;
-            replacement_tuples.extend(value_ids);
         }
         let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
         let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
@@ -610,6 +633,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             // first, delete potentially conflicting entries
             // currently not used because both tables are not identifying
             if let Some(crq) = conflict_resolution_query {
+                #[allow(
+                    clippy::disallowed_methods,
+                    reason = "Sqlx does not support dynamic table names for compile time checks."
+                )]
                 sqlx::query(crq)
                     .bind(&rep_new[..])
                     .bind(&rep_old[..])
@@ -618,12 +645,15 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             }
 
             // then insert like this:
+            #[allow(
+                clippy::disallowed_methods,
+                reason = "Sqlx does not support dynamic table names for compile time checks."
+            )]
             sqlx::query(&format!(
-                "
-            WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-            UPDATE {table} 
-            SET {column} = (SELECT new FROM lookup WHERE old={column})
-            WHERE {column} = ANY($2::int4[])"
+                "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+                UPDATE {table} 
+                SET {column} = (SELECT new FROM lookup WHERE old={column})
+                WHERE {column} = ANY($2::int4[])"
             ))
             .bind(&rep_new[..])
             .bind(&rep_old[..])
@@ -648,7 +678,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// EnumPut - PUT /api/v2/enumeration/{name}
+    /// `EnumPut` - PUT /api/v2/enumeration/{name}
     #[instrument(skip_all, fields(name=%path_params.name, claim=%claims.0))]
     async fn enum_put(
         &self,
@@ -696,23 +726,30 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             .drain(..),
         );
 
-        let present = sqlx::query(&format!(
+        #[allow(clippy::disallowed_methods, reason = "Sqlx does not support dynamic table names for compile time checks.")]
+        let present: i64 = sqlx::query_scalar(&format!(
             "SELECT COUNT(1) as cnt FROM UNNEST($1::text[]) as item WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
             enum_tables[&path_params.name]
         )).bind(&body.objects[..])
-        .map(|r| r.get::<i64, _>(0) as usize)
         .fetch_one(&mut *tx).await?;
+        let present = usize::try_from(present).map_err(|e| LTZFError::Other {
+            message: format!("Error converting expected object count: {e}"),
+        })?;
 
         if present == body.objects.len() {
             // flatten the replacement objects and check for existence
             if let Some(repl) = &body.replacing {
                 let flattened: Vec<String> =
                     repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
-                let present = sqlx::query(&format!(
+
+                #[allow(
+                    clippy::disallowed_methods,
+                    reason = "Sqlx does not support dynamic table names for compile time checks."
+                )]
+                let present: i64 = sqlx::query_scalar(&format!(
                     "SELECT COUNT(1) FROM UNNEST($1::text[]) as item WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
                     enum_tables[&path_params.name]
                 )).bind(&flattened[..])
-                .map(|r| r.get::<i64, _>(0) as usize)
                 .fetch_one(&mut *tx).await?;
 
                 if present == 0 {
@@ -732,15 +769,18 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
 
         // insert all enum entries, fetch their IDs
-        let new_ids = sqlx::query(&format!(
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Sqlx does not support dynamic table names for compile time checks."
+        )]
+        let new_ids: Vec<i32> = sqlx::query_scalar(&format!(
             "INSERT INTO {} (value)
-                SELECT item FROM UNNEST($1::text[]) as item 
-                ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
-                RETURNING id",
+            SELECT item FROM UNNEST($1::text[]) as item 
+            ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
+            RETURNING id",
             enum_tables[&path_params.name]
         ))
         .bind(&body.objects[..])
-        .map(|r| r.get::<i32, _>(0))
         .fetch_all(&mut *tx)
         .await?;
 
@@ -761,24 +801,29 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // for each replacing gremium:
         // for each table referencing it: Update those tables with the new id
         let mut replacement_tuples = vec![];
-        for entry in body.replacing.as_ref().unwrap() {
-            // first, delete potentially conflicting entries
-            // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
+        if let Some(replacing) = &body.replacing {
+            for entry in replacing {
+                // first, delete potentially conflicting entries
+                // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
 
-            // then insert like this:
-            let vitems: Vec<String> = entry.values.clone();
-            let value_ids: Vec<_> = sqlx::query(&format!(
-                "SELECT $2::int4 as repl_with, x.id as origin FROM
-                UNNEST($1::text[]) as item
-                INNER JOIN {} x ON x.value = item",
-                enum_tables[&path_params.name]
-            ))
-            .bind(&vitems[..])
-            .bind(new_ids[entry.replaced_by as usize] as i32)
-            .map(|r| (r.get::<i32, _>(0), r.get::<i32, _>(1)))
-            .fetch_all(&mut *tx)
-            .await?;
-            replacement_tuples.extend(value_ids);
+                // then insert like this:
+                let vitems: Vec<String> = entry.values.clone();
+                let repl_with = new_ids[entry.replaced_by as usize];
+                #[allow(
+                    clippy::disallowed_methods,
+                    reason = "Sqlx does not support dynamic table names for compile time checks."
+                )]
+                let value_ids: Vec<i32> = sqlx::query_scalar(&format!(
+                    "SELECT x.id  FROM
+                    UNNEST($1::text[]) as item
+                    INNER JOIN {} x ON x.value = item",
+                    enum_tables[&path_params.name]
+                ))
+                .bind(&vitems[..])
+                .fetch_all(&mut *tx)
+                .await?;
+                replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
+            }
         }
         let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
         let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
@@ -859,24 +904,35 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         );
         for (table, column, conflict_resolution_query) in &enum_table_refs[&path_params.name] {
             if let Some(crq) = conflict_resolution_query {
+                #[allow(
+                    clippy::disallowed_methods,
+                    reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
+                )]
                 sqlx::query(crq)
                     .bind(&rep_new[..])
                     .bind(&rep_old[..])
                     .execute(&mut *tx)
                     .await?;
             }
+            #[allow(
+                clippy::disallowed_methods,
+                reason = "Sqlx does not support dynamic table names for compile time checks."
+            )]
             sqlx::query(&format!(
-                "
-            WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-            UPDATE {table} 
-            SET {column} = (SELECT new FROM lookup WHERE old={column})
-            WHERE {column} = ANY($2::int4[])"
+                "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+                UPDATE {table} 
+                SET {column} = (SELECT new FROM lookup WHERE old={column})
+                WHERE {column} = ANY($2::int4[])"
             ))
             .bind(&rep_new[..])
             .bind(&rep_old[..])
             .execute(&mut *tx)
             .await?;
         }
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Sqlx does not support dynamic table names for compile time checks."
+        )]
         sqlx::query(&format!(
             "DELETE FROM {} x WHERE x.id = ANY($1::int4[])",
             enum_tables[&path_params.name]
@@ -895,7 +951,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// DokumentDeleteId - DELETE /api/v2/dokument/{api_id}
+    /// `DokumentDeleteId` - DELETE /`api/v2/dokument/{api_id`}
     #[instrument(skip_all, fields(dok=%path_params.api_id, claim=%claims.0))]
     async fn dokument_delete_id(
         &self,
@@ -927,7 +983,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 
-    /// DokumentPutId - PUT /api/v2/dokument/{api_id}
+    /// `DokumentPutId` - PUT /`api/v2/dokument/{api_id`}
     #[instrument(skip_all, fields(dok=%path_params.api_id, claim=%claims.0))]
     async fn dokument_put_id(
         &self,
@@ -987,10 +1043,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_authorisierte_sonstige {
-    use std::str::FromStr;
-
     use crate::api::auth::APIScope;
     use crate::db::merge::execute::run_integration;
     use axum::http::Method;
@@ -1027,7 +1082,7 @@ mod test_authorisierte_sonstige {
                 &vorgang,
             )
             .await
-            .unwrap();
+            .expect("Failed to create Vorgang.");
         assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
     }
     async fn fetch_all_authors(server: &LTZFServer) -> Vec<models::Autor> {
@@ -1045,10 +1100,10 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get Autoren.");
         match autoren {
             openapi::apis::miscellaneous_unauthorisiert::AutorenGetResponse::Status200_Success { body, ..} => body,
-            _ => vec![]
+            openapi::apis::miscellaneous_unauthorisiert::AutorenGetResponse::Status204_NoContent { .. } => vec![],
         }
     }
     async fn fetch_all_gremien(server: &LTZFServer) -> Vec<models::Gremium> {
@@ -1066,10 +1121,10 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get Gremien.");
         match gremien {
             GremienGetResponse::Status200_Success { body, .. } => body,
-            _ => vec![],
+            GremienGetResponse::Status204_NoContent { .. } => vec![],
         }
     }
     async fn fetch_all_enumvars(server: &LTZFServer, name: EnumerationNames) -> Vec<String> {
@@ -1086,7 +1141,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get Enum.");
         match entries {
             openapi::apis::miscellaneous_unauthorisiert::EnumGetResponse::Status200_Success {
                 body,
@@ -1112,7 +1167,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Autor");
         assert_eq!(
             r,
             AutorenDeleteByParamResponse::Status403_Forbidden {
@@ -1137,7 +1192,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Autor");
         assert_eq!(
             r,
             AutorenDeleteByParamResponse::Status403_Forbidden {
@@ -1166,7 +1221,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Autor.");
         assert_eq!(
             r,
             AutorenDeleteByParamResponse::Status204_NoContent {
@@ -1195,7 +1250,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Autor.");
         assert_eq!(
             r,
             AutorenDeleteByParamResponse::Status204_NoContent {
@@ -1240,7 +1295,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Enum.");
         assert_eq!(
             r,
             EnumDeleteResponse::Status403_Forbidden {
@@ -1259,7 +1314,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to delete Enum.");
         assert!(matches!(r, EnumDeleteResponse::Status204_NoContent { .. }));
 
         scenario.teardown().await;
@@ -1282,7 +1337,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Gremium.");
         assert!(matches!(
             r,
             GremienDeleteByParamResponse::Status403_Forbidden { .. }
@@ -1294,33 +1349,19 @@ mod test_authorisierte_sonstige {
     #[tokio::test]
     async fn test_gremien_delete() {
         let scenario = TestSetup::new("test_gremien_delete").await;
-
         let mut vorgang = generate::default_vorgang();
         let std_station = generate::default_station();
-        vorgang.stationen = vec![
-            models::Station {
-                api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-aaaa-deadbeef106e").unwrap()),
-                gremium: models::Gremium {
-                    link: None,
-                    name: "abc123".to_string(),
-                    parlament: models::Parlament::Br,
-                    wahlperiode: 17,
-                },
-                typ: models::Stationstyp::ParlInitiativ,
-                ..std_station.clone()
+        vorgang.stationen.push(models::Station {
+            api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-bbbb-deadbeef106e")),
+            gremium: models::Gremium {
+                link: None,
+                name: "rrrrrr".to_string(),
+                parlament: models::Parlament::Bt,
+                wahlperiode: 12,
             },
-            models::Station {
-                api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-bbbb-deadbeef106e").unwrap()),
-                gremium: models::Gremium {
-                    link: None,
-                    name: "rrrrrr".to_string(),
-                    parlament: models::Parlament::Bt,
-                    wahlperiode: 12,
-                },
-                typ: models::Stationstyp::PreparlRegent,
-                ..std_station.clone()
-            },
-        ];
+            typ: models::Stationstyp::ParlVollvlsgn,
+            ..std_station.clone()
+        });
 
         let rsp = scenario
             .server
@@ -1335,7 +1376,7 @@ mod test_authorisierte_sonstige {
                 &vorgang,
             )
             .await
-            .unwrap();
+            .expect("Failed to create Vorgang.");
         assert!(matches!(
             rsp,
             openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }
@@ -1350,13 +1391,13 @@ mod test_authorisierte_sonstige {
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::GremienDeleteByParamQueryParams {
-                    gr: Some("abc123".to_string()),
+                    gr: Some("rrrrrr".to_string()),
                     p: None,
                     wp: None,
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Gremium.");
         assert!(matches!(
             r,
             GremienDeleteByParamResponse::Status204_NoContent { .. }
@@ -1365,9 +1406,7 @@ mod test_authorisierte_sonstige {
         let gremien_after_delete = fetch_all_gremien(&scenario.server).await;
         assert!(
             gremien.len() == 2 && gremien_after_delete.len() == 1,
-            "vorher {:?} nachher {:?}",
-            gremien,
-            gremien_after_delete
+            "vorher {gremien:?} nachher {gremien_after_delete:?}"
         );
         let gremien = gremien_after_delete;
 
@@ -1385,14 +1424,34 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete Gremium.");
         assert!(matches!(
             r,
             GremienDeleteByParamResponse::Status204_NoContent { .. }
         ));
         let gremien_after_delete = fetch_all_gremien(&scenario.server).await;
         assert!(gremien.len() == 1 && gremien_after_delete.is_empty());
-
+        let r = scenario
+            .server
+            .gremien_delete_by_param(
+                &Method::GET,
+                &localhost(),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::GremienDeleteByParamQueryParams {
+                    gr: None,
+                    p: None,
+                    wp: Some(20),
+                },
+            )
+            .await
+            .expect("Failed to delete Gremium.");
+        assert!(matches!(
+            r,
+            GremienDeleteByParamResponse::Status204_NoContent { .. }
+        ));
+        let new_gremien = fetch_all_gremien(&scenario.server).await;
+        assert!(gremien.len() > new_gremien.len());
         scenario.teardown().await;
     }
 
@@ -1429,7 +1488,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create Gremium.");
         assert!(matches!(
             response,
             GremienPutResponse::Status403_Forbidden { .. }
@@ -1450,7 +1509,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Gremium.");
         assert!(matches!(
             response,
             GremienPutResponse::Status201_Created { .. }
@@ -1469,7 +1528,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Gremium.");
         assert!(matches!(
             response,
             GremienPutResponse::Status304_NotModified { .. }
@@ -1496,7 +1555,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Gremium.");
         assert!(matches!(
             response,
             GremienPutResponse::Status201_Created { .. }
@@ -1522,7 +1581,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Gremium.");
         assert!(matches!(
             response,
             GremienPutResponse::Status400_BadRequest { .. }
@@ -1566,7 +1625,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create Autor.");
         assert!(matches!(
             response,
             AutorenPutResponse::Status403_Forbidden { .. }
@@ -1587,7 +1646,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Autor.");
         assert!(matches!(
             response,
             AutorenPutResponse::Status201_Created { .. }
@@ -1606,7 +1665,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Autor.");
         assert!(matches!(
             response,
             AutorenPutResponse::Status304_NotModified { .. }
@@ -1633,7 +1692,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Autor.");
         assert!(matches!(
             response,
             AutorenPutResponse::Status201_Created { .. }
@@ -1654,7 +1713,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Autor.");
         assert!(matches!(
             response,
             AutorenPutResponse::Status400_BadRequest { .. }
@@ -1674,7 +1733,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Autor.");
         assert!(matches!(
             response,
             AutorenPutResponse::Status400_BadRequest { .. }
@@ -1691,14 +1750,13 @@ mod test_authorisierte_sonstige {
         mod_stln.autoren.push(mod_autor.clone());
 
         let mut modified_default = generate::default_vorgang();
-        modified_default.stationen[0]
-            .stellungnahmen
-            .as_mut()
-            .unwrap()[0] = StationDokumenteInner::Dokument(mod_stln);
+        if let Some(dokument) = &mut modified_default.stationen[0].stellungnahmen {
+            dokument[0] = StationDokumenteInner::Dokument(mod_stln);
+        }
 
         run_integration(&modified_default, uuid::Uuid::nil(), 1, &scenario.server)
             .await
-            .unwrap(); // insert one that can be merged
+            .expect("Integration failed."); // insert one that can be merged
         let all_authors = fetch_all_authors(&scenario.server).await;
         assert!(all_authors.contains(&mod_autor));
 
@@ -1713,7 +1771,7 @@ mod test_authorisierte_sonstige {
             },
         )
         .await
-        .unwrap();
+        .expect("Failed to create Autor.");
         assert!(
             matches!(&response, AutorenPutResponse::Status201_Created { .. }),
             "{response:?}"
@@ -1763,7 +1821,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create Enum.");
         assert!(matches!(
             response,
             EnumPutResponse::Status403_Forbidden { .. }
@@ -1800,7 +1858,7 @@ mod test_authorisierte_sonstige {
                 "haltestelle".to_string(),
             ),
         ];
-        for (tp, new_entry, other_new_entry) in testcases.iter() {
+        for (tp, new_entry, other_new_entry) in &testcases {
             let entries = fetch_all_enumvars(&scenario.server, *tp).await;
             let response = ep_with(
                 &scenario.server,
@@ -1811,7 +1869,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create Enum.");
             assert!(matches!(
                 response,
                 EnumPutResponse::Status201_Created { .. }
@@ -1831,7 +1889,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create Enum.");
             assert!(matches!(
                 response,
                 EnumPutResponse::Status304_NotModified { .. }
@@ -1879,7 +1937,7 @@ mod test_authorisierte_sonstige {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create Enum.");
             assert!(matches!(
                 response,
                 EnumPutResponse::Status400_BadRequest { .. }

@@ -1,112 +1,114 @@
+#![allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "Database setup and taredown requires use of `sqlx::query` as those cannot be statically verified."
+)]
 use sha256::digest;
 use std::sync::LazyLock;
 
 use crate::utils::tracing::Logging;
-use crate::{Configuration, LTZFServer, Result};
+use crate::{Configuration, LTZFServer};
 
 static MASTER_URL: LazyLock<String> = LazyLock::new(|| {
     dotenv::dotenv().ok();
-    std::env::var("DATABASE_URL").unwrap()
+    std::env::var("DATABASE_URL").expect("Cannot run test without the DATABASE_URL environment variable set. The use of .env files is supported.")
 });
 
 pub(crate) struct TestSetup {
     pub(crate) name: &'static str,
     pub(crate) server: LTZFServer,
+    create_pool: sqlx::PgPool,
 }
 impl TestSetup {
-    pub(crate) async fn new(name: &'static str) -> Self {
-        return Self {
-            name,
-            server: setup_server(name).await.unwrap(),
-        };
-    }
-    pub(crate) async fn teardown(&self) {
-        cleanup_server(self.name).await.unwrap();
-    }
-}
-async fn setup_server(dbname: &str) -> Result<LTZFServer> {
-    let create_pool = sqlx::PgPool::connect(&MASTER_URL).await.unwrap();
-    let user: String = sqlx::query_scalar::<_, String>("SELECT CURRENT_ROLE;")
-        .fetch_one(&create_pool)
-        .await?;
-    let testuser = format!("test_{user}");
-    sqlx::query(&format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
-        .execute(&create_pool)
-        .await?;
-    let _ = sqlx::query(&format!("CREATE USER \"{testuser}\" with PASSWORD 'test';"))
-        .execute(&create_pool)
-        .await;
-    sqlx::query(&format!("CREATE DATABASE {dbname} WITH OWNER '{testuser}'"))
-        .execute(&create_pool)
-        .await?;
+    pub(crate) async fn new(dbname: &'static str) -> Self {
+        let create_pool = sqlx::PgPool::connect(&MASTER_URL)
+            .await
+            .expect("Failed to establish connection to database server.");
+        let user: String = sqlx::query_scalar::<_, String>("SELECT CURRENT_ROLE;")
+            .fetch_one(&create_pool)
+            .await
+            .expect("Failed to get current user.");
+        let testuser = format!("test_{user}");
+        sqlx::query(&format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
+            .execute(&create_pool)
+            .await
+            .expect("Failed to drop existing database.");
+        let _ = sqlx::query(&format!("CREATE USER \"{testuser}\" with PASSWORD 'test';"))
+            .execute(&create_pool)
+            .await;
+        sqlx::query(&format!("CREATE DATABASE {dbname} WITH OWNER '{testuser}'"))
+            .execute(&create_pool)
+            .await
+            .expect("Failed to create test database.");
 
-    let new_pool = match (MASTER_URL.rfind("/"), MASTER_URL.rfind("@")) {
-        (Some(slash_pos), Some(at_pos)) => format!(
-            "postgres://{testuser}:test@{}/{dbname}",
-            &MASTER_URL[at_pos + 1..slash_pos]
-        ),
-        (Some(slash_pos), None) => {
-            let double_slash_pos = MASTER_URL.find("//").unwrap();
-            format!(
+        let new_pool = match (MASTER_URL.rfind('/'), MASTER_URL.rfind('@')) {
+            (Some(slash_pos), Some(at_pos)) => format!(
                 "postgres://{testuser}:test@{}/{dbname}",
-                &MASTER_URL[double_slash_pos + 2..slash_pos]
-            )
-        }
-        (None, _) => unreachable!(),
-    };
+                &MASTER_URL[at_pos.saturating_add(1)..slash_pos]
+            ),
+            (Some(slash_pos), None) => {
+                let double_slash_pos = MASTER_URL
+                    .find("//")
+                    .expect("Did not find \"//\" in DATABASE_URL. Invalid URL.");
+                format!(
+                    "postgres://{testuser}:test@{}/{dbname}",
+                    &MASTER_URL[double_slash_pos.saturating_add(2)..slash_pos]
+                )
+            }
+            (None, _) => unreachable!(),
+        };
 
-    let pool = sqlx::PgPool::connect(&new_pool).await.unwrap();
-    sqlx::migrate!().run(&pool).await?;
-    let hash = digest("total-nutzloser-wert");
-    sqlx::query!(
+        let pool = sqlx::PgPool::connect(&new_pool)
+            .await
+            .expect("Failed to establish connection to database server.");
+        sqlx::migrate!()
+            .run(&pool)
+            .await
+            .expect("Failed to run migrations.");
+        let hash = digest("total-nutzloser-wert");
+        sqlx::query!(
             "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
             VALUES
             ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
             ON CONFLICT DO NOTHING;", hash, "salziger-salzkeks", "total-nutzlos")
-        .execute(&pool).await?;
-    let logging = Logging::new("testing_error.log".into(), None);
-    Ok(LTZFServer::new(
-        pool,
-        Configuration {
-            per_object_scraper_log_size: 5,
-            track_path: "tracks.toml".to_owned(),
-            ..Default::default()
-        },
-        None,
-        logging,
-    ))
+        .execute(&pool).await.expect("Failed to create test API keys.");
+        let logging = Logging::new("testing_error.log".into(), None);
+
+        Self {
+            name: dbname,
+            create_pool,
+            server: LTZFServer::new(
+                pool,
+                Configuration {
+                    per_object_scraper_log_size: 5,
+                    track_path: "tracks.toml".to_owned(),
+                    ..Default::default()
+                },
+                None,
+                logging,
+            ),
+        }
+    }
+    pub(crate) async fn teardown(&self) {
+        sqlx::query(&format!("DROP DATABASE {} WITH (FORCE);", self.name))
+            .execute(&self.create_pool)
+            .await
+            .expect("Failed to drop test database.");
+        let _ = std::fs::remove_file("testing_error.log");
+    }
 }
 
-async fn cleanup_server(dbname: &str) -> Result<()> {
-    let create_pool = sqlx::PgPool::connect(&MASTER_URL).await.unwrap();
-    sqlx::query(&format!("DROP DATABASE {dbname} WITH (FORCE);"))
-        .execute(&create_pool)
-        .await?;
-    let _ = std::fs::remove_file("testing_error.log");
-
-    Ok(())
-}
-
-#[allow(unused)]
 pub(crate) mod generate {
-    use std::str::FromStr;
 
-    use crate::LTZFServer;
-    use crate::Result;
     use openapi::models;
-    use sha256::digest;
-    use uuid::Uuid;
 
     pub(crate) mod random {
-        use chrono::DateTime;
-        use chrono::Utc;
+
         use openapi::models;
+        use rand::Rng;
+        use rand::SeedableRng;
         use rand::rngs::StdRng;
-        use rand::{Rng, SeedableRng};
         use sha256::digest;
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        use uuid::Uuid;
 
         // Helper function to generate random strings
         pub(crate) fn random_string(
@@ -137,19 +139,22 @@ pub(crate) mod generate {
 
         // Helper function to generate random dates
         pub(crate) fn random_date(rng: &mut StdRng) -> chrono::DateTime<chrono::Utc> {
-            let year = rng.random_range(2020..=2030);
-            let month = rng.random_range(1..=12);
-            let day = rng.random_range(1..=28);
-            let hour = rng.random_range(0..=23);
-            let minute = rng.random_range(0..=59);
-            let second = rng.random_range(0..=59);
+            loop {
+                if let Some(dt) = {
+                    let year = rng.random_range(2020..=2030);
+                    let month = rng.random_range(1..=12);
+                    let day = rng.random_range(1..=31);
+                    let hour = rng.random_range(0..=23);
+                    let minute = rng.random_range(0..=59);
+                    let second = rng.random_range(0..=59);
 
-            chrono::DateTime::parse_from_rfc3339(&format!(
-                "{}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
-                year, month, day, hour, minute, second
-            ))
-            .unwrap()
-            .to_utc()
+                    chrono::NaiveDate::from_ymd_opt(year, month, day)
+                        .and_then(|date| date.and_hms_opt(hour, minute, second))
+                        .map(|dt| dt.and_utc())
+                } {
+                    return dt;
+                }
+            }
         }
 
         // Helper function to generate random authors
@@ -653,7 +658,9 @@ pub(crate) mod generate {
             let mut rng = StdRng::seed_from_u64(seed);
             random_station(&mut rng)
         }
+        #[cfg(feature = "track-validation")]
         use std::collections::BTreeMap;
+        #[cfg(feature = "track-validation")]
         pub(crate) fn vorgang_with_stations(
             seed: u64,
             t: models::Vorgangstyp,
@@ -668,9 +675,15 @@ pub(crate) mod generate {
                 stationen: stypes
                     .chars()
                     .map(|c| models::Station {
-                        typ: *map.iter().find(|(k, v)| *v == &c).unwrap().0,
+                        typ: *map
+                            .iter()
+                            .find(|(_, v)| *v == &c)
+                            .expect("expected to find station type in map")
+                            .0,
                         gremium: vorgang.stationen[0].gremium.clone(),
-                        zp_start: dates[0].checked_add_days(chrono::Days::new(14)).unwrap(),
+                        zp_start: dates[0]
+                            .checked_add_days(chrono::Days::new(14))
+                            .expect("adding days failed"),
                         ..random_station(&mut rng)
                     })
                     .collect(),
@@ -686,43 +699,26 @@ pub(crate) mod generate {
             random_dokument(&mut rng)
         }
         pub(crate) fn sitzung(seed: u64) -> models::Sitzung {
+            use rand::SeedableRng;
             use rand::rngs::StdRng;
-            use rand::{Rng, SeedableRng};
             let mut rng = StdRng::seed_from_u64(seed);
             random_sitzung(&mut rng)
         }
     }
 
-    pub(crate) fn alternate_station() -> models::Station {
-        let stat = default_station();
-        models::Station {
-            api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeefaeea").unwrap()),
-            typ: models::Stationstyp::ParlAblehnung,
-            dokumente: vec![],
-            zp_start: chrono::DateTime::parse_from_rfc3339("1951-01-01T22:01:02+00:00")
-                .unwrap()
-                .to_utc(),
-            zp_modifiziert: Some(
-                chrono::DateTime::parse_from_rfc3339("1951-01-02T22:01:02+00:00")
-                    .unwrap()
-                    .to_utc(),
-            ),
-            ..stat
-        }
-    }
     pub(crate) fn default_station() -> models::Station {
         models::Station {
-            api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeefeeee").unwrap()),
+            api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeefeeee")),
             typ: models::Stationstyp::ParlInitiativ,
             link: Some("https://an.example.com/leckmichfett".to_string()),
             gremium_federf: Some(false),
             titel: Some("rattlesnakes!".to_string()),
             zp_start: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
-                .unwrap()
+                .expect("Failed to parse static datetime. Test broken.")
                 .to_utc(),
             zp_modifiziert: Some(
                 chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
-                    .unwrap()
+                    .expect("Failed to parse static datetime. Test broken.")
                     .to_utc(),
             ),
             trojanergefahr: Some(2u8),
@@ -748,7 +744,7 @@ pub(crate) mod generate {
     }
     pub(crate) fn default_dokument() -> models::Dokument {
         models::Dokument{
-                api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef3333").unwrap()),
+                api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef3333")),
                 autoren: vec![default_autor_person()],
                 hash: "f98d9d6f136109780d69f6".to_string(),
                 drucksnr: Some("20/441".to_string()),
@@ -763,15 +759,21 @@ pub(crate) mod generate {
                 vorwort: Some("Vorwort".to_string()),
                 zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
                 schlagworte: Some(vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()]),
-                zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc()),
-                zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
-                zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
+                zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .expect("Failed to parse static datetime. Test broken.")
+                    .to_utc()),
+                zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .expect("Failed to parse static datetime. Test broken.")
+                    .to_utc(),
+                zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .expect("Failed to parse static datetime. Test broken.")
+                    .to_utc(),
                 touched_by: None,
             }
     }
     pub(crate) fn default_stellungnahme() -> models::Dokument {
         models::Dokument{
-                api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef7777").unwrap()),
+                api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef7777")),
                 autoren: vec![default_autor_person()],
                 hash: "f98d9d6f13635463450d69f6".to_string(),
                 drucksnr: None,
@@ -786,9 +788,15 @@ pub(crate) mod generate {
                 vorwort: Some("Stelluingsnahmenvorwort das völlig verschieden von dem Hauptdokument ist".to_string()),
                 zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
                 schlagworte: Some(vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()]),
-                zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc()),
-                zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
-                zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
+                zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .expect("Failed to parse static datetime. Test broken.")
+                    .to_utc()),
+                zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .expect("Failed to parse static datetime. Test broken.")
+                    .to_utc(),
+                zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .expect("Failed to parse static datetime. Test broken.")
+                    .to_utc(),
                 touched_by: None,
             }
     }
@@ -828,11 +836,11 @@ pub(crate) mod generate {
     }
     pub(crate) fn default_sitzung() -> models::Sitzung {
         models::Sitzung {
-            api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef9999").unwrap()),
+            api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef9999")),
             touched_by: None,
             titel: Some("Klogespräche und -lektüre im 22. Jhd.".to_string()),
             termin: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
-                .unwrap()
+                .expect("Failed to parse static datetime. Test broken.")
                 .to_utc(),
             gremium: default_gremium(),
             nummer: 42,
@@ -859,7 +867,7 @@ pub(crate) mod generate {
         let mut at = vec![default_autor_person(), default_autor_institution()];
         at.sort_by(|a, b| a.organisation.cmp(&b.organisation));
         models::Vorgang {
-            api_id: Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef106e").unwrap(),
+            api_id: uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef106e"),
             titel: "Testtitel".to_string(),
             kurztitel: Some("Kurzer Testtitel".to_string()),
             stationen: vec![default_station()],

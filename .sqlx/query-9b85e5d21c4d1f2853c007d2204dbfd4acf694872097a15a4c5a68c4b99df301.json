@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(DISTINCT(c_id)) as \"cnt!\"\n        FROM track_class tc, parlament p\n        WHERE \n        p_id = p.id AND\n        EXISTS (SELECT 1 FROM UNNEST($1::text[]) as in_parls(ip) WHERE ip = p.value)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cnt!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9b85e5d21c4d1f2853c007d2204dbfd4acf694872097a15a4c5a68c4b99df301"
+}

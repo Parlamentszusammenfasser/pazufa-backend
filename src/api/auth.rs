@@ -8,9 +8,11 @@ use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use headers::Host;
 use openapi::apis::ApiKeyAuthHeader;
-use openapi::apis::authentifizierung::*;
+use openapi::apis::authentifizierung::{AuthRotateResponse, AuthStatusResponse, Authentifizierung};
 use openapi::apis::authentifizierung_keyadder_schnittstellen::AuthentifizierungKeyadderSchnittstellen;
-use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
+use openapi::apis::authentifizierung_keyadder_schnittstellen::{
+    AuthDeleteResponse, AuthListingKeytagResponse, AuthListingResponse, AuthPostResponse,
+};
 use openapi::models::RotationResponse;
 use openapi::models::{self, AuthListingKeytag200Response};
 use tracing::{Instrument, debug, error, info, instrument, warn};
@@ -57,16 +59,17 @@ async fn internal_extract_claims(
     headers: &axum::http::header::HeaderMap,
     key: &str,
 ) -> Result<crate::api::Claims> {
-    let key = headers.get(key);
-    if key.is_none() {
-        error!("Key was None, expected to find it in the headers");
-        return Err(LTZFError::Validation {
-            source: Box::new(crate::error::DataValidationError::MissingField {
-                field: "X-API-Key".to_string(),
-            }),
-        });
-    }
-    let key = key.unwrap().to_str()?;
+    let key = headers
+        .get(key)
+        .ok_or_else(|| {
+            error!("Key was None, expected to find it in the headers");
+            LTZFError::Validation {
+                source: Box::new(crate::error::DataValidationError::MissingField {
+                    field: "X-API-Key".to_string(),
+                }),
+            }
+        })?
+        .to_str()?;
     let tag = crate::utils::auth::keytag_of(key);
     debug!("Authenticating Key: `{}`", tag);
 
@@ -133,7 +136,7 @@ async fn internal_extract_claims(
                 }),
             })
         } else {
-            let scope = (APIScope::try_from(scope.as_str()).unwrap(), id);
+            let scope = (APIScope::try_from(scope.as_str())?, id);
             sqlx::query!(
                 "UPDATE api_keys SET last_used = $1 WHERE id = $2",
                 chrono::Utc::now(),
@@ -200,11 +203,16 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             });
         }
         let mut tx = self.sqlx_db.begin().await?;
-        let total_count = sqlx::query!("SELECT COUNT(1) AS total_count FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW()")
-        .map(|r| r.total_count)
-        .fetch_one(&mut *tx).await?.unwrap();
+        let total_count = sqlx::query_scalar!(
+            "SELECT COUNT(1) FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW()"
+        )
+        .fetch_one(&mut *tx)
+        .await?
+        .unwrap_or_default();
         let prp = PaginationResponsePart::new(
-            total_count as i32,
+            i32::try_from(total_count).map_err(|e| LTZFError::Other {
+                message: format!("Error during integer conversion: {e}"),
+            })?,
             query_params.page,
             query_params.per_page,
         );
@@ -281,31 +289,40 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         let vorgaenge = as_option(
             dings
                 .iter()
-                .filter(|r| r.disc == Some(1))
-                .map(|x| x.api_id.unwrap().to_string())
+                .filter_map(|record| match (record.disc, record.api_id) {
+                    (Some(1), Some(api_id)) => Some(api_id.to_string()),
+                    _ => None,
+                })
                 .collect(),
         );
         let stationen = as_option(
             dings
                 .iter()
-                .filter(|r| r.disc == Some(2))
-                .map(|x| x.api_id.unwrap().to_string())
+                .filter_map(|record| match (record.disc, record.api_id) {
+                    (Some(2), Some(api_id)) => Some(api_id.to_string()),
+                    _ => None,
+                })
                 .collect(),
         );
         let sitzungen = as_option(
             dings
                 .iter()
-                .filter(|r| r.disc == Some(3))
-                .map(|x| x.api_id.unwrap().to_string())
+                .filter_map(|record| match (record.disc, record.api_id) {
+                    (Some(3), Some(api_id)) => Some(api_id.to_string()),
+                    _ => None,
+                })
                 .collect(),
         );
         let dokumente = as_option(
             dings
                 .iter()
-                .filter(|r| r.disc == Some(4))
-                .map(|x| x.api_id.unwrap().to_string())
+                .filter_map(|record| match (record.disc, record.api_id) {
+                    (Some(4), Some(api_id)) => Some(api_id.to_string()),
+                    _ => None,
+                })
                 .collect(),
         );
+
         let result = AuthListingKeytag200Response {
             dokumente,
             vorgaenge,
@@ -328,7 +345,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         });
     }
 
-    #[doc = "AuthDelete - DELETE /api/v2/auth"]
+    #[doc = "`AuthDelete` - DELETE /api/v2/auth"]
     #[instrument(skip_all, fields(claim=%claims.0, keytag=%header_params.api_key_delete))]
     async fn auth_delete(
         &self,
@@ -362,7 +379,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         })
     }
 
-    #[doc = "AuthPost - POST /api/v2/auth"]
+    #[doc = "`AuthPost` - POST /api/v2/auth"]
     #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_post(
         &self,
@@ -388,12 +405,12 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
 
         sqlx::query!(
             "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)
-        VALUES
-        ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4), $5, $6)",
+            VALUES
+            ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4), $5, $6)",
             key_digest,
             claims.1,
             body.expires_at
-                .unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
+                .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(365)),
             body.scope.clone(),
             salt,
             tag
@@ -418,15 +435,15 @@ impl Authentifizierung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[instrument(skip_all, fields(claim=%claims.0))]
     /// SECURITY:
-    /// There should always ever be at most two keys in an active rotation relationship (rotated_for!=NULL && deleted_by!=NULL)
+    /// There should always ever be at most two keys in an active rotation relationship (`rotated_for!=NULL` && `deleted_by!=NULL`)
     /// And the rotation date must never be expanded, otherwise you can just prolong your old key's life indefinitely
     ///
-    /// Names: old_key: The key that the request has been authenticated with
-    /// new_key: the key that is created and succeeds old_key
-    /// some_key: Any key in the database
+    /// Names: `old_key`: The key that the request has been authenticated with
+    /// `new_key`: the key that is created and succeeds `old_key`
+    /// `some_key`: Any key in the database
     /// Cases:
-    /// 1. old_key.rotated_for != None  => SET old_key.rotated_for.deleted_by=himself, old_key.rotated_for=new_key,
-    /// 2. some_key.rotated_for=old_key => some_key.deleted_by=some_key, old_key.rotated_for=new_key
+    /// 1. `old_key.rotated_for` != None  => SET `old_key.rotated_for.deleted_by=himself`, `old_key.rotated_for=new_key`,
+    /// 2. `some_key.rotated_for=old_key` => `some_key.deleted_by=some_key`, `old_key.rotated_for=new_key`
     #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_rotate(
         &self,
@@ -452,9 +469,9 @@ impl Authentifizierung<LTZFError> for LTZFServer {
 
         let new_id = sqlx::query!(
             "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)
-        VALUES
-        ($1, $2, $3, $4,$5, $6)
-        RETURNING id",
+            VALUES
+            ($1, $2, $3, $4,$5, $6)
+            RETURNING id",
             new_hash,
             claims.1,
             chrono::Utc::now() + (old_key_entry.expires_at - old_key_entry.created_at),
@@ -493,8 +510,8 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         let rot_expiration_date = chrono::Utc::now() + chrono::Duration::days(1);
         sqlx::query!(
             "UPDATE api_keys 
-        SET expires_at = LEAST($2::timestamptz, expires_at), rotated_for = $3
-        WHERE id = $1",
+            SET expires_at = LEAST($2::timestamptz, expires_at), rotated_for = $3
+            WHERE id = $1",
             claims.1,
             rot_expiration_date.clone(),
             new_id
@@ -514,7 +531,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
             },
         ))
     }
-    /// AuthStatus - GET /api/v2/auth/status
+    /// `AuthStatus` - GET /api/v2/auth/status
     #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_status(
         &self,
@@ -525,7 +542,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
     ) -> Result<AuthStatusResponse> {
         let db_row = sqlx::query!(
             "SELECT * FROM 
-        api_keys WHERE id = $1",
+            api_keys WHERE id = $1",
             claims.1
         )
         .fetch_one(&self.sqlx_db)
@@ -544,6 +561,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 mod auth_test {
     use axum::http::Method;
     use axum_extra::extract::CookieJar;
@@ -561,11 +579,12 @@ mod auth_test {
     async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
         fetch_key_row(server, keytag).await.id
     }
+
     fn localhost() -> headers::Host {
         use http::uri::Authority;
         Authority::from_static("localhost").into()
     }
-    #[allow(unused)]
+    #[allow(unused, reason = "We want to model structs close to database model")]
     struct KeyRow {
         id: i32,
         created_by: i32,
@@ -579,8 +598,13 @@ mod auth_test {
         salt: String,
         keytag: String,
     }
+
     async fn fetch_key_row(server: &LTZFServer, keytag: String) -> KeyRow {
-        let mut tx = server.sqlx_db.begin().await.unwrap();
+        let mut tx = server
+            .sqlx_db
+            .begin()
+            .await
+            .expect("Failed to start transaction for fetching key row.");
         let index = sqlx::query!("SELECT * FROM api_keys WHERE keytag = $1", keytag)
             .map(|r| KeyRow {
                 id: r.id,
@@ -597,8 +621,10 @@ mod auth_test {
             })
             .fetch_one(&mut *tx)
             .await
-            .unwrap();
-        tx.commit().await.unwrap();
+            .expect("Failed to get key row.");
+        tx.commit()
+            .await
+            .expect("Failed to commit transaction for fetching key row.");
         index
     }
 
@@ -620,11 +646,10 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Server could not return key.");
 
-        let original_key = match key {
-            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
-            _ => panic!("Unexpected: Expected success"),
+        let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(original_key) = key else {
+            panic!("Unexpected: Expected success")
         };
         let original_key_idx = fetch_key_index(server, keytag_of(&original_key)).await;
 
@@ -643,7 +668,7 @@ mod auth_test {
             "Expected Successful response, got {resp:?}"
         );
 
-        let rotstruct = server
+        let fresh_key = match server
             .auth_rotate(
                 &Method::POST,
                 &localhost(),
@@ -651,10 +676,10 @@ mod auth_test {
                 &(super::APIScope::KeyAdder, original_key_idx),
             )
             .await
-            .unwrap();
-        let fresh_key = match rotstruct {
+            .expect("Failed to rotate key.")
+        {
             AuthRotateResponse::Status201_RotationSuccessful(rots) => rots.new_api_key,
-            _ => unreachable!("Unreachable"),
+            AuthRotateResponse::Status403_Forbidden { .. } => unreachable!(),
         };
         let fresh_key_index = fetch_key_index(server, keytag_of(&fresh_key)).await;
         let fresh_key_status = fetch_key_status(server, fresh_key_index).await;
@@ -688,7 +713,7 @@ mod auth_test {
                 &(super::APIScope::KeyAdder, index),
             )
             .await
-            .unwrap()
+            .expect("Failed to get auth status.")
         {
             AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(stat) => stat,
         }
@@ -713,7 +738,7 @@ mod auth_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get forbidden auth response.");
             assert_eq!(
                 resp,
                 AuthPostResponse::Status403_Forbidden {
@@ -735,7 +760,7 @@ mod auth_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get forbidden auth response.");
             assert_eq!(
                 resp,
                 AuthPostResponse::Status403_Forbidden {
@@ -759,14 +784,13 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get auth response.");
         matches!(
             resp,
             AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(_)
         );
-        let key = match resp {
-            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
-            _ => panic!("Expected authorized response"),
+        let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) = resp else {
+            panic!("Expected authorized response")
         };
         assert_eq!(key.len(), 64);
         assert!(key.starts_with("ltzf_"));
@@ -871,7 +895,7 @@ mod auth_test {
                             .unwrap_or(x.as_str())
                     })
                     .collect();
-                bodykeys.sort();
+                bodykeys.sort_unstable();
                 let mut keys = keys
                     .iter()
                     .map(|x| keytag_of(x))
@@ -939,10 +963,11 @@ mod auth_test {
                     expires_at: None,
                 },
             )
-            .await;
-        let key = match rsp {
-            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => key,
-            _ => unreachable!(),
+            .await
+            .expect("Failed to create key.");
+
+        let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) = rsp else {
+            unreachable!()
         };
         let key_idx = fetch_key_index(server, keytag_of(&key)).await;
 
@@ -958,7 +983,7 @@ mod auth_test {
                 &generate::default_vorgang(),
             )
             .await
-            .unwrap();
+            .expect("Failed to add a new Vorgang.");
         // enough setup, here it comes:
         let rsp = server
             .auth_listing_keytag(
@@ -974,10 +999,10 @@ mod auth_test {
 
         match rsp {
             Ok(AuthListingKeytagResponse::Status200_OK { body, .. }) => {
-                assert!(body.dokumente.is_some() && body.dokumente.unwrap().len() == 2);
-                assert!(body.sitzungen.is_none());
-                assert!(body.stationen.is_some() && body.stationen.unwrap().len() == 1);
-                assert!(body.vorgaenge.is_some() && body.vorgaenge.unwrap().len() == 1);
+                assert_eq!(body.dokumente.map(|d| d.len()), Some(2));
+                assert_eq!(body.sitzungen, None);
+                assert_eq!(body.stationen.map(|s| s.len()), Some(1));
+                assert_eq!(body.vorgaenge.map(|v| v.len()), Some(1));
             }
             _ => unreachable!(),
         }
@@ -1001,14 +1026,13 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create key.");
         assert!(matches!(
             rsp,
             AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(..)
         ));
-        let key = match rsp {
-            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
-            _ => unreachable!("Not possible"),
+        let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) = rsp else {
+            unreachable!("Not possible")
         };
         let tag = keytag_of(&key);
         let row = fetch_key_row(server, tag.clone()).await;
@@ -1026,7 +1050,7 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete key.");
         assert!(matches!(
             rsp,
             AuthDeleteResponse::Status204_NoContent {
@@ -1050,7 +1074,7 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete key.");
         assert!(matches!(
             rsp,
             AuthDeleteResponse::Status204_NoContent {
@@ -1074,7 +1098,7 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to delete key.");
         assert!(matches!(
             rsp,
             AuthDeleteResponse::Status403_Forbidden {
@@ -1104,91 +1128,78 @@ mod auth_test {
                 },
             )
             .await
-            .unwrap();
-        let key0 = match resp {
-            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
-            _ => unreachable!("blub"),
+            .expect("Failed to create key.");
+        let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key0) = resp else {
+            unreachable!()
         };
         let key0_idx = fetch_key_index(server, keytag_of(&key0)).await;
 
         // first test: status of the key is not in rotation
         // then rotate: The key is in rotation at index 2
-        let key1 = {
-            let key_status = fetch_key_status(server, 2).await;
-            assert!(!key_status.is_being_rotated && key_status.scope == "keyadder".to_string());
-            let rrsp = server
-                .auth_rotate(
-                    &Method::POST,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(super::APIScope::KeyAdder, 2),
-                )
-                .await
-                .unwrap();
-            assert!(matches!(
-                rrsp,
-                AuthRotateResponse::Status201_RotationSuccessful(..)
-            ));
-            match rrsp {
-                AuthRotateResponse::Status201_RotationSuccessful(s) => s,
-                _ => unreachable!("not possible"),
-            }
-            // state of the db:
-            // 1. superadmin key
-            // 2. key in rotation (1d)
-            // 3. freshly generated key (1y)
-        }
-        .new_api_key;
+        let original_key_status = fetch_key_status(server, 2).await;
+        assert!(!original_key_status.is_being_rotated);
+        assert_eq!(original_key_status.scope, "keyadder");
+        let key1 = match server
+            .auth_rotate(
+                &Method::POST,
+                &localhost(),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 2),
+            )
+            .await
+            .expect("Failed to rotate key.")
+        {
+            AuthRotateResponse::Status201_RotationSuccessful(s) => s.new_api_key,
+            AuthRotateResponse::Status403_Forbidden { .. } => panic!("Failed to rotate key."),
+        };
+        // state of the db:
+        // 1. superadmin key
+        // 2. key in rotation (1d)
+        // 3. freshly generated key (1y)
+
         let key1_idx = fetch_key_index(server, keytag_of(&key1)).await;
 
         // testing that the time limits work and a "standalone" rotation is possible
         let key0_status = fetch_key_status(server, key0_idx).await; // old key
         assert!(
             key0_status.is_being_rotated
-                && key0_status.scope == "keyadder".to_string()
+                && key0_status.scope == "keyadder"
                 && key0_status
                     .expires_at
                     .checked_sub_days(chrono::Days::new(1))
-                    .unwrap()
+                    .expect("Failed to sub day from expiry datetime.")
                     <= chrono::Utc::now()
         );
         let key1_status = fetch_key_status(server, key1_idx).await; // new key
         assert!(
             !key1_status.is_being_rotated
-                && key1_status.scope == "keyadder".to_string()
+                && key1_status.scope == "keyadder"
                 && key1_status
                     .expires_at
                     .checked_sub_months(chrono::Months::new(11))
-                    .unwrap()
+                    .expect("Failed to sub 11 months from expiry datetime.")
                     >= chrono::Utc::now()
         );
 
         // rotate the new key and expect the key in rotation to be invalidated
-        let key2 = {
-            let rrsp = server
-                .auth_rotate(
-                    &Method::POST,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(super::APIScope::KeyAdder, 3),
-                )
-                .await
-                .unwrap();
-            assert!(matches!(
-                rrsp,
-                AuthRotateResponse::Status201_RotationSuccessful(..)
-            ));
-            match rrsp {
-                AuthRotateResponse::Status201_RotationSuccessful(s) => s,
-                _ => unreachable!("not possible"),
-            }
-            // state of the db:
-            // 1. superadmin key
-            // key0: ~~key in rotation (1d)~~ -> invalidated key
-            // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
-            // key2: freshly generated key (1y)
-        }
-        .new_api_key;
+        let key2 = match server
+            .auth_rotate(
+                &Method::POST,
+                &localhost(),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 3),
+            )
+            .await
+            .expect("Failed to rotate key.")
+        {
+            AuthRotateResponse::Status201_RotationSuccessful(s) => s.new_api_key,
+            AuthRotateResponse::Status403_Forbidden { .. } => panic!("Failed to rotate key."),
+        };
+        // state of the db:
+        // 1. superadmin key
+        // key0: ~~key in rotation (1d)~~ -> invalidated key
+        // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
+        // key2: freshly generated key (1y)
         let key2_idx = fetch_key_index(server, keytag_of(&key2)).await;
         let key2_status = fetch_key_status(server, key2_idx).await; // new key
         assert!(!key2_status.is_being_rotated);
@@ -1199,32 +1210,26 @@ mod auth_test {
 
         // rotate the key in rotation again and expect the previously generated fresh key to be invalidated.
         // the old key's lifetime does not change from the first rotation (otherwise it could be extended -> secu risk)
-        let key3 = {
-            let rrsp = server
-                .auth_rotate(
-                    &Method::POST,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(super::APIScope::KeyAdder, 3),
-                )
-                .await
-                .unwrap();
-            assert!(matches!(
-                rrsp,
-                AuthRotateResponse::Status201_RotationSuccessful(..)
-            ));
-            match rrsp {
-                AuthRotateResponse::Status201_RotationSuccessful(s) => s,
-                _ => unreachable!("not possible"),
-            }
-            // state of the db:
-            // 1. superadmin key
-            // key0: ~~key in rotation (1d)~~ -> invalidated
-            // key1: ~~freshly generated key (1y)~~ -> key in rotation (original timestamp)
-            // key2: ~~freshly generated key (1y)~~ -> invalidated
-            // key3: freshly generated key (1y)
-        }
-        .new_api_key;
+        let key3 = match server
+            .auth_rotate(
+                &Method::POST,
+                &localhost(),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 3),
+            )
+            .await
+            .expect("Failed to rotate key.")
+        {
+            AuthRotateResponse::Status201_RotationSuccessful(s) => s.new_api_key,
+            AuthRotateResponse::Status403_Forbidden { .. } => panic!("Failed to rotate key."),
+        };
+        // state of the db:
+        // 1. superadmin key
+        // key0: ~~key in rotation (1d)~~ -> invalidated
+        // key1: ~~freshly generated key (1y)~~ -> key in rotation (original timestamp)
+        // key2: ~~freshly generated key (1y)~~ -> invalidated
+        // key3: freshly generated key (1y)
+
         let key3_idx = fetch_key_index(server, keytag_of(&key3)).await;
         let key3_status = fetch_key_status(server, key3_idx).await;
         let key1_status_new = fetch_key_status(server, key1_idx).await;

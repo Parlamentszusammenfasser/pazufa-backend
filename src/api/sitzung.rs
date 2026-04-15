@@ -9,9 +9,15 @@ use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use chrono::Datelike;
 use headers::Host;
-use openapi::apis::collector_schnittstellen_sitzung::*;
-use openapi::apis::data_administration_sitzung::*;
-use openapi::apis::sitzung_unauthorisiert::*;
+use openapi::apis::collector_schnittstellen_sitzung::{
+    CollectorSchnittstellenSitzung, KalDatePutResponse,
+};
+use openapi::apis::data_administration_sitzung::{
+    DataAdministrationSitzung, SidPutResponse, SitzungDeleteResponse,
+};
+use openapi::apis::sitzung_unauthorisiert::{
+    KalDateGetResponse, KalGetResponse, SGetByIdResponse, SGetResponse, SitzungUnauthorisiert,
+};
 use openapi::models;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
@@ -21,32 +27,35 @@ use super::find_applicable_date_range;
 
 // helper that converts the documents in a sitzung into just their uuids instead of full objects
 fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
+    use models::{Dokument, StationDokumenteInner};
+
     let mut st = st.clone();
-    for t in &mut st.tops {
-        if t.dokumente.is_none() {
-            continue;
-        }
-        for d in t.dokumente.as_mut().unwrap() {
-            if let models::StationDokumenteInner::Dokument(dok) = d {
-                *d = models::StationDokumenteInner::String(dok.api_id.unwrap().to_string());
+
+    let all_docs = st
+        .tops
+        .iter_mut()
+        .filter_map(|t| t.dokumente.as_mut())
+        .chain(st.dokumente.as_mut());
+
+    for docs in all_docs {
+        for d in docs {
+            if let StationDokumenteInner::Dokument(Dokument {
+                api_id: Some(api_id),
+                ..
+            }) = d
+            {
+                *d = StationDokumenteInner::String(api_id.to_string());
             }
         }
     }
-    if st.dokumente.is_none() {
-        return st;
-    }
-    for d in st.dokumente.as_mut().unwrap() {
-        if let models::StationDokumenteInner::Dokument(dok) = d {
-            *d = models::StationDokumenteInner::String(dok.api_id.unwrap().to_string());
-        }
-    }
+
     st
 }
 
 #[async_trait]
 impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "SitzungDelete - DELETE /api/v2/sitzung/{sid}"]
+    #[doc = "`SitzungDelete` - DELETE /api/v2/sitzung/{sid}"]
     #[instrument(skip_all, fields(claim=%claims.0, sid=%path_params.sid))]
     async fn sitzung_delete(
         &self,
@@ -70,12 +79,12 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
         Ok(r)
     }
 
-    /// PUTs a models::Sitzung into the database with checks on whether
+    /// PUTs a `models::Sitzung` into the database with checks on whether
     /// the objects modifies internal state.
     /// NOTE: Documents that are referenced by UUID (within body.dokumente)
     /// and point to a document that is not in the database are silently
     /// filtered out.
-    #[doc = "SidPut - PUT /api/v2/sitzung/{sid}"]
+    #[doc = "`SidPut` - PUT /api/v2/sitzung/{sid}"]
     #[instrument(skip_all, fields(claim=%claims.0, sid=%path_params.sid))]
     async fn sid_put(
         &self,
@@ -104,8 +113,13 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
             debug!(
                 "odb: {}\nonew: {}",
-                serde_json::to_string(&db_cmpvg.with_round_timestamps()).unwrap(),
-                serde_json::to_string(&st_to_uuiddoks(body).with_round_timestamps()).unwrap()
+                serde_json::to_string(&db_cmpvg.with_round_timestamps())
+                    .unwrap_or_else(|_| format!("{:?}", db_cmpvg.with_round_timestamps())),
+                serde_json::to_string(&st_to_uuiddoks(body).with_round_timestamps())
+                    .unwrap_or_else(|_| format!(
+                        "{:?}",
+                        st_to_uuiddoks(body).with_round_timestamps()
+                    ))
             );
             if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(body).with_round_timestamps() {
                 info!("Sitzung has the same state as the input object");
@@ -141,7 +155,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
 impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
-    #[doc = "KalDatePut - PUT /api/v2/kalender/{parlament}/{datum}"]
+    #[doc = "`KalDatePut` - PUT /api/v2/kalender/{parlament}/{datum}"]
     #[instrument(skip_all, fields(claim=%claims.0, date=%path_params.datum))]
     async fn kal_date_put(
         &self,
@@ -156,11 +170,13 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
         let last_upd_day = chrono::Utc::now()
             .date_naive()
             .checked_sub_days(chrono::Days::new(1))
-            .unwrap();
+            .ok_or_else(|| LTZFError::Other {
+                message: "Date::now() out of bounds.".to_string(),
+            })?;
         if claims.0 == APIScope::Collector && path_params.datum < last_upd_day {
             warn!(
-                "Permission not Granted because you are only a collector and {} < {}",
-                path_params.datum, last_upd_day
+                "Permission not Granted because you are only a collector and {} < {last_upd_day}",
+                path_params.datum,
             );
             return Ok(KalDatePutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
@@ -175,13 +191,12 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
                 f.termin.date_naive() >= last_upd_day
                     && f.gremium.parlament == path_params.parlament
             })
-            .cloned()
             .collect();
 
-        if len != body.len() {
+        if len < body.len() {
             debug!(
                 "Filtered {}/{} Sitzungen due to date and parlament equality constraints",
-                len - body.len(),
+                len.wrapping_sub(body.len()),
                 len
             );
         }
@@ -200,13 +215,15 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 
         let dt_begin = path_params
             .datum
-            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_time(chrono::NaiveTime::default())
             .and_utc();
         let dt_end = path_params
             .datum
             .checked_add_days(chrono::Days::new(1))
-            .unwrap()
-            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .ok_or_else(|| LTZFError::Other {
+                message: "Parameter `datum` out of bounds.".to_string(),
+            })?
+            .and_time(chrono::NaiveTime::default())
             .and_utc();
         // delete all entries that fit the description
         debug!("Deleting entries from {dt_begin} until {dt_end}");
@@ -239,7 +256,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
-    #[doc = "KalDateGet - GET /api/v2/kalender/{parlament}/{datum}"]
+    #[doc = "`KalDateGet` - GET /api/v2/kalender/{parlament}/{datum}"]
     #[instrument(skip_all, fields(date=%path_params.datum))]
     async fn kal_date_get(
         &self,
@@ -252,22 +269,21 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     ) -> Result<KalDateGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
         let dr = find_applicable_date_range(
-            Some(path_params.datum.year() as u32),
+            Some(path_params.datum.year()),
             Some(path_params.datum.month()),
             Some(path_params.datum.day()),
             None,
             None,
             header_params.if_modified_since,
         );
-        if dr.is_none() {
+        let Some(dr) = dr else {
             info!("Date Range too narrow or invalid");
             return Ok(KalDateGetResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
-        }
-        let dr = dr.unwrap();
+        };
 
         let dt_begin = dr.since;
         let dt_end = dr.until;
@@ -315,9 +331,9 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         })
     }
 
-    /// TODO: unify kal_get and kal_date_get by utilising sitzung_retrieve_by_param
+    /// TODO: unify `kal_get` and `kal_date_get` by utilising `sitzung_retrieve_by_param`
     /// find a way to implement pagination and the prp here
-    #[doc = "KalGet - GET /api/v2/kalender"]
+    #[doc = "`KalGet` - GET /api/v2/kalender"]
     #[instrument(skip_all)]
     async fn kal_get(
         &self,
@@ -331,14 +347,28 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         let hparams = header_params;
         let mut tx = self.sqlx_db.begin().await?;
         let result = find_applicable_date_range(
-            qparams.y.map(|x| x as u32),
-            qparams.m.map(|x| x as u32),
-            qparams.dom.map(|x| x as u32),
+            qparams.y,
+            qparams
+                .m
+                .map(|x| {
+                    u32::try_from(x).map_err(|e| LTZFError::Other {
+                        message: format!("Could not convert query parameter `m` into u32: {e}"),
+                    })
+                })
+                .transpose()?,
+            qparams
+                .dom
+                .map(|x| {
+                    u32::try_from(x).map_err(|e| LTZFError::Other {
+                        message: format!("Could not convert query parameter `dom` into u32: {e}"),
+                    })
+                })
+                .transpose()?,
             qparams.since,
             qparams.until,
             hparams.if_modified_since,
         );
-        if result.is_none() {
+        let Some(result) = result else {
             warn!(
                 "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
                 query_params, header_params.if_modified_since
@@ -348,15 +378,22 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
-        }
+        };
 
         let params = retrieve::SitzungFilterParameters {
             gremium_like: qparams.gr.clone(),
             parlament: qparams.p,
             vgid: None,
-            wp: qparams.wp.map(|x| x as u32),
-            since: result.as_ref().unwrap().since,
-            until: result.unwrap().until,
+            wp: qparams
+                .wp
+                .map(|x| {
+                    u32::try_from(x).map_err(|e| LTZFError::Other {
+                        message: format!("Could not convert query parameter `wp` into u32: {e}"),
+                    })
+                })
+                .transpose()?,
+            since: result.since,
+            until: result.until,
         };
 
         // retrieval
@@ -395,7 +432,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         }
     }
 
-    #[doc = "SGetById - GET /api/v2/sitzung/{sid}"]
+    #[doc = "`SGetById` - GET /api/v2/sitzung/{sid}"]
     #[instrument(skip_all, fields(sid=%path_params.sid))]
     async fn s_get_by_id(
         &self,
@@ -409,6 +446,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         // in the past this was done by optional authentication, but that
         // turned out not to neatly fit into the oapi spec.
         // for now this is just a disabled feature
+        // THE SOLUTION TO THIS IS UTOIPA
         let claims = (APIScope::Collector, 0);
         let mut tx = self.sqlx_db.begin().await?;
         let api_id = path_params.sid;
@@ -473,7 +511,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         }
     }
 
-    #[doc = "SGet - GET /api/v2/sitzung"]
+    #[doc = "`SGet` - GET /api/v2/sitzung"]
     #[instrument(skip_all)]
     async fn s_get(
         &self,
@@ -491,7 +529,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             query_params.until,
             header_params.if_modified_since,
         );
-        if range.is_none() {
+        let Some(range) = range else {
             warn!(
                 "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
                 query_params, header_params.if_modified_since
@@ -501,13 +539,20 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
-        }
+        };
         let params = retrieve::SitzungFilterParameters {
             gremium_like: query_params.gr.clone(),
             parlament: query_params.p,
-            wp: query_params.wp.map(|x| x as u32),
-            since: range.as_ref().unwrap().since,
-            until: range.unwrap().until,
+            wp: query_params
+                .wp
+                .map(|x| {
+                    u32::try_from(x).map_err(|e| LTZFError::Other {
+                        message: format!("Could not convert query parameter `wp` into u32: {e}"),
+                    })
+                })
+                .transpose()?,
+            since: range.since,
+            until: range.until,
             vgid: query_params.vgid,
         };
 
@@ -550,10 +595,12 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     }
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod sitzung_test {
     use axum::http::Method;
     use axum_extra::extract::CookieJar;
+
     use chrono::Utc;
     use openapi::apis::collector_schnittstellen_sitzung::*;
     use openapi::apis::data_administration_sitzung::*;
@@ -582,6 +629,7 @@ mod sitzung_test {
 
     // Calendar tests
     #[tokio::test]
+    #[traced_test]
     async fn test_calendar_auth() {
         let scenario = TestSetup::new("test_calendar_auth").await;
         let server = &scenario.server;
@@ -590,23 +638,27 @@ mod sitzung_test {
         let test_date = chrono::Utc::now().date_naive();
         let test_session = generate::default_sitzung();
 
+        let datum = test_date
+            .checked_sub_days(chrono::Days::new(5))
+            .expect("Failed to subtract days from current date");
+
         let response = server
             .kal_date_put(
                 &Method::PUT,
                 &host,
                 &cookies,
-                &(auth::APIScope::Collector, 1), // Using Collector scope with old date should fail
+                &(auth::APIScope::Collector, 1),
                 &models::KalDatePutHeaderParams {
                     x_scraper_id: Uuid::nil(),
                 },
                 &models::KalDatePutPathParams {
-                    datum: test_date.checked_sub_days(chrono::Days::new(5)).unwrap(), // Date more than 1 day old
+                    datum,
                     parlament: models::Parlament::Bt,
                 },
                 &vec![test_session],
             )
             .await
-            .unwrap();
+            .expect("Failed to call kal_date_put endpoint");
         assert_eq!(
             response,
             KalDatePutResponse::Status403_Forbidden {
@@ -637,7 +689,6 @@ mod sitzung_test {
 
         // Test cases for kal_date_put:
         // 1. Create calendar entry out of valid date range with admin permissions
-        // result: should not be possible, the invalid data points are silently filtered out
         let response = server
             .kal_date_put(
                 &Method::PUT,
@@ -654,7 +705,7 @@ mod sitzung_test {
                 &vec![outdated_session.clone()],
             )
             .await
-            .unwrap();
+            .expect("Failed to create calendar entry with admin permissions");
         assert_eq!(
             response,
             KalDatePutResponse::Status201_Created {
@@ -665,7 +716,6 @@ mod sitzung_test {
         );
 
         // 2. Update calendar entry with date constraints and fail (collector is only allowed to update recent dates)
-        // this is rejected with forbidden
         let response = server
             .kal_date_put(
                 &Method::PUT,
@@ -682,7 +732,7 @@ mod sitzung_test {
                 &vec![outdated_session],
             )
             .await
-            .unwrap();
+            .expect("Failed to update calendar entry with collector permissions");
         assert_eq!(
             response,
             KalDatePutResponse::Status201_Created {
@@ -691,8 +741,8 @@ mod sitzung_test {
                 x_rate_limit_reset: None
             }
         );
+
         // Update calendar entry with date constraints and succeed
-        // this is accepted and an entry is created
         let response = server
             .kal_date_put(
                 &Method::PUT,
@@ -709,7 +759,7 @@ mod sitzung_test {
                 &vec![recent_session],
             )
             .await
-            .unwrap();
+            .expect("Failed to update calendar entry with recent session");
         assert_eq!(
             response,
             KalDatePutResponse::Status201_Created {
@@ -718,6 +768,7 @@ mod sitzung_test {
                 x_rate_limit_reset: None
             }
         );
+
         let response = server
             .kal_date_get(
                 &Method::PUT,
@@ -736,7 +787,7 @@ mod sitzung_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get calendar entries");
         assert!(matches!(
             response,
             KalDateGetResponse::Status200_SuccessfulResponse { body, .. }
@@ -776,7 +827,8 @@ mod sitzung_test {
                 &vec![session.clone()],
             )
             .await
-            .unwrap();
+            .expect("Failed to create calendar entry");
+
         // 2. Get calendar entry for non-existent date
         let response = server
             .kal_date_get(
@@ -787,7 +839,8 @@ mod sitzung_test {
                     if_modified_since: None,
                 },
                 &models::KalDateGetPathParams {
-                    datum: chrono::NaiveDate::from_ymd_opt(1950, 10, 10).unwrap(),
+                    datum: chrono::NaiveDate::from_ymd_opt(1950, 10, 10)
+                        .expect("Failed to create date from year, month, day"),
                     parlament,
                 },
                 &models::KalDateGetQueryParams {
@@ -796,7 +849,7 @@ mod sitzung_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get calendar entry for non-existent date");
         assert_eq!(
             response,
             KalDateGetResponse::Status404_NotFound {
@@ -805,6 +858,7 @@ mod sitzung_test {
                 x_rate_limit_reset: None
             }
         );
+
         // successful GET
         let response = server
             .kal_date_get(
@@ -824,17 +878,18 @@ mod sitzung_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get calendar entry");
         let normalized_session = super::st_to_uuiddoks(&session).with_round_timestamps();
         info!("expected: {:?}", vec![normalized_session.clone()]);
         if let KalDateGetResponse::Status200_SuccessfulResponse { ref body, .. } = response {
-            info!("actual  : {:?}", body)
+            info!("actual  : {:?}", body);
         }
         assert!(matches!(
             response,
             KalDateGetResponse::Status200_SuccessfulResponse { body, .. }
-            if body.iter().map(|b| b.with_round_timestamps()).collect::<Vec<_>>() == vec![normalized_session]
+            if body.iter().map(super::super::RoundTimestamp::with_round_timestamps).collect::<Vec<_>>() == vec![normalized_session]
         ));
+
         // see if if-mod-since works
         let response = server
             .kal_date_get(
@@ -854,12 +909,12 @@ mod sitzung_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get calendar entry with if-modified-since header");
         assert!(
             matches!(response, KalDateGetResponse::Status404_NotFound { .. },),
-            "Expected 404, got {:?}",
-            response
+            "Expected 404, got {response:?}"
         );
+
         // Cleanup
         setup.teardown().await;
     }
@@ -885,7 +940,7 @@ mod sitzung_test {
                 &session.clone(),
             )
             .await
-            .unwrap();
+            .expect("Failed to create session");
         assert!(matches!(response, SidPutResponse::Status201_Created { .. }));
 
         // Test cases for kal_get:
@@ -903,17 +958,23 @@ mod sitzung_test {
                         page: None,
                         per_page: None,
                         y: Some(date.year()),
-                        m: Some(date.month0() as i32 + 1),
+                        m: Some(i32::try_from(date.month()).unwrap_or_else(|_| {
+                            unreachable!(
+                                "Value is always in the range 1..=12. Cannot wrap on conversion."
+                            )
+                        })),
                         dom: None,
                         gr: None,
                         p: Some(parlament),
                         since: None,
                         until: None,
-                        wp: Some(session.gremium.wahlperiode as i32),
+                        wp: Some(i32::try_from(session.gremium.wahlperiode).expect(
+                            "Failed to convert the Wahlperiode counter, as it exceeds i32::MAX.",
+                        )),
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get calendar entries with valid parameters");
             match &response {
                 KalGetResponse::Status200_SuccessfulResponse { body, .. } => {
                     assert!(
@@ -952,7 +1013,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get calendar entries with invalid parameters");
             assert_eq!(
                 response,
                 KalGetResponse::Status416_RequestRangeNotSatisfiable {
@@ -968,11 +1029,11 @@ mod sitzung_test {
             let start_date = session
                 .termin
                 .checked_sub_days(chrono::Days::new(1))
-                .unwrap();
+                .expect("Failed to subtract days from session date");
             let end_date = session
                 .termin
                 .checked_add_days(chrono::Days::new(1))
-                .unwrap();
+                .expect("Failed to add days to session date");
             let response = server
                 .kal_get(
                     &Method::GET,
@@ -995,7 +1056,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get calendar entries with date range");
             match response {
                 KalGetResponse::Status200_SuccessfulResponse { body, .. } => {
                     assert!(!body.is_empty(), "Expected to find sessions in date range");
@@ -1019,7 +1080,7 @@ mod sitzung_test {
                     if_modified_since: Some(
                         chrono::Utc::now()
                             .checked_add_days(chrono::Days::new(1))
-                            .unwrap(),
+                            .expect("Failed to add days to current date"),
                     ),
                 },
                 &models::KalGetQueryParams {
@@ -1036,12 +1097,12 @@ mod sitzung_test {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get calendar entries with if-modified-since header");
         assert!(
             matches!(response, KalGetResponse::Status304_NotModified { .. }),
-            "{:?}",
-            response
+            "{response:?}"
         );
+
         let response = server
             .kal_get(
                 &Method::GET,
@@ -1061,18 +1122,19 @@ mod sitzung_test {
                     since: Some(
                         chrono::Utc::now()
                             .checked_add_days(chrono::Days::new(1))
-                            .unwrap(),
+                            .expect("Failed to add days to current date"),
                     ),
                     until: None,
                     wp: None,
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to get calendar entries with future date range");
         assert!(matches!(
             response,
             KalGetResponse::Status204_NoContent { .. }
         ));
+
         setup.teardown().await;
     }
 
@@ -1091,12 +1153,14 @@ mod sitzung_test {
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::SidPutPathParams {
-                    sid: test_session.api_id.unwrap(),
+                    sid: test_session
+                        .api_id
+                        .expect("Failed to get API ID from test session"),
                 },
                 &test_session,
             )
             .await
-            .unwrap();
+            .expect("Failed to create session");
         assert_eq!(
             create_response,
             SidPutResponse::Status201_Created {
@@ -1106,6 +1170,7 @@ mod sitzung_test {
             }
         );
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
         // Test cases for s_get_by_id:
         // 1. Get existing session
         {
@@ -1118,11 +1183,13 @@ mod sitzung_test {
                         if_modified_since: None,
                     },
                     &models::SGetByIdPathParams {
-                        sid: test_session.api_id.unwrap(),
+                        sid: test_session
+                            .api_id
+                            .expect("Failed to get API ID from test session"),
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get existing session");
             match response {
                 SGetByIdResponse::Status200_Success { body, .. } => {
                     assert_eq!(body.api_id, test_session.api_id);
@@ -1148,7 +1215,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get non-existent session");
             assert_eq!(
                 response,
                 SGetByIdResponse::Status404_NotFound {
@@ -1173,7 +1240,7 @@ mod sitzung_test {
                     &models::SGetByIdPathParams { sid: invalid_id },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get session with invalid ID");
             assert_eq!(
                 response,
                 SGetByIdResponse::Status404_NotFound {
@@ -1183,6 +1250,8 @@ mod sitzung_test {
                 }
             );
         }
+
+        // Test if-modified-since header
         {
             let response = server
                 .s_get_by_id(
@@ -1193,11 +1262,13 @@ mod sitzung_test {
                         if_modified_since: Some(chrono::Utc::now()),
                     },
                     &models::SGetByIdPathParams {
-                        sid: test_session.api_id.unwrap(),
+                        sid: test_session
+                            .api_id
+                            .expect("Failed to get API ID from test session"),
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get session with if-modified-since header");
             assert_eq!(
                 response,
                 SGetByIdResponse::Status304_NotModified {
@@ -1232,7 +1303,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get sessions with valid parameters");
             match response {
                 SGetResponse::Status200_SuccessfulResponse { body, .. } => {
                     assert!(!body.is_empty());
@@ -1264,7 +1335,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get sessions with invalid parameters");
             assert_eq!(
                 response,
                 SGetResponse::Status416_RequestRangeNotSatisfiable {
@@ -1298,7 +1369,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get sessions with filters");
             match response {
                 SGetResponse::Status200_SuccessfulResponse { body, .. } => {
                     assert!(!body.is_empty());
@@ -1306,6 +1377,8 @@ mod sitzung_test {
                 _ => panic!("Expected successful operation response"),
             }
         }
+
+        // Test if-modified-since header for s_get
         {
             let response = server
                 .s_get(
@@ -1328,7 +1401,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get sessions with if-modified-since header");
             assert_eq!(
                 response,
                 SGetResponse::Status304_NotModified {
@@ -1338,6 +1411,8 @@ mod sitzung_test {
                 }
             );
         }
+
+        // Test getting sessions with different wahlperiode
         {
             let response = server
                 .s_get(
@@ -1360,7 +1435,7 @@ mod sitzung_test {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get sessions with different wahlperiode");
             assert_eq!(
                 response,
                 SGetResponse::Status204_NoContent {
@@ -1370,42 +1445,18 @@ mod sitzung_test {
                 }
             );
         }
+
         // Cleanup
         scenario.teardown().await;
     }
-
     #[tokio::test]
     #[traced_test]
-    async fn test_session_modify_endpoints() {
-        let scenario = TestSetup::new("session_modify_ep").await;
+    async fn test_session_modify_update() {
+        let scenario = TestSetup::new("test_session_modify_update").await;
         let server = &scenario.server;
         let sitzung = generate::random::sitzung(12);
-        // - Input non-existing session
-        {
-            let response = server
-                .sid_put(
-                    &Method::PUT,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::SidPutPathParams {
-                        sid: sitzung.api_id.unwrap(),
-                    },
-                    &sitzung,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                SidPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-        }
 
-        // - Update existing session with the same data
+        // Test case: Input non-existing session
         let response = server
             .sid_put(
                 &Method::PUT,
@@ -1413,20 +1464,41 @@ mod sitzung_test {
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::SidPutPathParams {
-                    sid: sitzung.api_id.unwrap(),
+                    sid: sitzung.api_id.expect("session API ID is none"),
                 },
                 &sitzung,
             )
             .await
-            .unwrap();
-        assert!(
-            matches!(response, SidPutResponse::Status304_NotModified { .. }),
-            "Failed to update existing session with the same data.\nInput:  {:?}\n\n Output: {:?}",
-            sitzung,
+            .expect("Failed to create non-existing session");
+        assert_eq!(
             response,
+            SidPutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
         );
 
-        // - Update existing session with valid new data
+        // Test case: Update existing session with the same data
+        let response = server
+            .sid_put(
+                &Method::PUT,
+                &localhost(),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::SidPutPathParams {
+                    sid: sitzung.api_id.expect("session API ID is none"),
+                },
+                &sitzung,
+            )
+            .await
+            .expect("Failed to update session with same data");
+        assert!(
+            matches!(response, SidPutResponse::Status304_NotModified { .. }),
+            "Failed to update existing session with the same data.\nInput:  {sitzung:?}\n\n Output: {response:?}",
+        );
+
+        // Test case: Update existing session with valid new data
         let rsp_new = models::Sitzung {
             link: Some("https://example.com/a/b/c".to_string()),
             ..sitzung.clone()
@@ -1438,12 +1510,12 @@ mod sitzung_test {
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::SidPutPathParams {
-                    sid: sitzung.api_id.unwrap(),
+                    sid: sitzung.api_id.expect("session API ID is none"),
                 },
                 &rsp_new,
             )
             .await
-            .unwrap();
+            .expect("Failed to update session with new data");
         assert_eq!(
             response,
             SidPutResponse::Status201_Created {
@@ -1452,9 +1524,10 @@ mod sitzung_test {
                 x_rate_limit_reset: None
             }
         );
+
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
-        // - Update session with insufficient permissions
+        // Test case: Update session with insufficient permissions
         let response = server
             .sid_put(
                 &Method::PUT,
@@ -1462,12 +1535,14 @@ mod sitzung_test {
                 &CookieJar::new(),
                 &(auth::APIScope::Collector, 1),
                 &models::SidPutPathParams {
-                    sid: sitzung.api_id.unwrap(),
+                    sid: sitzung
+                        .api_id
+                        .expect("Failed to get API ID from test session"),
                 },
                 &sitzung,
             )
             .await
-            .unwrap();
+            .expect("Failed to update session with insufficient permissions");
         assert_eq!(
             response,
             SidPutResponse::Status403_Forbidden {
@@ -1476,10 +1551,41 @@ mod sitzung_test {
                 x_rate_limit_reset: None
             }
         );
+    }
+    #[tokio::test]
+    async fn test_session_delete() {
+        let scenario = TestSetup::new("test_session_delete").await;
+        let server = &scenario.server;
+        let sitzung = generate::random::sitzung(12);
+
+        // Test case: Input non-existing session
+        let response = server
+            .sid_put(
+                &Method::PUT,
+                &localhost(),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::SidPutPathParams {
+                    sid: sitzung
+                        .api_id
+                        .expect("Failed to get API ID from test session"),
+                },
+                &sitzung,
+            )
+            .await
+            .expect("Failed to create non-existing session");
+        assert_eq!(
+            response,
+            SidPutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
 
         // Test cases for sitzung_delete:
+        // Test case: Delete existing session with proper permissions
         {
-            // - Delete existing session with proper permissions
             let response = server
                 .sitzung_delete(
                     &Method::PUT,
@@ -1487,11 +1593,13 @@ mod sitzung_test {
                     &CookieJar::new(),
                     &(auth::APIScope::KeyAdder, 1),
                     &models::SitzungDeletePathParams {
-                        sid: sitzung.api_id.unwrap(),
+                        sid: sitzung
+                            .api_id
+                            .expect("Failed to get API ID from test session"),
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to delete existing session");
             assert_eq!(
                 response,
                 SitzungDeleteResponse::Status204_NoContent {
@@ -1500,8 +1608,10 @@ mod sitzung_test {
                     x_rate_limit_reset: None
                 }
             );
+        }
 
-            // - Delete non-existent session
+        // Test case: Delete non-existent session
+        {
             let response = server
                 .sitzung_delete(
                     &Method::PUT,
@@ -1509,11 +1619,13 @@ mod sitzung_test {
                     &CookieJar::new(),
                     &(auth::APIScope::KeyAdder, 1),
                     &models::SitzungDeletePathParams {
-                        sid: sitzung.api_id.unwrap(),
+                        sid: sitzung
+                            .api_id
+                            .expect("Failed to get API ID from test session"),
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to attempt to delete non-existent session");
             assert_eq!(
                 response,
                 SitzungDeleteResponse::Status404_NotFound {
@@ -1522,8 +1634,10 @@ mod sitzung_test {
                     x_rate_limit_reset: None
                 }
             );
+        }
 
-            // - Delete session with insufficient permissions
+        // Test case: Delete session with insufficient permissions
+        {
             let response = server
                 .sitzung_delete(
                     &Method::PUT,
@@ -1531,11 +1645,13 @@ mod sitzung_test {
                     &CookieJar::new(),
                     &(auth::APIScope::Collector, 1),
                     &models::SitzungDeletePathParams {
-                        sid: sitzung.api_id.unwrap(),
+                        sid: sitzung
+                            .api_id
+                            .expect("Failed to get API ID from test session"),
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to attempt to delete session with insufficient permissions");
             assert_eq!(
                 response,
                 SitzungDeleteResponse::Status403_Forbidden {
@@ -1545,6 +1661,7 @@ mod sitzung_test {
                 }
             );
         }
+
         scenario.teardown().await;
     }
 

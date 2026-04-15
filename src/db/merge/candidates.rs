@@ -2,13 +2,15 @@ use crate::LTZFServer;
 use crate::Result;
 use crate::db::merge::MatchState;
 use crate::error::DataValidationError;
+use crate::error::LTZFError;
 use openapi::models;
 #[cfg(feature = "track-validation")]
 use std::collections::BTreeSet;
+use std::string::ToString;
 use uuid::Uuid;
 
 /// this function determines what means "matching enough".
-/// 1. wenn api_id matcht
+/// 1. wenn `api_id` matcht
 /// 2. wenn Parlament / Parlamentsgruppe, wp, typ und mindestens ein identifikator matchen
 pub async fn vorgang_merge_candidates(
     model: &models::Vorgang,
@@ -23,7 +25,7 @@ pub async fn vorgang_merge_candidates(
         .iter()
         .map(|x| x.id.clone())
         .collect();
-    let identt_t: Vec<_> = model
+    let identtyp_t: Vec<_> = model
         .ids
         .as_ref()
         .unwrap_or(&vec![])
@@ -38,7 +40,7 @@ pub async fn vorgang_merge_candidates(
         .map(|s| s.gremium.parlament)
         .collect();
     #[cfg(feature = "track-validation")]
-    let parls: Vec<_> = parls.iter().map(|x| x.to_string()).collect();
+    let parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
 
     #[cfg(feature = "track-validation")]
     let result = sqlx::query!(
@@ -86,8 +88,10 @@ pub async fn vorgang_merge_candidates(
             OR $7 = 0 OR NOT EXISTS(SELECT 1 FROM station s WHERE s.vg_id = vorgang.id)
         )
 	);",
-    model.api_id, &ident_t[..], &identt_t[..], model.wahlperiode as i32,
-    srv.guard_ts(&model.typ, model.api_id, obj)?, &parls[..], model.stationen.len() as i32)
+    model.api_id, &ident_t[..], &identtyp_t[..],
+    i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other {message: format!("value was unable to be converted to i32: {e}")})?,
+    srv.guard_ts(&model.typ, model.api_id, obj), &parls[..],
+    i32::try_from(model.stationen.len()).map_err(|e|LTZFError::Other {message: format!("value was unable to be converted to i32: {e}")})?)
     .fetch_all(executor).await?;
 
     #[cfg(not(feature = "track-validation"))]
@@ -119,8 +123,9 @@ pub async fn vorgang_merge_candidates(
 			eingabe.typ = db_id_table.idt_str)
 		)
 	);",
-    model.api_id, &ident_t[..], &identt_t[..], model.wahlperiode as i32,
-    srv.guard_ts(&model.typ, model.api_id, obj)?)
+    model.api_id, &ident_t[..], &identtyp_t[..],
+    i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other { message: format!("Failed to convert vorgang wahlperiode as it exceed i32::MAX: {e}") })?,
+    srv.guard_ts(&model.typ, model.api_id, obj))
     .fetch_all(executor).await?;
 
     tracing::debug!(
@@ -144,7 +149,7 @@ pub async fn vorgang_merge_candidates(
 }
 
 /// bei gleichem Vorgang => Vorraussetzung
-/// 1. wenn die api_id matcht
+/// 1. wenn die `api_id` matcht
 /// 2. wenn vorgang, typ und gremium matchen und mindestens ein Dokument gleich ist
 pub async fn station_merge_candidates(
     model: &models::Station,
@@ -168,7 +173,11 @@ pub async fn station_merge_candidates(
         .collect();
     let (gr_name, gr_wp, gr_parl) = (
         model.gremium.name.clone(),
-        model.gremium.wahlperiode as i32,
+        i32::try_from(model.gremium.wahlperiode).map_err(|e| LTZFError::Other {
+            message: format!(
+                "Failed to convert the Wahlperiode of a Gremium, because it exceeds i32::MAX: {e}"
+            ),
+        })?,
         model.gremium.parlament.to_string(),
     );
 
@@ -185,9 +194,8 @@ pub async fn station_merge_candidates(
 
     if !conflict.is_empty() {
         let err = format!(
-            "Tried to insert a station {} into the database that matches by api id, but is associated with a different Vorgang ({}).\n
+            "Tried to insert a station {api_id} into the database that matches by api id, but is associated with a different Vorgang ({}).\n
             This almost always indicates an error.",
-            model.api_id.unwrap(),
             conflict[0],
         );
         tracing::error!("{}", &err);
@@ -196,22 +204,22 @@ pub async fn station_merge_candidates(
 
     let result = sqlx::query!(
         "SELECT s.id, s.api_id FROM station s
-    INNER JOIN stationstyp st ON st.id=s.typ
-    INNER JOIN gremium g ON g.id=s.gr_id
-    INNER JOIN parlament p ON p.id = g.parl
-    WHERE s.api_id = $1 OR
-    (s.vg_id = $2 AND st.value = $3 AND  -- vorgang und stationstyp übereinstimmen
-    (g.name = $4 OR $4 IS NULL) AND  -- gremiumname übereinstimmt
-    (p.value = $5 OR $5 IS NULL) AND  -- parlamentname übereinstimmt
-    (g.wp = $6 OR $6 IS NULL) AND -- gremium wahlperiode übereinstimmt
-    EXISTS (SELECT * FROM rel_station_dokument rsd
+        INNER JOIN stationstyp st ON st.id=s.typ
+        INNER JOIN gremium g ON g.id=s.gr_id
+        INNER JOIN parlament p ON p.id = g.parl
+        WHERE s.api_id = $1 OR
+        (s.vg_id = $2 AND st.value = $3 AND  -- vorgang und stationstyp übereinstimmen
+        (g.name = $4 OR $4 IS NULL) AND  -- gremiumname übereinstimmt
+        (p.value = $5 OR $5 IS NULL) AND  -- parlamentname übereinstimmt
+        (g.wp = $6 OR $6 IS NULL) AND -- gremium wahlperiode übereinstimmt
+        EXISTS (SELECT * FROM rel_station_dokument rsd
         INNER JOIN dokument d ON rsd.dok_id=d.id
         WHERE rsd.stat_id = s.id
         AND d.hash IN (SELECT str FROM UNNEST($7::text[]) blub(str))
 	))",
         model.api_id,
         vorgang,
-        srv.guard_ts(&model.typ, api_id, obj)?,
+        srv.guard_ts(&model.typ, api_id, obj),
         gr_name,
         gr_parl,
         gr_wp,
@@ -240,13 +248,13 @@ pub async fn station_merge_candidates(
 }
 
 /// wenn gleich:
-/// api_id OR hash OR (typ AND drucksNr AND zp_referenz)
+/// `api_id` OR hash OR (typ AND drucksNr AND `zp_referenz`)
 pub async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
 ) -> Result<MatchState<i32>> {
-    let dids = sqlx::query!(
+    let dids = sqlx::query_scalar!(
         "SELECT d.id FROM dokument d 
         INNER JOIN dokumententyp dt ON dt.id = d.typ 
         WHERE 
@@ -260,10 +268,9 @@ pub async fn dokument_merge_candidates(
             &model.typ,
             model.api_id.unwrap_or(Uuid::nil()),
             "dok_merge_candidates"
-        )?,
+        ),
         model.zp_referenz
     )
-    .map(|r| r.id)
     .fetch_all(executor)
     .await?;
     if dids.is_empty() {
@@ -275,6 +282,7 @@ pub async fn dokument_merge_candidates(
     }
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod candid_test {
     use super::*;
@@ -330,7 +338,7 @@ mod candid_test {
         #[cfg(not(feature = "track-validation"))]
         let vgs: Vec<_> = (1..5).map(generate::random::vorgang).collect();
         // insert vorgang 1,2,3, ...
-        for vg in vgs.iter() {
+        for vg in &vgs {
             let r = srv
                 .vorgang_id_put(
                     &Method::PUT,
@@ -343,10 +351,14 @@ mod candid_test {
                     vg,
                 )
                 .await
-                .unwrap();
+                .expect("Failed ot get valid server respone when trying to push new Vorgang.");
             assert!(matches!(r, VorgangIdPutResponse::Status201_Created { .. }));
         }
-        let mut tx = srv.sqlx_db.begin().await.unwrap();
+        let mut tx = srv
+            .sqlx_db
+            .begin()
+            .await
+            .expect("Failed to start dabase transaction.");
         // check wether all conditions are "enough" to find a specific station
         let mod_v0 = models::Vorgang {
             api_id: uuid::Uuid::nil(),
@@ -355,14 +367,14 @@ mod candid_test {
         // matching on exactly one if only differing el is the api_id
         let candidate = super::vorgang_merge_candidates(&mod_v0, &mut *tx, srv)
             .await
-            .unwrap();
+            .expect("Failed to find merge candidate.");
         assert!(matches!(candidate, MatchState::ExactlyOne(_)));
         // check wether insufficient uniqueness conditions yield appropriate results:
         // no match for something not in the db
         let candidate =
             super::vorgang_merge_candidates(&generate::default_vorgang(), &mut *tx, srv)
                 .await
-                .unwrap();
+                .expect("Failed to find non-existent merge candidate.");
         assert!(matches!(candidate, MatchState::NoMatch));
 
         // ambiguous match for ambiguous conditions
@@ -382,7 +394,7 @@ mod candid_test {
                 &double_vg,
             )
             .await
-            .unwrap();
+            .expect("Failed to get valid server response when trying to push Vorgang with ambigous merge conditions.");
         assert!(matches!(
             ins,
             VorgangIdPutResponse::Status201_Created { .. }
@@ -411,9 +423,13 @@ mod candid_test {
                 &vg,
             )
             .await
-            .unwrap();
+            .expect("Vorgang loading failed");
 
-        let mut tx = srv.sqlx_db.begin().await.unwrap();
+        let mut tx = srv
+            .sqlx_db
+            .begin()
+            .await
+            .expect("Starting a Transaction failed");
         let singular_match = station_merge_candidates(&stat, 1, &mut tx, srv).await;
         assert!(matches!(singular_match, Ok(MatchState::ExactlyOne(_))));
 
@@ -496,7 +512,7 @@ mod candid_test {
             }))
             .collect();
         // insert vorgang 1,2,3, ...
-        for vg in vgs.iter() {
+        for vg in &vgs {
             let r = srv
                 .vorgang_id_put(
                     &Method::PUT,
@@ -509,17 +525,21 @@ mod candid_test {
                     vg,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server response when trying to push new Vorgang.");
             assert!(matches!(r, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }));
         }
-        let mut tx = srv.sqlx_db.begin().await.unwrap();
+        let mut tx = srv
+            .sqlx_db
+            .begin()
+            .await
+            .expect("Failed to start dabase transaction.");
         let test_docs = [
             // by api_id
             models::Dokument {
                 hash: "91843918479182471".to_string(),
                 drucksnr: Some("123/1241204".to_string()),
                 zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
-                    .unwrap()
+                    .expect("Failed to parse datetime. Test broken.")
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
                 ..generate::random::dokument(0)
@@ -529,7 +549,7 @@ mod candid_test {
                 api_id: Some(uuid::Uuid::now_v7()),
                 drucksnr: Some("123/1241204".to_string()),
                 zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
-                    .unwrap()
+                    .expect("Failed to parse datetime. Test broken.")
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
                 ..generate::random::dokument(0)
@@ -542,13 +562,10 @@ mod candid_test {
             },
         ];
         for (i, d) in test_docs.iter().enumerate() {
-            let r = dokument_merge_candidates(&d, &mut *tx, srv).await.unwrap();
-            assert!(
-                matches!(r, MatchState::ExactlyOne(_)),
-                "Dok {} was {:?}",
-                i,
-                r
-            );
+            let r = dokument_merge_candidates(d, &mut *tx, srv)
+                .await
+                .expect("Failed to find merge candidate");
+            assert!(matches!(r, MatchState::ExactlyOne(_)), "Dok {i} was {r:?}");
         }
         // no matching identifiers
         let fail = models::Dokument {
@@ -556,14 +573,14 @@ mod candid_test {
             hash: "91843918479182471".to_string(),
             drucksnr: Some("123/1241204".to_string()),
             zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
-                .unwrap()
+                .expect("Failed to parse datetime. Test broken.")
                 .to_utc(),
             typ: models::Doktyp::Antwort,
             ..generate::random::dokument(0)
         };
         let r = dokument_merge_candidates(&fail, &mut *tx, srv)
             .await
-            .unwrap();
+            .expect("Failed to find non-existent merge candidate.");
         assert!(matches!(r, MatchState::NoMatch));
         setup.teardown().await;
     }

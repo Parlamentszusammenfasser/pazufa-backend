@@ -7,7 +7,11 @@ use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use headers::Host;
 use openapi::apis::{
-    collector_schnittstellen_vorgang::*, data_administration_vorgang::*, unauthorisiert_vorgang::*,
+    collector_schnittstellen_vorgang::{CollectorSchnittstellenVorgang, VorgangPutResponse},
+    data_administration_vorgang::{
+        DataAdministrationVorgang, VorgangDeleteResponse, VorgangIdPutResponse,
+    },
+    unauthorisiert_vorgang::{UnauthorisiertVorgang, VorgangGetByIdResponse, VorgangGetResponse},
 };
 use openapi::models;
 use tracing::{debug, error, info, instrument, warn};
@@ -21,7 +25,7 @@ use crate::db;
 #[async_trait]
 impl DataAdministrationVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "VorgangDelete - DELETE /api/v2/vorgang/{vorgang_id}"]
+    #[doc = "`VorgangDelete` - DELETE /`api/v2/vorgang/{vorgang_id`}"]
     #[instrument(skip_all, fields(claims=%claims.0, vg_id=%path_params.vorgang_id))]
     async fn vorgang_delete(
         &self,
@@ -44,7 +48,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
         Ok(id_vg_del)
     }
 
-    #[doc = "VorgangIdPut - PUT /api/v2/vorgang/{vorgang_id}"]
+    #[doc = "`VorgangIdPut` - PUT /`api/v2/vorgang/{vorgang_id`}"]
     #[instrument(skip_all, fields(claims=%claims.0, vg_id=%path_params.vorgang_id))]
     async fn vorgang_id_put(
         &self,
@@ -81,15 +85,14 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
                 });
             }
             debug!("Found to be different enough to not be exactly the same. Deleting...");
-            match delete::delete_vorgang_by_api_id(api_id, self).await? {
-                VorgangDeleteResponse::Status204_NoContent { .. } => {
-                    debug!("Delete successful, now inserting...");
-                    insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
-                }
-                _ => {
-                    error!("After successful delete an insert cannot fail");
-                    unreachable!("If this is reached, some assumptions did not hold")
-                }
+            if let VorgangDeleteResponse::Status204_NoContent { .. } =
+                delete::delete_vorgang_by_api_id(api_id, self).await?
+            {
+                debug!("Delete successful, now inserting...");
+                insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
+            } else {
+                error!("After successful delete an insert cannot fail");
+                unreachable!("If this is reached, some assumptions did not hold")
             }
         } else {
             debug!("No Match found");
@@ -110,7 +113,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
 impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
-    #[doc = "VorgangPut - PUT /api/v2/vorgang"]
+    #[doc = "`VorgangPut` - PUT /api/v2/vorgang"]
     #[instrument(skip_all, fields(claims=%claims.0, scraper=%header_params.x_scraper_id))]
     async fn vorgang_put(
         &self,
@@ -167,7 +170,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
-    #[doc = "VorgangGetById - GET /api/v2/vorgang/{vorgang_id}"]
+    #[doc = "`VorgangGetById` - GET /`api/v2/vorgang/{vorgang_id`}"]
     #[instrument(skip_all, fields(vg=%path_params.vorgang_id))]
     async fn vorgang_get_by_id(
         &self,
@@ -184,71 +187,77 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         let claims = (APIScope::Collector, 0);
 
         let mut tx = self.sqlx_db.begin().await?;
-        let exists = sqlx::query!(
-            "SELECT 1 as out FROM vorgang WHERE api_id = $1",
-            path_params.vorgang_id
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .is_some();
-        if !exists {
-            warn!("Vorgang was not found");
-            return Ok(VorgangGetByIdResponse::Status404_NotFound {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let dbid = sqlx::query!(
-            "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
-                SELECT 1 FROM station s WHERE s.zp_modifiziert > COALESCE($2::timestamptz, '1940-01-01T00:00:00Z') AND s.vg_id = vorgang.id
-            )",
-            path_params.vorgang_id,
-            header_params.if_modified_since
-        )
-        .map(|x| x.id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if let Some(dbid) = dbid {
-            let mut result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
-            if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
-                result.touched_by = as_option(
-                    sqlx::query!(
-                        "SELECT * FROM scraper_touched_vorgang sts
-                INNER JOIN api_keys ON api_keys.id = sts.collector_key
-                WHERE vg_id = $1",
-                        dbid
-                    )
-                    .map(|r| models::TouchedByInner {
-                        key: Some(r.key_hash),
-                        scraper_id: Some(r.scraper),
-                    })
-                    .fetch_all(&mut *tx)
-                    .await?,
-                );
-            }
-            tx.commit().await?;
-            info!("Successful retrieval");
-            Ok(VorgangGetByIdResponse::Status200_Success {
-                body: result,
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            })
+
+        let dbid = if let Some(if_modified_since) = header_params.if_modified_since {
+            sqlx::query_scalar!(
+                "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
+                    SELECT 1 FROM station s WHERE s.zp_modifiziert > $2::timestamptz AND s.vg_id = vorgang.id
+                )",
+                path_params.vorgang_id,
+                if_modified_since
+            )
         } else {
-            info!(
-                "Successful Retrieval, was unchanged since {}",
-                header_params.if_modified_since.unwrap()
-            );
-            Ok(VorgangGetByIdResponse::Status304_NotModified {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            })
+            sqlx::query_scalar!(
+                "SELECT id FROM vorgang WHERE api_id = $1",
+                path_params.vorgang_id
+            )
         }
+            .fetch_optional(&mut *tx)
+            .await?;
+
+        let res = match (header_params.if_modified_since, dbid) {
+            (_, Some(dbid)) => {
+                let mut result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
+                if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
+                    result.touched_by = as_option(
+                        sqlx::query!(
+                            "SELECT * FROM scraper_touched_vorgang sts
+                            INNER JOIN api_keys ON api_keys.id = sts.collector_key
+                            WHERE vg_id = $1",
+                            dbid
+                        )
+                        .map(|r| models::TouchedByInner {
+                            key: Some(r.key_hash),
+                            scraper_id: Some(r.scraper),
+                        })
+                        .fetch_all(&mut *tx)
+                        .await?,
+                    );
+                }
+                info!("Successful retrieval");
+                Ok(VorgangGetByIdResponse::Status200_Success {
+                    body: result,
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                })
+            }
+            (Some(if_modified_since), None) => {
+                info!(
+                    "Successful Retrieval, was unchanged since {}",
+                    if_modified_since
+                );
+                Ok(VorgangGetByIdResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                })
+            }
+            (None, None) => {
+                warn!("Vorgang was not found");
+                Ok(VorgangGetByIdResponse::Status404_NotFound {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                })
+            }
+        };
+
+        tx.commit().await?;
+        res
     }
 
-    #[doc = "VorgangGet - GET /api/v2/vorgang"]
+    #[doc = "`VorgangGet` - GET /api/v2/vorgang"]
     #[instrument(skip_all)]
     async fn vorgang_get(
         &self,
@@ -284,28 +293,26 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
                 &mut tx,
             )
             .await?;
-            if result.1.is_empty() && header_params.if_modified_since.is_none() {
+            if result.1.is_empty() {
                 tx.rollback().await?;
-                info!(
-                    "Parameters did not yield any content: {:?}, ims=None",
-                    query_params
-                );
-                Ok(VorgangGetResponse::Status204_NoContent {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                })
-            } else if result.1.is_empty() && header_params.if_modified_since.is_some() {
-                tx.rollback().await?;
-                info!(
-                    "No modification to result set since {}",
-                    header_params.if_modified_since.unwrap()
-                );
-                Ok(VorgangGetResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                })
+                if let Some(if_modified_since) = header_params.if_modified_since {
+                    info!("No modification to result set since {}", if_modified_since);
+                    Ok(VorgangGetResponse::Status304_NotModified {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    })
+                } else {
+                    info!(
+                        "Parameters did not yield any content: {:?}, ims=None",
+                        query_params
+                    );
+                    Ok(VorgangGetResponse::Status204_NoContent {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    })
+                }
             } else {
                 tx.commit().await?;
                 let prp = &result.0;
@@ -337,6 +344,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
     }
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_endpoints {
 
@@ -379,7 +387,7 @@ mod test_endpoints {
                 &test_vorgang,
             )
             .await
-            .unwrap();
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
         assert_eq!(
             create_response,
             VorgangPutResponse::Status201_Created {
@@ -405,13 +413,20 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect(
+                    "Failed to get valid server respone when trying to get existing Vorgang by ID.",
+                );
             match response {
                 VorgangGetByIdResponse::Status200_Success { body, .. } => {
                     assert_eq!(body.api_id, test_vorgang.api_id);
                     assert_eq!(body.titel, test_vorgang.titel);
                 }
-                _ => panic!("Expected successful operation response"),
+                VorgangGetByIdResponse::Status304_NotModified { .. } => panic!(
+                    "Test server returned \"304: Not Modified\", even though \"if_modified_since\" was set to `None`."
+                ),
+                VorgangGetByIdResponse::Status404_NotFound { .. } => panic!(
+                    "Test server returned \"404: Not Found\", even though Vorgang was just pushed with positive response code."
+                ),
             }
         }
 
@@ -431,7 +446,9 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect(
+                    "Failed to get valid server respone when trying to get existing Vorgang by ID.",
+                );
             assert_eq!(
                 response,
                 VorgangGetByIdResponse::Status404_NotFound {
@@ -458,7 +475,7 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to get Vorgang by an invalid ID (nil).");
             assert_eq!(
                 response,
                 VorgangGetByIdResponse::Status404_NotFound {
@@ -481,7 +498,7 @@ mod test_endpoints {
                 },
             )
             .await
-            .unwrap();
+                .expect("Failed to get valid server respone when trying to get existing Vorgang by ID with update time limitations.");
         assert_eq!(
             response,
             VorgangGetByIdResponse::Status304_NotModified {
@@ -512,7 +529,7 @@ mod test_endpoints {
                     &test_vorgang,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 create_response,
                 VorgangPutResponse::Status201_Created {
@@ -549,7 +566,7 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to get existing Vorgang with invalid date range.");
             assert_eq!(
                 response,
                 VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
@@ -580,7 +597,7 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to get existing Vorgang with date range in the future.");
             assert_eq!(
                 response,
                 VorgangGetResponse::Status204_NoContent {
@@ -621,7 +638,7 @@ mod test_endpoints {
                     &test_vorgang,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 create_response,
                 VorgangPutResponse::Status201_Created {
@@ -648,14 +665,14 @@ mod test_endpoints {
                         since: None,
                         until: None,
                         vgtyp: Some(test_vorgang.typ),
-                        wp: Some(test_vorgang.wahlperiode as i32),
+                        wp: Some(i32::try_from(test_vorgang.wahlperiode).expect("Failed to convert Wahlperiode as it exceeds i32::MAX.")),
                         fach: None,
                         org: None,
                         person: None,
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to get existing Vorgang with valid filters.");
             match response {
                 VorgangGetResponse::Status200_Successful { body, .. } => {
                     assert!(!body.is_empty());
@@ -692,7 +709,7 @@ mod test_endpoints {
                     &test_vorgang,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 response,
                 VorgangIdPutResponse::Status201_Created {
@@ -718,7 +735,7 @@ mod test_endpoints {
                     &test_vorgang,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang without permissions.");
             assert_eq!(
                 response,
                 VorgangIdPutResponse::Status403_Forbidden {
@@ -745,7 +762,7 @@ mod test_endpoints {
                     &test_vorgang,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 response,
                 VorgangPutResponse::Status201_Created {
@@ -776,7 +793,7 @@ mod test_endpoints {
                     &vg1,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 rsp1,
                 VorgangIdPutResponse::Status201_Created {
@@ -798,7 +815,7 @@ mod test_endpoints {
                     &vg2,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 rsp2,
                 VorgangIdPutResponse::Status201_Created {
@@ -820,7 +837,9 @@ mod test_endpoints {
                     &vg3,
                 )
                 .await
-                .unwrap();
+                .expect(
+                    "Failed to get valid server respone when trying to push conflicting Vorgang.",
+                );
             assert_eq!(
                 conflict_resp,
                 VorgangPutResponse::Status409_Conflict {
@@ -858,7 +877,7 @@ mod test_endpoints {
                     &test_vorgang,
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to push new Vorgang.");
             assert_eq!(
                 create_response,
                 VorgangPutResponse::Status201_Created {
@@ -880,7 +899,7 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to delete Vorgang.");
             assert_eq!(
                 response,
                 VorgangDeleteResponse::Status204_NoContent {
@@ -907,7 +926,7 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to delete non-existent Vorgang.");
             assert_eq!(
                 response,
                 VorgangDeleteResponse::Status404_NotFound {
@@ -932,7 +951,7 @@ mod test_endpoints {
                     },
                 )
                 .await
-                .unwrap();
+                .expect("Failed to get valid server respone when trying to delete Vorgang w/ insufficient permissions.");
             assert_eq!(
                 response,
                 VorgangDeleteResponse::Status403_Forbidden {
@@ -957,6 +976,7 @@ mod test_endpoints {
     }
 }
 
+#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_failed_irl_scenarios {
     use crate::{api::auth::APIScope, utils::testing::TestSetup};
@@ -979,12 +999,14 @@ mod test_failed_irl_scenarios {
     }
 
     async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
-        let file = tokio::fs::File::open(path).await.unwrap();
+        let file = tokio::fs::File::open(path)
+            .await
+            .expect("Failed to open JSON lines file.");
         let buf_reader = BufReader::new(file);
         let mut records = vec![];
         let mut lines = buf_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            records.push(serde_json::from_str(&line).unwrap())
+            records.push(serde_json::from_str(&line).expect("Failed to deserialize JSON line."));
         }
         records
     }
@@ -1029,5 +1051,8 @@ mod test_failed_irl_scenarios {
         "tests/scenarios/on_onflict_upd_nodouble.jsonl",
         test_scenario_on_onflict_upd_nodouble
     );
-    irl_scenario!("tests/scenarios/500_sqlx_query.jsonl", test_500_sqlx_query);
+    irl_scenario!(
+        "tests/scenarios/500_sqlx_query.jsonl",
+        sqlx_ret_500_query_returned_no_rows
+    );
 }

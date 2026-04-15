@@ -1,8 +1,8 @@
 when:
-  - event: [ push, tag ]
+  - event: [ push ]
 
 variables:
-  - &version "0.2.7+1"
+  - &version "0.2.8"
 
 labels:
   pazufa_scope: generic
@@ -20,8 +20,6 @@ services:
 steps:
   - name: formatting
     image: rust:1.92-slim-bookworm
-    when:
-      - event: push
     commands:
       - rustup component add rustfmt
       - nice cargo fmt --check
@@ -30,8 +28,6 @@ steps:
 
   - name: linting & testing
     image: rust:1.92-slim-bookworm
-    when:
-      - event: push
     commands:
       - rustup component add clippy
       - apt update -qq && apt install git maven curl pkg-config libssl-dev libpq5 -yqq --no-install-recommends > /dev/null
@@ -49,7 +45,7 @@ steps:
       - cargo sqlx prepare --check
 
       # run tests / linting
-      - nice cargo clippy --workspace -- -D warnings
+      - nice cargo clippy --all-targets
       - nice cargo test
     environment:
       SPEC_PATH: https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3/docs/specs/openapi.yml
