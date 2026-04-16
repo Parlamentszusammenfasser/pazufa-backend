@@ -19,7 +19,7 @@ use openapi::apis::sitzung_unauthorisiert::{
     KalDateGetResponse, KalGetResponse, SGetByIdResponse, SGetResponse, SitzungUnauthorisiert,
 };
 use openapi::models;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
@@ -134,8 +134,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             {
                 insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
             } else {
-                error!("Delete was unsuccessful despite session being in the database");
-                unreachable!("If this is reached, some assumptions did not hold")
+                unreachable!("Delete was unsuccessful despite session being in the database");
             }
         } else {
             insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
@@ -505,9 +504,8 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             })
         } else {
-            error!("Session ID was not found a second time despite if_modified_since being None. This might indicate a grave database state error.\n
+            unreachable!("Session ID was not found a second time despite if_modified_since being None. This might indicate a grave database state error.\n
             Call Parameters: {:?}, {:?}", path_params, header_params);
-            unreachable!("This should not happen.")
         }
     }
 

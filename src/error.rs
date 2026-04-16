@@ -98,6 +98,9 @@ error_from!(
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum InfrastructureError {
+    #[snafu(display("Infrastructure Error: {reason}"))]
+    General { reason: String },
+
     #[snafu(display("Server error: {source}"))]
     Server { source: axum::Error },
 

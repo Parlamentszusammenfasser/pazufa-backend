@@ -43,7 +43,6 @@ COPY ./.git ./.git
 COPY ./.sqlx ./.sqlx
 COPY ./src ./src
 COPY ./migrations ./migrations
-COPY ./tracks.toml ./tracks.toml
 
 
 ENV SQLX_OFFLINE=true
@@ -78,6 +77,6 @@ COPY --from=builder --chmod=0100 --chown=pazufa-backend:pazufa-backend /app/targ
 WORKDIR /app
 
 USER pazufa-backend
-ENV RUST_LOG=warn,pazufa-backend=info
+ENV RUST_LOG=warn,pazufa_backend=info
  
 ENTRYPOINT ["./pazufa-backend"]

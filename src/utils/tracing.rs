@@ -94,7 +94,7 @@ impl Logging {
                 .append(true)
                 .create(true)
                 .open(object_log)
-                .expect("Should Create or Append");
+                .expect("Object Log Should Create or Append");
 
             fmt.with_writer(file)
                 .with_filter(tracing_subscriber::filter::filter_fn(|meta| {

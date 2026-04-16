@@ -13,22 +13,22 @@ services:
       POSTGRES_DB: ltzf
 
   pazufa-backend:
+    #image: pazufa/backend:0.2.7
     build:
       context: .
       dockerfile: Dockerfile.deploy
       network: host
     container_name: pazufa-backend
     ports:
-      - 8080:80
+      - 8080:8080
     depends_on:
       - database
     networks:
       - pazufa-network
     environment:
       DATABASE_URL: "postgres://ltzf-user:ltzf-pass@database:5432/ltzf" # required
-      RUST_LOG: "warn,pazufa-backend=info"                                                 # optional
+      RUST_LOG: "warn,pazufa_backend=info"                                                 # optional
+      LTZF_PORT: "8080"
       LTZF_KEYADDER_KEY: "tegernsee-apfelsaft-co2grenzwert"             # required
-      MAIL_SERVER: "smtp.web.de"
-      MAIL_USER: "tophatinkling@web.de"
 networks:
   pazufa-network:

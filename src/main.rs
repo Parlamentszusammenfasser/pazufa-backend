@@ -21,6 +21,7 @@ use tower_http::{compression::CompressionLayer, cors, limit};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::error::InfrastructureError;
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
 use std::process::exit;
@@ -215,7 +216,11 @@ async fn main() -> Result<()> {
     tracing::debug!("Configuration: {:?}", &config);
 
     tracing::info!("Starting the Initialisation process");
-    let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
+    let listener = TcpListener::bind(format!("{}:{}", config.host, config.port))
+        .await
+        .map_err(|_| InfrastructureError::General {
+            reason: format!("Failed to bind to {}:{}", config.host, config.port),
+        })?;
 
     tracing::debug!("Started Listener");
     let sqlx_db = init_db_conn(&config.db_url).await?;
