@@ -23,7 +23,7 @@ trackfile = file["version"]["trackfile"]
 
 replace("Dockerfile.deploy", r"LABEL version=\"\d+\.\d+\.\d+\"", f"LABEL version=\"{version}\"")
 replace("Cargo.toml", "version\\s*=\\s*\"\\d+\\.\\d+\\.\\d+\"\n", f"version = \"{version}\"\n")
-replace(".woodpecker.yml", r"  - &version \"\d+\.\d+\.\d+\"", f"  - &version \"{version}\"")
+replace(".woodpecker/deploy.yml", r"  - &version \"\d+\.\d+\.\d+\"", f"  - &version \"{version}\"")
 
 
 replace("Dockerfile.deploy", r"ENV TRACK_PATH=\"https://.*\"", f"ENV TRACK_PATH=\"{trackfile}\"")

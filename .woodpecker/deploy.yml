@@ -1,0 +1,24 @@
+when:
+  - event: tag
+    branch: main
+
+variables:
+  - &version "0.2.8"
+
+labels:
+  pazufa_scope: generic
+  performance: high
+
+steps:
+  - name: deploy on docker
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    settings:
+      repo: pazufa/backend
+      dockerfile: Dockerfile.deploy
+      platforms: 
+        - linux/amd64
+        - linux/aarch64
+      tag: *version
+      username: pazufa
+      password:
+        from_secret: pazufa-docker-pass
