@@ -7,7 +7,7 @@ public API to read the dataset of parliamentary proceedings.
 ## One-Step Setup For Scraper Development
 To just "get it up and running", e.g. locally as a counterpart during 
 scraper development, please run:
-`docker compose up -d --build` (every time you want the service to start)
+`docker compose up -d` (every time you want the service to start)
 
 `-d` is for detach, logs are then visible via 
 `docker logs -f <container>`, it can be stopped via 
@@ -26,6 +26,8 @@ Please also note that this requires port 8080 not to be occupied by any other
 program. If you wish to utilize a different port you must set it in the
 `docker-compose.yml` itself by changing this line:
 `- 8080:8080` to `-<your port>:8080`.
+
+Instead of using the pre-built image from the DockerHub, run `docker compose up -d --build` to build the image yourself.
 
 ## Setting up for Development
 ### Setting up Rust

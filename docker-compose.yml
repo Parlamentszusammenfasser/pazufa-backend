@@ -1,32 +1,34 @@
 services:
-  database:
+  pazufa-database:
     image: postgres:latest
-    container_name: pg-server
+#    container_name: pazufa-database-dev
     restart: unless-stopped
     ports:
       - 5432:5432
     networks:
       - pazufa-network
     environment:
-      POSTGRES_USER: ltzf-user
-      POSTGRES_PASSWORD: ltzf-pass
-      POSTGRES_DB: ltzf
+      POSTGRES_USER: pazufa-user
+      POSTGRES_PASSWORD: pazufa-pass
+      POSTGRES_DB: pazufa
 
   pazufa-backend:
-    #image: pazufa/backend:0.2.7
+    image: pazufa/backend:0.2.8
+    restart: unless-stopped
+# use `docker compose up --build` to not use the repository image but build yourself instead
     build:
-      context: .
+      context: pazufa-backend
       dockerfile: Dockerfile.deploy
       network: host
-    container_name: pazufa-backend
+#    container_name: pazufa-backend
     ports:
       - 8080:8080
     depends_on:
-      - database
+      - pazufa-database
     networks:
       - pazufa-network
     environment:
-      DATABASE_URL: "postgres://ltzf-user:ltzf-pass@database:5432/ltzf" # required
+      DATABASE_URL: "postgres://pazufa-user:pazufa-pass@pazufa-database:5432/pazufa" # required
       RUST_LOG: "warn,pazufa_backend=info"                                                 # optional
       LTZF_PORT: "8080"
       LTZF_KEYADDER_KEY: "tegernsee-apfelsaft-co2grenzwert"             # required
