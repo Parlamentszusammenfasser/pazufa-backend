@@ -28,7 +28,8 @@ COPY build.rs ./
 COPY ./.git ./.git
 COPY ./.sqlx ./.sqlx
 COPY ./migrations ./migrations
-COPY ./tracks.toml ./tracks.toml
+RUN curl -o ./tracks.toml $TRACK_PATH
+COPY ./track-validation ./track-validation
 COPY ./src ./src
 
 ENV SQLX_OFFLINE=true

@@ -17,8 +17,8 @@ services:
     restart: unless-stopped
 # use `docker compose up --build` to not use the repository image but build yourself instead
     build:
-      context: pazufa-backend
-      dockerfile: Dockerfile.deploy
+      context: .
+      dockerfile: Dockerfile
       network: host
 #    container_name: pazufa-backend
       platforms:
