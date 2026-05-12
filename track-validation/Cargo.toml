@@ -1,0 +1,19 @@
+[package]
+name = "track-validation"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "track_validation"
+
+[[bin]]
+name = "conflicts-benchmark"
+
+
+[dependencies]
+tracing = "0.1.44"
+rand = "0.9"
+snafu = "0.8"
+
+[dev-dependencies]
+tracing-test = "0.2.5"

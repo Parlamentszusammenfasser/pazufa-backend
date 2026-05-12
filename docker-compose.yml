@@ -21,6 +21,8 @@ services:
       dockerfile: Dockerfile.deploy
       network: host
 #    container_name: pazufa-backend
+      platforms:
+        - linux/amd64
     ports:
       - 8080:8080
     depends_on:

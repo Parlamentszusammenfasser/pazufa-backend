@@ -1,33 +1,310 @@
-use chrono::{DateTime, Datelike, Utc};
-use chrono::{DurationRound, NaiveDate};
-use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use axum::response::IntoResponse;
-use axum_extra::extract::CookieJar;
-use headers::Host;
-use openapi::models;
-use tracing::{debug, instrument};
-
-use crate::Configuration;
-use crate::Result;
 #[cfg(feature = "track-validation")]
 use crate::db::validate::Tracks;
-use crate::error::LTZFError;
 use crate::utils::notify;
 use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
-use openapi::apis::unauthorisiert::{PingResponse, StatusResponse, Unauthorisiert};
+use crate::{Configuration, models};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Json, Response};
+use chrono::{DateTime, Datelike, DurationRound, NaiveDate, Utc};
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::fmt::{Debug, Display};
+use std::sync::Arc;
+use utoipa::openapi::{
+    self, ContentBuilder, HeaderBuilder, ResponseBuilder, ResponsesBuilder, Schema,
+};
+use utoipa::{IntoResponses, PartialSchema, ToSchema};
 
-pub(crate) mod auth;
-pub(crate) mod misc;
-pub(crate) mod misc_auth;
-pub(crate) mod sitzung;
-pub(crate) mod vorgang;
+pub mod auth;
+pub mod misc;
+pub mod misc_auth;
+pub mod sitzung;
+pub mod vorgang;
 
-pub type Claims = (auth::APIScope, i32);
+#[derive(PartialEq, Debug)]
+pub enum AuthListingGetResponse<T: ToSchema + Sized + Sync + Send + Serialize + Debug + PartialEq> {
+    Error(String),
+    Success {
+        body: Vec<T>,
+        prp: PaginationResponsePart,
+        path_prefix: &'static str,
+    },
+    Unauth,
+    NoContent,
+    NotMod,
+    BadReq,
+}
+
+impl<T: ToSchema + Sized + Sync + Send + Serialize + Debug + PartialEq> IntoResponses
+    for AuthListingGetResponse<T>
+{
+    fn responses() -> BTreeMap<String, openapi::RefOr<openapi::response::Response>> {
+        ResponsesBuilder::new()
+            .response(
+                "200",
+                ResponseBuilder::new()
+                    .header(
+                        "link",
+                        HeaderBuilder::new()
+                            .schema(models::headers::Link::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-page",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XPage::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-per-page",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XPerPage::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-total-pages",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XTotalPages::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-total-count",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XTotalPages::schema())
+                            .build(),
+                    )
+                    .description("Ok")
+                    .content(
+                        "application/json",
+                        ContentBuilder::new().schema(Some(T::schema())).build(),
+                    ),
+            )
+            .response(
+                "500",
+                ResponseBuilder::new()
+                    .content("text/plain", ContentBuilder::new().schema(Some("")).build())
+                    .description("Error"),
+            )
+            .response("204", ResponseBuilder::new().description("No Content"))
+            .response("401", ResponseBuilder::new().description("Unauthorized"))
+            .response("304", ResponseBuilder::new().description("Not Modified"))
+            .response("400", ResponseBuilder::new().description("Bad Request"))
+            .build()
+            .into()
+    }
+}
+impl<T: ToSchema + Sized + Sync + Send + Serialize + Debug + PartialEq> IntoResponse
+    for AuthListingGetResponse<T>
+{
+    fn into_response(self) -> Response {
+        match self {
+            Self::Error(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            Self::BadReq => StatusCode::BAD_REQUEST.into_response(),
+            Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
+            Self::Unauth => StatusCode::UNAUTHORIZED.into_response(),
+            Self::NoContent => StatusCode::NO_CONTENT.into_response(),
+            Self::Success {
+                body,
+                prp,
+                path_prefix,
+            } => {
+                let mut hm = HeaderMap::new();
+                let Ok(link) = HeaderValue::from_str(&prp.generate_link_header(path_prefix)) else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                hm.insert("link", link);
+                hm.insert("x-per-page", prp.x_per_page.into());
+                hm.insert("x-page", prp.x_page.into());
+                hm.insert("x-total-pages", prp.x_total_pages.into());
+                hm.insert("x-total-count", prp.x_total_count.into());
+
+                (StatusCode::OK, hm, Json(body)).into_response()
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ListingGetResponse<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> {
+    Error(String),
+    Success {
+        body: Vec<T>,
+        prp: PaginationResponsePart,
+        path_prefix: &'static str,
+    },
+    NoContent,
+    NotMod,
+    BadReq,
+}
+
+impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResponses
+    for ListingGetResponse<T>
+{
+    fn responses() -> BTreeMap<String, openapi::RefOr<openapi::response::Response>> {
+        ResponsesBuilder::new()
+            .response(
+                "200",
+                ResponseBuilder::new()
+                    .header(
+                        "link",
+                        HeaderBuilder::new()
+                            .schema(models::headers::Link::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-page",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XPage::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-per-page",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XPerPage::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-total-pages",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XTotalPages::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-total-count",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XTotalPages::schema())
+                            .build(),
+                    )
+                    .description("Ok")
+                    .content(
+                        "application/json",
+                        ContentBuilder::new()
+                            .schema(Some(Schema::Array(openapi::Array::new(T::schema()))))
+                            .build(),
+                    ),
+            )
+            .response(
+                "500",
+                ResponseBuilder::new()
+                    .content("text/plain", ContentBuilder::new().schema(Some("")).build())
+                    .description("Error"),
+            )
+            .response("204", ResponseBuilder::new().description("No Content"))
+            .response("304", ResponseBuilder::new().description("Not Modified"))
+            .response("400", ResponseBuilder::new().description("Bad Request"))
+            .build()
+            .into()
+    }
+}
+impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResponse
+    for ListingGetResponse<T>
+{
+    fn into_response(self) -> Response {
+        match self {
+            Self::Error(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            Self::BadReq => StatusCode::BAD_REQUEST.into_response(),
+            Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
+            Self::NoContent => StatusCode::NO_CONTENT.into_response(),
+            Self::Success {
+                body,
+                prp,
+                path_prefix,
+            } => {
+                let mut hm = HeaderMap::new();
+                let Ok(link) = HeaderValue::from_str(&prp.generate_link_header(path_prefix)) else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                hm.insert("link", link);
+                hm.insert("x-per-page", prp.x_per_page.into());
+                hm.insert("x-page", prp.x_page.into());
+                hm.insert("x-total-pages", prp.x_total_pages.into());
+                hm.insert("x-total-count", prp.x_total_count.into());
+
+                (StatusCode::OK, hm, Json(body)).into_response()
+            }
+        }
+    }
+}
+
+#[derive(Debug, IntoResponses, PartialEq)]
+pub enum PutResponse {
+    #[response(status = 201, description = "Ressource Created")]
+    Success,
+    #[response(status = 401, description = "Authentication or Authorization failed")]
+    Unauth,
+    #[response(status = 304, description = "Ressource was not modified")]
+    NotMod,
+    #[response(status = 409, description = "Conflict creating the ressource")]
+    Conflict,
+    #[response(status = 400, description = "Malformed Request")]
+    BadReq(String),
+    #[response(status = 500, description = "Internal Server Error")]
+    Error(String),
+}
+impl IntoResponse for PutResponse {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Conflict => StatusCode::CONFLICT.into_response(),
+            Self::Success => StatusCode::CREATED.into_response(),
+            Self::Error(s) => (StatusCode::INTERNAL_SERVER_ERROR, s).into_response(),
+            Self::BadReq(s) => (StatusCode::BAD_REQUEST, s).into_response(),
+            Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
+            Self::Unauth => StatusCode::UNAUTHORIZED.into_response(),
+        }
+    }
+}
+
+#[derive(Debug, IntoResponses, PartialEq)]
+pub enum DeleteResponse {
+    #[response(status = 204)]
+    Success,
+    #[response(status = 401, description = "Authentication failed")]
+    Unauth,
+    #[response(status = 403, description = "Authorization failed")]
+    Forbid,
+    #[response(status = 400, description = "Malformed Request")]
+    BadReq,
+    #[response(status = 500, description = "Internal Server Error")]
+    Error(String),
+}
+impl IntoResponse for DeleteResponse {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Success => StatusCode::NO_CONTENT.into_response(),
+            Self::Error(s) => (StatusCode::INTERNAL_SERVER_ERROR, s).into_response(),
+            Self::BadReq => StatusCode::BAD_REQUEST.into_response(),
+            Self::Forbid => StatusCode::FORBIDDEN.into_response(),
+            Self::Unauth => StatusCode::UNAUTHORIZED.into_response(),
+        }
+    }
+}
+#[derive(IntoResponses, PartialEq, Debug)]
+pub enum GetSingleResponse<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> {
+    #[response(status = 500)]
+    Error(String),
+    #[response(status = 200, content_type = "application/json")]
+    Success(Box<T>),
+    #[response(status = 404)]
+    NotFound,
+    #[response(status = 304)]
+    NotMod,
+    #[response(status = 400)]
+    BadReq,
+}
+impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResponse
+    for GetSingleResponse<T>
+{
+    fn into_response(self) -> Response {
+        match self {
+            Self::Error(s) => (StatusCode::INTERNAL_SERVER_ERROR, s).into_response(),
+            Self::BadReq => StatusCode::BAD_REQUEST.into_response(),
+            Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
+            Self::NotFound => StatusCode::NOT_FOUND.into_response(),
+            Self::Success(body) => (StatusCode::OK, Json(*body)).into_response(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct LTZFServer {
@@ -67,104 +344,23 @@ impl LTZFServer {
     }
 }
 
-#[async_trait]
-impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
-    #[instrument(skip_all, fields(%method))]
-    async fn handle_error(
-        &self,
-        method: &axum::http::Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        error: LTZFError,
-    ) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
-        tracing::error!("An error occurred during {method} that was not expected: {error}\n");
-        match error {
-            LTZFError::Validation { source } => match *source {
-                crate::error::DataValidationError::MalformedVorgang { reason } => {
-                    Ok((axum::http::StatusCode::BAD_REQUEST, reason).into_response())
-                }
-                res => Ok((
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    res.to_string(),
-                )
-                    .into_response()),
-            },
-            res => Ok((
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                res.to_string(),
-            )
-                .into_response()),
-        }
-    }
-}
-
-#[async_trait]
-impl Unauthorisiert<LTZFError> for LTZFServer {
-    #[instrument(skip_all, fields(t=?query_params.t))]
-    async fn ping(
-        &self,
-        _method: &axum::http::Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        query_params: &models::PingQueryParams,
-    ) -> Result<PingResponse> {
-        if let Some(t) = query_params.t {
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|_| LTZFError::Other {
-                    message: "System time before unix epoch.".to_owned(),
-                })?
-                .as_secs_f64();
-            debug!("Ping with one-way time: {} s", current_time - t);
-        }
-        Ok(PingResponse::Status200_Pong)
-    }
-
-    #[instrument(skip_all)]
-    async fn status(
-        &self,
-        _method: &axum::http::Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-    ) -> Result<StatusResponse> {
-        debug!("Status Requested");
-        // TODO: implement "API is not running for some reason" markers
-        let body = self.statistics.output().await;
-        Ok(StatusResponse::Status200_APIIsRunning {
-            body,
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
-    }
-}
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PaginationResponsePart {
-    pub x_total_count: i32,
-    pub x_total_pages: i32,
-    pub x_page: i32,
-    pub x_per_page: i32,
-}
-
-fn div_ceil(dividend: i32, divisor: i32) -> Option<i32> {
-    let quotient = dividend.checked_div(divisor)?;
-    let remainder = dividend.checked_rem(divisor)?;
-    if remainder != 0 && dividend.is_positive() == divisor.is_positive() {
-        quotient.checked_add(1)
-    } else {
-        Some(quotient)
-    }
+    pub x_total_count: u32,
+    pub x_total_pages: u32,
+    pub x_page: u32,
+    pub x_per_page: u32,
 }
 
 impl PaginationResponsePart {
-    pub const DEFAULT_PER_PAGE: i32 = 32;
-    pub const MAX_PER_PAGE: i32 = 256;
-    pub fn new(x_total_count: i32, x_page: Option<i32>, x_per_page: Option<i32>) -> Self {
+    pub const DEFAULT_PER_PAGE: u32 = 32;
+    pub const MAX_PER_PAGE: u32 = 256;
+    #[must_use]
+    pub fn new(x_total_count: u32, x_page: Option<u32>, x_per_page: Option<u32>) -> Self {
         let x_per_page =
             x_per_page.map_or(Self::DEFAULT_PER_PAGE, |x| x.clamp(1, Self::MAX_PER_PAGE));
-        let Some(x_total_pages) = div_ceil(x_total_count, x_per_page) else {
-            unreachable!("x_per_page is clamped between 1 and 256.")
-        };
+
+        let x_total_pages = x_total_count.div_ceil(x_per_page).max(1);
         let x_page = x_page.map_or(1, |x| x.clamp(1, x_total_pages));
 
         Self {
@@ -174,9 +370,11 @@ impl PaginationResponsePart {
             x_per_page,
         }
     }
+    #[must_use]
     pub fn limit(&self) -> i64 {
         i64::from(self.x_per_page)
     }
+    #[must_use]
     pub fn offset(&self) -> i64 {
         let page_offset = i64::from(self.x_page.saturating_sub(1));
         let per_page = i64::from(self.x_per_page);
@@ -186,45 +384,36 @@ impl PaginationResponsePart {
             page_offset * per_page
         }
     }
+    #[must_use]
     pub fn start(&self) -> usize {
-        let Ok(page) = usize::try_from(self.x_page.max(0)).map(|page| page.saturating_sub(1))
-        else {
-            unreachable!(
-                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
-            )
-        };
-        let Ok(per_page) = usize::try_from(self.x_per_page.max(0)) else {
-            unreachable!(
-                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
-            )
-        };
-        page.saturating_mul(per_page)
+        usize::try_from(
+            self.x_page
+                .saturating_sub(1)
+                .saturating_mul(self.x_per_page),
+        )
+        .unwrap_or(0)
     }
 
+    #[must_use]
     pub fn end(&self) -> usize {
-        let Ok(offset) = usize::try_from(self.offset().max(0)) else {
+        let Ok(offset) = usize::try_from(self.offset()) else {
             #[cfg(target_pointer_width = "64")]
-            unreachable!(
-                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
-            );
+            unreachable!("u32 forces non-negativity.");
             #[cfg(not(target_pointer_width = "64"))]
             panic!("Offset exceeded usize limit.");
         };
-        let Ok(limit) = usize::try_from(self.limit().max(0)) else {
+        let Ok(limit) = usize::try_from(self.limit()) else {
             #[cfg(target_pointer_width = "64")]
-            unreachable!(
-                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
-            );
+            unreachable!("u32 forces non-negativity.");
             #[cfg(not(target_pointer_width = "64"))]
             panic!("Offset exceeded usize limit.");
         };
-        let Ok(total_count) = usize::try_from(self.x_total_count.max(0)) else {
-            unreachable!(
-                "i32 to usize only fails if the value is negative. `max(0)` forces non-negativity."
-            )
+        let Ok(total_count) = usize::try_from(self.x_total_count) else {
+            unreachable!("u32 forces non-negativity.")
         };
         total_count.min(offset.saturating_add(limit))
     }
+    #[must_use]
     pub fn generate_link_header(&self, link_first_part: &str) -> String {
         let mut link_string = String::new();
         if self.x_page < self.x_total_pages {
@@ -259,7 +448,6 @@ impl PaginationResponsePart {
     }
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod prp_test {
     use crate::api::PaginationResponsePart;
@@ -327,6 +515,15 @@ mod prp_test {
         assert_eq!(prp.start(), 0);
         assert_eq!(prp.end(), 1);
     }
+
+    #[test]
+    fn test_empty_result_but_page() {
+        let prp = PaginationResponsePart::new(0, Some(1), Some(32));
+        assert_eq!(prp.x_page, 1);
+        assert_eq!(prp.x_per_page, 32);
+        assert_eq!(prp.start(), 0);
+        assert_eq!(prp.end(), 0, "{prp:?}");
+    }
 }
 
 pub struct DateRange {
@@ -370,6 +567,7 @@ impl
         }
     }
 }
+#[must_use]
 pub fn find_applicable_date_range(
     y: Option<i32>,
     m: Option<u32>,
@@ -406,22 +604,16 @@ pub fn find_applicable_date_range(
         )
     });
 
-    #[allow(unused, reason = "Temp. example")]
-    {
-        let since2 = [since, ifmodsince, ymd_since].into_iter().flatten().max();
-        let until2 = [until, ymd_until].into_iter().flatten().min();
-    }
-
     #[rustfmt::skip]
     let since = match (since, ifmodsince, ymd_since) {
-        (Some(since),    Some(ifmodsince), Some(ymd_since) ) => Some(since.max(ifmodsince).max(ymd_since)),
-        (Some(since),    Some(ifmodsince), None                          ) => Some(since.max(ifmodsince)),
-        (Some(since),    None,                            Some(ymd_since)) => Some(since.max(ymd_since)),
-        (None,                          Some(ifmodsince), Some(ymd_since)) => Some(ifmodsince.max(ymd_since)),
-        (Some(since),    None,                            None                          ) => Some(since),
-        (None,                          Some(ifmodsince), None                          ) => Some(ifmodsince),
-        (None,                          None,                            Some(ymd_since)) => Some(ymd_since),  
-        (None,                          None,                            None                          ) => None,
+        (Some(since), Some(ifmodsince), Some(ymd_since)) => Some(since.max(ifmodsince).max(ymd_since)),
+        (Some(since), Some(ifmodsince), None           ) => Some(since.max(ifmodsince)),
+        (Some(since), None,             Some(ymd_since)) => Some(since.max(ymd_since)),
+        (None,        Some(ifmodsince), Some(ymd_since)) => Some(ifmodsince.max(ymd_since)),
+        (Some(since), None,             None           ) => Some(since),
+        (None,        Some(ifmodsince), None           ) => Some(ifmodsince),
+        (None,        None,             Some(ymd_since)) => Some(ymd_since),  
+        (None,        None,             None           ) => None,
     };
 
     #[rustfmt::skip]
@@ -443,7 +635,6 @@ pub fn find_applicable_date_range(
     Some(DateRange { since, until })
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_applicable_date_range {
     use super::{DateRange, find_applicable_date_range};
@@ -569,201 +760,126 @@ mod test_applicable_date_range {
     }
 }
 
-/// this is here to implement a `PartialEq`, Eq, Ord, ...
-/// for hashing, since we need t
-#[derive(Debug, Clone)]
-pub(crate) struct WrappedAutor<'wrapped> {
-    pub autor: &'wrapped models::Autor,
-}
-impl PartialEq for WrappedAutor<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.autor.organisation == other.autor.organisation
-            && self.autor.person == other.autor.person
-    }
-}
-impl Eq for WrappedAutor<'_> {}
-impl PartialOrd for WrappedAutor<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(std::cmp::Ord::cmp(self, other))
-    }
-}
-impl Ord for WrappedAutor<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.autor
-            .organisation
-            .cmp(&other.autor.organisation)
-            .then(self.autor.person.cmp(&other.autor.person))
-    }
-}
-
 /// This trait enables sorting all arrays contained in an object
 /// to be able to compare them afterwards without caring for ordering
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 pub(crate) trait SortArrays: Clone {
     fn sort_arrays(&mut self);
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 impl SortArrays for models::Dokument {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
         let emp = String::new();
-        if let Some(x) = self.schlagworte.as_mut() {
-            x.sort();
-        }
-        if let Some(x) = self.touched_by.as_mut() {
-            x.sort_by(|a, b| {
-                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
-                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            });
-        }
+        self.schlagworte.sort();
+        self.touched_by.sort_by(|a, b| {
+            (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+        });
+
         self.autoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
     }
 }
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 impl SortArrays for models::Station {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
         let emp = String::new();
-        if let Some(x) = self.schlagworte.as_mut() {
-            x.sort();
-        }
-        if let Some(x) = self.touched_by.as_mut() {
-            x.sort_by(|a, b| {
-                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
-                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            });
-        }
-        if let Some(x) = self.additional_links.as_mut() {
-            x.sort();
-        }
+        self.schlagworte.sort();
+        self.touched_by.sort_by(|a, b| {
+            (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+        });
+        self.additional_links.sort();
         self.dokumente.sort_by(|a, b| match (a, b) {
-            (
-                models::StationDokumenteInner::String(x),
-                models::StationDokumenteInner::String(y),
-            ) => x.cmp(y),
-            (
-                models::StationDokumenteInner::String(x),
-                models::StationDokumenteInner::Dokument(y),
-            ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
-            (
-                models::StationDokumenteInner::Dokument(x),
-                models::StationDokumenteInner::String(y),
-            ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
-            (
-                models::StationDokumenteInner::Dokument(x),
-                models::StationDokumenteInner::Dokument(y),
-            ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+            (models::DokumentOrApiId::ApiId(x), models::DokumentOrApiId::ApiId(y)) => x.cmp(y),
+            (models::DokumentOrApiId::ApiId(x), models::DokumentOrApiId::Dokument(y)) => {
+                (*x).cmp(&y.api_id.unwrap_or(nil))
+            }
+            (models::DokumentOrApiId::Dokument(x), models::DokumentOrApiId::ApiId(y)) => {
+                (*y).cmp(&x.api_id.unwrap_or(nil))
+            }
+            (models::DokumentOrApiId::Dokument(x), models::DokumentOrApiId::Dokument(y)) => {
+                x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil))
+            }
         });
         self.dokumente.iter_mut().for_each(|x| {
-            if let models::StationDokumenteInner::Dokument(x) = x {
+            if let models::DokumentOrApiId::Dokument(x) = x {
                 x.sort_arrays();
             }
         });
-        if let Some(x) = self.stellungnahmen.as_mut() {
-            x.sort_by(|a, b| match (a, b) {
-                (
-                    models::StationDokumenteInner::String(x),
-                    models::StationDokumenteInner::String(y),
-                ) => x.cmp(y),
-                (
-                    models::StationDokumenteInner::String(x),
-                    models::StationDokumenteInner::Dokument(y),
-                ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
-                (
-                    models::StationDokumenteInner::Dokument(x),
-                    models::StationDokumenteInner::String(y),
-                ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
-                (
-                    models::StationDokumenteInner::Dokument(x),
-                    models::StationDokumenteInner::Dokument(y),
-                ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
-            });
-            for x in x {
-                if let models::StationDokumenteInner::Dokument(x) = x {
-                    x.sort_arrays();
-                }
+        self.stellungnahmen.sort_by(|a, b| match (a, b) {
+            (models::DokumentOrApiId::ApiId(x), models::DokumentOrApiId::ApiId(y)) => x.cmp(y),
+            (models::DokumentOrApiId::ApiId(x), models::DokumentOrApiId::Dokument(y)) => {
+                (*x).cmp(&y.api_id.unwrap_or(nil))
+            }
+            (models::DokumentOrApiId::Dokument(x), models::DokumentOrApiId::ApiId(y)) => {
+                (*y).cmp(&x.api_id.unwrap_or(nil))
+            }
+            (models::DokumentOrApiId::Dokument(x), models::DokumentOrApiId::Dokument(y)) => {
+                x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil))
+            }
+        });
+        for x in &mut self.stellungnahmen {
+            if let models::DokumentOrApiId::Dokument(x) = x {
+                x.sort_arrays();
             }
         }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 impl SortArrays for models::Vorgang {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
         let emp = String::new();
-        if let Some(x) = self.touched_by.as_mut() {
-            x.sort_by(|a, b| {
-                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
-                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            });
-        }
-        if let Some(x) = self.lobbyregister.as_mut() {
-            x.sort_by(|a, b| a.link.cmp(&b.link));
-        }
-        self.stationen
-            .sort_by(|a, b| (a.zp_start, a.api_id).cmp(&(b.zp_start, b.api_id)));
+        self.touched_by.sort_by(|a, b| {
+            (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+        });
+        self.lobbyregister.sort_by(|a, b| a.link.cmp(&b.link));
+        self.stationen.sort_by_key(|a| (a.zp_start, a.api_id));
         self.stationen.iter_mut().for_each(SortArrays::sort_arrays);
         self.initiatoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
-        if let Some(x) = self.ids.as_mut() {
-            x.sort_by(|a, b| (&a.typ, &a.id).cmp(&(&b.typ, &b.id)));
-        }
-        if let Some(x) = self.links.as_mut() {
-            x.sort();
-        }
+        self.ids
+            .sort_by(|a, b| (&a.typ, &a.id).cmp(&(&b.typ, &b.id)));
+        self.links.sort();
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 impl SortArrays for models::Sitzung {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
         let emp = String::new();
-        if let Some(x) = self.touched_by.as_mut() {
-            x.sort_by(|a, b| {
-                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
-                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
-            });
-        }
-        if let Some(x) = self.experten.as_mut() {
-            x.sort_by(|a, b| a.organisation.cmp(&b.organisation));
-        }
+        self.touched_by.sort_by(|a, b| {
+            (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+        });
+        self.experten
+            .sort_by(|a, b| a.organisation.cmp(&b.organisation));
+        self.dokumente.sort_by(|a, b| match (a, b) {
+            (models::DokumentOrApiId::ApiId(x), models::DokumentOrApiId::ApiId(y)) => x.cmp(y),
+            (models::DokumentOrApiId::ApiId(x), models::DokumentOrApiId::Dokument(y)) => {
+                (*x).cmp(&y.api_id.unwrap_or(nil))
+            }
+            (models::DokumentOrApiId::Dokument(x), models::DokumentOrApiId::ApiId(y)) => {
+                (*y).cmp(&x.api_id.unwrap_or(nil))
+            }
+            (models::DokumentOrApiId::Dokument(x), models::DokumentOrApiId::Dokument(y)) => {
+                x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil))
+            }
+        });
 
-        if let Some(x) = self.dokumente.as_mut() {
-            x.sort_by(|a, b| match (a, b) {
-                (
-                    models::StationDokumenteInner::String(x),
-                    models::StationDokumenteInner::String(y),
-                ) => x.cmp(y),
-                (
-                    models::StationDokumenteInner::String(x),
-                    models::StationDokumenteInner::Dokument(y),
-                ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
-                (
-                    models::StationDokumenteInner::Dokument(x),
-                    models::StationDokumenteInner::String(y),
-                ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
-                (
-                    models::StationDokumenteInner::Dokument(x),
-                    models::StationDokumenteInner::Dokument(y),
-                ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
-            });
-
-            for x in x {
-                if let models::StationDokumenteInner::Dokument(x) = x {
-                    x.sort_arrays();
-                }
+        for x in &mut self.dokumente {
+            if let models::DokumentOrApiId::Dokument(x) = x {
+                x.sort_arrays();
             }
         }
-        self.tops.sort_by(|a, b| a.nummer.cmp(&b.nummer));
+        self.tops.sort_by_key(|a| a.nummer);
     }
 }
 /// Helper Trait that allows me to compare objects (vorgang, dokument, ...)
@@ -806,28 +922,24 @@ impl RoundTimestamp for models::Station {
         Self {
             zp_modifiziert: self.zp_modifiziert.map(round_to_second),
             zp_start: round_to_second(self.zp_start),
-            stellungnahmen: self.stellungnahmen.as_ref().map(|v| {
-                v.iter()
-                    .map(|sn| match sn {
-                        models::StationDokumenteInner::Dokument(d) => {
-                            models::StationDokumenteInner::Dokument(d.with_round_timestamps())
-                        }
-                        models::StationDokumenteInner::String(x) => {
-                            models::StationDokumenteInner::String(x.clone())
-                        }
-                    })
-                    .collect()
-            }),
+            stellungnahmen: self
+                .stellungnahmen
+                .iter()
+                .map(|sn| match sn {
+                    models::DokumentOrApiId::Dokument(d) => {
+                        models::DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    models::DokumentOrApiId::ApiId(x) => models::DokumentOrApiId::ApiId(*x),
+                })
+                .collect(),
             dokumente: self
                 .dokumente
                 .iter()
                 .map(|sn| match sn {
-                    models::StationDokumenteInner::Dokument(d) => {
-                        models::StationDokumenteInner::Dokument(d.with_round_timestamps())
+                    models::DokumentOrApiId::Dokument(d) => {
+                        models::DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
                     }
-                    models::StationDokumenteInner::String(x) => {
-                        models::StationDokumenteInner::String(x.clone())
-                    }
+                    models::DokumentOrApiId::ApiId(x) => models::DokumentOrApiId::ApiId(*x),
                 })
                 .collect(),
 
@@ -851,18 +963,16 @@ impl RoundTimestamp for models::Vorgang {
 impl RoundTimestamp for models::Sitzung {
     fn with_round_timestamps(&self) -> Self {
         Self {
-            dokumente: self.dokumente.as_ref().map(|v| {
-                v.iter()
-                    .map(|sn| match sn {
-                        models::StationDokumenteInner::Dokument(d) => {
-                            models::StationDokumenteInner::Dokument(d.with_round_timestamps())
-                        }
-                        models::StationDokumenteInner::String(x) => {
-                            models::StationDokumenteInner::String(x.clone())
-                        }
-                    })
-                    .collect()
-            }),
+            dokumente: self
+                .dokumente
+                .iter()
+                .map(|sn| match sn {
+                    models::DokumentOrApiId::Dokument(d) => {
+                        models::DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    models::DokumentOrApiId::ApiId(x) => models::DokumentOrApiId::ApiId(*x),
+                })
+                .collect(),
             termin: round_to_second(self.termin),
             ..self.clone()
         }

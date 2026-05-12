@@ -1,48 +1,41 @@
 use crate::LTZFServer;
 use crate::Result;
 use crate::db::merge::MatchState;
+use crate::db::retrieve;
 use crate::error::DataValidationError;
 use crate::error::LTZFError;
-use openapi::models;
+use crate::models;
 #[cfg(feature = "track-validation")]
 use std::collections::BTreeSet;
 use std::string::ToString;
 use uuid::Uuid;
 
 /// this function determines what means "matching enough".
-/// 1. wenn `api_id` matcht
-/// 2. wenn Parlament / Parlamentsgruppe, wp, typ und mindestens ein identifikator matchen
-pub async fn vorgang_merge_candidates(
+/// A Vorgang is matched to another, these criteria must hold:
+/// (wp, typ)_old == (wp, typ)_new &&
+/// (a `vg_ident` matches AND a bundesland matches within the stations
+/// OR
+///  the api id matches
+/// )
+pub(crate) async fn vorgang_merge_candidates(
     model: &models::Vorgang,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
 ) -> Result<MatchState<i32>> {
     let obj = "merged Vorgang";
-    let ident_t: Vec<_> = model
-        .ids
-        .as_ref()
-        .unwrap_or(&vec![])
-        .iter()
-        .map(|x| x.id.clone())
-        .collect();
-    let identtyp_t: Vec<_> = model
-        .ids
-        .as_ref()
-        .unwrap_or(&vec![])
-        .iter()
-        .map(|x| x.typ.clone())
-        .collect();
+    let (mut ident_list, mut identtyp_list) = (vec![], vec![]);
+    for id in &model.ids {
+        ident_list.push(id.id.clone());
+        identtyp_list.push(id.typ.clone());
+    }
 
-    #[cfg(feature = "track-validation")]
     let parls: BTreeSet<_> = model
         .stationen
         .iter()
         .map(|s| s.gremium.parlament)
         .collect();
-    #[cfg(feature = "track-validation")]
     let parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
 
-    #[cfg(feature = "track-validation")]
     let result = sqlx::query!(
         "WITH db_id_table AS (
             SELECT rel_vorgang_ident.vg_id as vg_id, identifikator as ident, vg_ident_typ.value as idt_str
@@ -65,17 +58,20 @@ pub async fn vorgang_merge_candidates(
     SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei denen
 	INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
 	WHERE
-	vorgang.api_id = $1 OR -- entweder die API ID genau übereinstimmt (trivialer Fall) ODER
-	(
-	    vorgang.wahlperiode = $4 AND -- wahlperiode und 
-	    vt.value = $5 
-    AND            -- typ übereinstimmen und 
-		(EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) as eingabe(ident, typ), db_id_table WHERE  -- eine übereinstimmende ID existiert
+    (vorgang.wahlperiode = $4 AND -- wahlperiode und 
+	    vt.value = $5
+    ) AND
+    (
+        vorgang.api_id = $1    -- entweder die API ID genau übereinstimmt (trivialer Fall) ODER
+    OR                     
+	( -- eine übereinstimmende ID existiert
+		(EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) as eingabe(ident, typ), db_id_table WHERE 
 			db_id_table.vg_id = vorgang.id AND
 			eingabe.ident = db_id_table.ident AND
 			eingabe.typ = db_id_table.idt_str)
 		) 
-    AND -- ein übereinstimmendes Bundesland existiert == eine station existiert, die dasselbe Bundesland wie eine Station der Eingabe hat 
+        AND -- ein übereinstimmendes Bundesland existiert, 
+            -- <=> eine station existiert, die dasselbe Bundesland wie eine Station der Eingabe hat 
         (EXISTS (
                 SELECT 1 FROM UNNEST($6::text[]) as in_parls(ip), vorgang_class vc, parlament p, track_class tc
             WHERE
@@ -87,45 +83,12 @@ pub async fn vorgang_merge_candidates(
             -- oder eine der beiden keine stationen hat, an denen man das bundesland feststellen könnte
             OR $7 = 0 OR NOT EXISTS(SELECT 1 FROM station s WHERE s.vg_id = vorgang.id)
         )
-	);",
-    model.api_id, &ident_t[..], &identtyp_t[..],
+	    )
+    );",
+    model.api_id, &ident_list[..], &identtyp_list[..],
     i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other {message: format!("value was unable to be converted to i32: {e}")})?,
     srv.guard_ts(&model.typ, model.api_id, obj), &parls[..],
     i32::try_from(model.stationen.len()).map_err(|e|LTZFError::Other {message: format!("value was unable to be converted to i32: {e}")})?)
-    .fetch_all(executor).await?;
-
-    #[cfg(not(feature = "track-validation"))]
-    let result = sqlx::query!(
-        "WITH db_id_table AS (
-            SELECT rel_vorgang_ident.vg_id as vg_id, identifikator as ident, vg_ident_typ.value as idt_str
-            FROM vg_ident_typ, rel_vorgang_ident 
-            WHERE vg_ident_typ.id = rel_vorgang_ident.typ),
-
-	    initds_vwtable AS ( --vorworte von initiativdrucksachen von stationen
-			SELECT s.vg_id, d.vorwort, d.volltext FROM dokument d
-				INNER JOIN rel_station_dokument rsd ON rsd.dok_id=d.id
-				INNER JOIN dokumententyp dt ON dt.id=d.typ
-				INNER JOIN station s ON s.id = rsd.stat_id
-				WHERE rsd.stat_id=s.id
-				AND (dt.value='entwurf' OR dt.value = 'preparl-entwurf')
-		)
-    SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei denen
-	INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
-	WHERE
-	vorgang.api_id = $1 OR -- entweder die API ID genau übereinstimmt (trivialer Fall) ODER
-	(
-	    vorgang.wahlperiode = $4 AND -- wahlperiode und 
-	    vt.value = $5 
-    AND            -- typ übereinstimmen und 
-		(EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) as eingabe(ident, typ), db_id_table WHERE  -- eine übereinstimmende ID existiert
-			db_id_table.vg_id = vorgang.id AND
-			eingabe.ident = db_id_table.ident AND
-			eingabe.typ = db_id_table.idt_str)
-		)
-	);",
-    model.api_id, &ident_t[..], &identtyp_t[..],
-    i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other { message: format!("Failed to convert vorgang wahlperiode as it exceed i32::MAX: {e}") })?,
-    srv.guard_ts(&model.typ, model.api_id, obj))
     .fetch_all(executor).await?;
 
     tracing::debug!(
@@ -148,10 +111,13 @@ pub async fn vorgang_merge_candidates(
     })
 }
 
-/// bei gleichem Vorgang => Vorraussetzung
-/// 1. wenn die `api_id` matcht
-/// 2. wenn vorgang, typ und gremium matchen und mindestens ein Dokument gleich ist
-pub async fn station_merge_candidates(
+/// matches IFF:
+/// `vg_id_old` == `vg_id_new` AND
+/// (`api_id_old` == `api_id_new`
+/// OR
+///  (typ, gremium)_old == (typ, gremium)_new AND one matching document exists
+/// )
+pub(crate) async fn station_merge_candidates(
     model: &models::Station,
     vorgang: i32,
     executor: &mut sqlx::PgTransaction<'_>,
@@ -159,27 +125,6 @@ pub async fn station_merge_candidates(
 ) -> Result<MatchState<i32>> {
     let obj = "merged station";
     let api_id = model.api_id.unwrap_or(uuid::Uuid::now_v7());
-    let dok_hash: Vec<_> = model
-        .dokumente
-        .iter()
-        .filter(|x| matches!(x, models::StationDokumenteInner::Dokument(_)))
-        .map(|x| {
-            if let models::StationDokumenteInner::Dokument(d) = x {
-                d.hash.clone()
-            } else {
-                unreachable!()
-            }
-        })
-        .collect();
-    let (gr_name, gr_wp, gr_parl) = (
-        model.gremium.name.clone(),
-        i32::try_from(model.gremium.wahlperiode).map_err(|e| LTZFError::Other {
-            message: format!(
-                "Failed to convert the Wahlperiode of a Gremium, because it exceeds i32::MAX: {e}"
-            ),
-        })?,
-        model.gremium.parlament.to_string(),
-    );
 
     let conflict: Vec<uuid::Uuid> = sqlx::query!(
         "SELECT v.api_id vapi FROM station s, vorgang v
@@ -195,11 +140,45 @@ pub async fn station_merge_candidates(
     if !conflict.is_empty() {
         let err = format!(
             "Tried to insert a station {api_id} into the database that matches by api id, but is associated with a different Vorgang ({}).\n
-            This almost always indicates an error.",
+            This always indicates an error.",
             conflict[0],
         );
         tracing::error!("{}", &err);
         return Err(DataValidationError::Conflict { reason: err }.into());
+    }
+    // now check for similar stations
+    let (gr_name, gr_wp, gr_parl) = (
+        model.gremium.name.clone(),
+        i32::from(model.gremium.wahlperiode),
+        model.gremium.parlament.to_string(),
+    );
+    let mut similar_doc_ids = vec![];
+
+    for d in &model.dokumente {
+        let doc: &models::Dokument = match d {
+            models::DokumentOrApiId::ApiId(dapi_id) => {
+                // retrieve, then do the same as below
+                let doc_id =
+                    sqlx::query_scalar!("SELECT id FROM dokument d WHERE d.api_id = $1", dapi_id)
+                        .fetch_optional(&mut **executor)
+                        .await?;
+                let Some(doc_id) = doc_id else {
+                    return Err(DataValidationError::MalformedVorgang {
+                        reason: format!(
+                            "This API ID for a document is not in the database: {dapi_id}"
+                        ),
+                    }
+                    .into());
+                };
+                &retrieve::dokument_by_id(doc_id, &mut *executor).await?
+            }
+            models::DokumentOrApiId::Dokument(doc) => doc,
+        };
+        if let MatchState::ExactlyOne(id) =
+            dokument_merge_candidates(doc, &mut **executor, srv).await?
+        {
+            similar_doc_ids.push(id);
+        }
     }
 
     let result = sqlx::query!(
@@ -209,13 +188,15 @@ pub async fn station_merge_candidates(
         INNER JOIN parlament p ON p.id = g.parl
         WHERE s.api_id = $1 OR
         (s.vg_id = $2 AND st.value = $3 AND  -- vorgang und stationstyp übereinstimmen
-        (g.name = $4 OR $4 IS NULL) AND  -- gremiumname übereinstimmt
-        (p.value = $5 OR $5 IS NULL) AND  -- parlamentname übereinstimmt
-        (g.wp = $6 OR $6 IS NULL) AND -- gremium wahlperiode übereinstimmt
-        EXISTS (SELECT * FROM rel_station_dokument rsd
+        (g.name = $4) AND   -- gremium.name übereinstimmt
+        (p.value = $5) AND  -- gremium.parlamentname übereinstimmt
+        (g.wp = $6) AND     -- gremium.wahlperiode übereinstimmt
+
+        --mindestens ein Dokument auch in der anderen Station angehängt ist:
+        EXISTS (SELECT * FROM rel_station_dokument rsd 
         INNER JOIN dokument d ON rsd.dok_id=d.id
         WHERE rsd.stat_id = s.id
-        AND d.hash IN (SELECT str FROM UNNEST($7::text[]) blub(str))
+        AND d.id IN (SELECT i FROM UNNEST($7::int4[]) blub(i))
 	))",
         model.api_id,
         vorgang,
@@ -223,7 +204,7 @@ pub async fn station_merge_candidates(
         gr_name,
         gr_parl,
         gr_wp,
-        &dok_hash[..]
+        &similar_doc_ids[..]
     )
     .fetch_all(&mut **executor)
     .await?;
@@ -247,9 +228,11 @@ pub async fn station_merge_candidates(
     })
 }
 
-/// wenn gleich:
-/// `api_id` OR hash OR (typ AND drucksNr AND `zp_referenz`)
-pub async fn dokument_merge_candidates(
+/// matches IFF:
+/// `api_id_old` == `api_id_new` OR
+/// `hash_old` == `hash_new` OR
+/// (typ, drucksNr, `zp_referenz`~12h)_old == (typ, drucksnr, `zp_referenz`~12h)_new
+pub(crate) async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
@@ -260,7 +243,9 @@ pub async fn dokument_merge_candidates(
         WHERE 
         d.hash = $1 OR
         d.api_id = $2 OR
-        (d.drucksnr = $3 AND dt.value = $4 AND ($5 BETWEEN (d.zp_referenz-'12 hours'::interval) AND (d.zp_referenz+'12 hours'::interval)))",
+        (d.drucksnr = $3 AND dt.value = $4 
+            AND ($5 BETWEEN (d.zp_referenz-'12 hours'::interval) 
+            AND (d.zp_referenz+'12 hours'::interval)))",
         model.hash,
         model.api_id,
         model.drucksnr,
@@ -282,26 +267,16 @@ pub async fn dokument_merge_candidates(
     }
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod candid_test {
     use super::*;
-    use crate::api::auth;
+    use crate::api::vorgang::vorgang_id_put;
     use crate::db::merge::MatchState;
+    use crate::models::{self, params};
     use crate::utils::testing::{TestSetup, generate};
-    use axum::http::Method;
-    use axum_extra::extract::CookieJar;
     use chrono::DateTime;
-    use openapi::apis::data_administration_vorgang::{
-        DataAdministrationVorgang, VorgangIdPutResponse,
-    };
-    use openapi::models;
     use tracing_test::traced_test;
 
-    fn localhost() -> headers::Host {
-        use http::uri::Authority;
-        Authority::from_static("localhost").into()
-    }
     #[tokio::test]
     async fn vorgang_test() {
         let setup = TestSetup::new("test_vorgang_candidates").await;
@@ -312,25 +287,25 @@ mod candid_test {
             generate::random::vorgang_with_stations(
                 1,
                 models::Vorgangstyp::GgEinspruch,
-                "IV",
+                "IL",
                 &srv.tracks.station_mapping,
             ),
             generate::random::vorgang_with_stations(
                 2,
                 models::Vorgangstyp::GgLandParl,
-                "RSIVAZ",
+                "RSILAZ",
                 &srv.tracks.station_mapping,
             ),
             generate::random::vorgang_with_stations(
                 3,
                 models::Vorgangstyp::GgLandParl,
-                "IVAAVJG",
+                "ILAALJG",
                 &srv.tracks.station_mapping,
             ),
             generate::random::vorgang_with_stations(
                 4,
                 models::Vorgangstyp::GgEinspruch,
-                "IVAAA",
+                "ILAAA",
                 &srv.tracks.station_mapping,
             ),
         ];
@@ -339,20 +314,9 @@ mod candid_test {
         let vgs: Vec<_> = (1..5).map(generate::random::vorgang).collect();
         // insert vorgang 1,2,3, ...
         for vg in &vgs {
-            let r = srv
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangIdPutPathParams {
-                        vorgang_id: vg.api_id,
-                    },
-                    vg,
-                )
+            vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg)
                 .await
                 .expect("Failed ot get valid server respone when trying to push new Vorgang.");
-            assert!(matches!(r, VorgangIdPutResponse::Status201_Created { .. }));
         }
         let mut tx = srv
             .sqlx_db
@@ -382,23 +346,16 @@ mod candid_test {
             api_id: Uuid::nil(), // different UUID, but same other criteria
             ..vgs[0].clone()
         };
-        let ins = srv
-            .vorgang_id_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::VorgangIdPutPathParams {
-                    vorgang_id: double_vg.api_id,
+        vorgang_id_put(
+                srv,
+                1,
+                &params::ApiIdPathParam {
+                    api_id: double_vg.api_id,
                 },
                 &double_vg,
             )
             .await
             .expect("Failed to get valid server response when trying to push Vorgang with ambigous merge conditions.");
-        assert!(matches!(
-            ins,
-            VorgangIdPutResponse::Status201_Created { .. }
-        ));
 
         let candidates = super::vorgang_merge_candidates(&double_vg, &mut *tx, srv).await;
         assert!(matches!(candidates, Ok(MatchState::Ambiguous(_))));
@@ -411,17 +368,7 @@ mod candid_test {
         let srv = &setup.server;
         let vg = generate::default_vorgang();
         let stat = generate::default_station();
-        let _ = srv
-            .vorgang_id_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::VorgangIdPutPathParams {
-                    vorgang_id: vg.api_id,
-                },
-                &vg,
-            )
+        let _ = vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, &vg)
             .await
             .expect("Vorgang loading failed");
 
@@ -453,9 +400,9 @@ mod candid_test {
         let vgs = [
             models::Vorgang {
                 stationen: vec![models::Station {
-                    dokumente: vec![models::StationDokumenteInner::Dokument(
+                    dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
                         generate::random::dokument(0),
-                    )],
+                    ))],
                     gremium: models::Gremium {
                         parlament: models::Parlament::Bt,
                         ..generate::default_gremium()
@@ -469,25 +416,25 @@ mod candid_test {
             generate::random::vorgang_with_stations(
                 1,
                 models::Vorgangstyp::GgEinspruch,
-                "IV",
+                "IL",
                 &srv.tracks.station_mapping,
             ),
             generate::random::vorgang_with_stations(
                 2,
                 models::Vorgangstyp::GgLandParl,
-                "RSIVAZ",
+                "RSILAZ",
                 &srv.tracks.station_mapping,
             ),
             generate::random::vorgang_with_stations(
                 3,
                 models::Vorgangstyp::GgLandParl,
-                "IVAAVJG",
+                "ILAALJG",
                 &srv.tracks.station_mapping,
             ),
             generate::random::vorgang_with_stations(
                 4,
                 models::Vorgangstyp::GgEinspruch,
-                "IVAAA",
+                "ILAAA",
                 &srv.tracks.station_mapping,
             ),
         ];
@@ -497,7 +444,7 @@ mod candid_test {
             .map(generate::random::vorgang)
             .chain(std::iter::once(models::Vorgang {
                 stationen: vec![models::Station {
-                    dokumente: vec![models::StationDokumenteInner::Dokument(
+                    dokumente: vec![models::DokumentOrApiId::Dokument(
                         generate::random::dokument(0),
                     )],
                     gremium: models::Gremium {
@@ -513,20 +460,9 @@ mod candid_test {
             .collect();
         // insert vorgang 1,2,3, ...
         for vg in &vgs {
-            let r = srv
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangIdPutPathParams {
-                        vorgang_id: vg.api_id,
-                    },
-                    vg,
-                )
+            vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg)
                 .await
                 .expect("Failed to get valid server response when trying to push new Vorgang.");
-            assert!(matches!(r, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }));
         }
         let mut tx = srv
             .sqlx_db

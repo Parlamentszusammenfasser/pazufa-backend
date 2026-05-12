@@ -1,558 +1,388 @@
+use super::PutResponse;
+use super::auth::APIScope;
+use super::find_applicable_date_range;
+use crate::api::{GetSingleResponse, ListingGetResponse, RoundTimestamp};
+use crate::db;
 use crate::db::{delete, insert, merge, retrieve};
 use crate::error::{DataValidationError, LTZFError};
-use crate::utils::as_option;
-use crate::{LTZFServer, Result};
-use async_trait::async_trait;
-use axum::http::Method;
-use axum_extra::extract::CookieJar;
-use headers::Host;
-use openapi::apis::{
-    collector_schnittstellen_vorgang::{CollectorSchnittstellenVorgang, VorgangPutResponse},
-    data_administration_vorgang::{
-        DataAdministrationVorgang, VorgangDeleteResponse, VorgangIdPutResponse,
-    },
-    unauthorisiert_vorgang::{UnauthorisiertVorgang, VorgangGetByIdResponse, VorgangGetResponse},
-};
-use openapi::models;
-use tracing::{debug, error, info, instrument, warn};
+use crate::models::params;
+use crate::{LTZFServer, Result, models};
+use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
-use super::auth::{self, APIScope};
-use super::find_applicable_date_range;
-use crate::api::RoundTimestamp;
-use crate::db;
-
-#[async_trait]
-impl DataAdministrationVorgang<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
-    #[doc = "`VorgangDelete` - DELETE /`api/v2/vorgang/{vorgang_id`}"]
-    #[instrument(skip_all, fields(claims=%claims.0, vg_id=%path_params.vorgang_id))]
-    async fn vorgang_delete(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::VorgangDeletePathParams,
-    ) -> Result<VorgangDeleteResponse> {
-        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            warn!("Permission Level too low");
-            return Ok(VorgangDeleteResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let id_vg_del = db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await?;
-        info!(target: "obj", "Deleted Vorgang {}", path_params.vorgang_id);
-        Ok(id_vg_del)
-    }
-
-    #[doc = "`VorgangIdPut` - PUT /`api/v2/vorgang/{vorgang_id`}"]
-    #[instrument(skip_all, fields(claims=%claims.0, vg_id=%path_params.vorgang_id))]
-    async fn vorgang_id_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::VorgangIdPutPathParams,
-        body: &models::Vorgang,
-    ) -> Result<VorgangIdPutResponse> {
-        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            warn!("Permission Level too low");
-            return Ok(VorgangIdPutResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let mut tx = self.sqlx_db.begin().await?;
-        let api_id = path_params.vorgang_id;
-        let db_id = sqlx::query!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
-            .map(|x| x.id)
-            .fetch_optional(&mut *tx)
-            .await?;
-        if let Some(db_id) = db_id {
-            debug!("Match found: {db_id}");
-            let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
-
-            if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
-                return Ok(VorgangIdPutResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                });
-            }
-            debug!("Found to be different enough to not be exactly the same. Deleting...");
-            if let VorgangDeleteResponse::Status204_NoContent { .. } =
-                delete::delete_vorgang_by_api_id(api_id, self).await?
-            {
-                debug!("Delete successful, now inserting...");
-                insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
-            } else {
-                error!("After successful delete an insert cannot fail");
-                unreachable!("If this is reached, some assumptions did not hold")
-            }
-        } else {
-            debug!("No Match found");
-            insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
-        }
-        tx.commit().await?;
-        info!(target: "obj", "PUT by ID Vorgang {}", path_params.vorgang_id);
-        info!("Successful insert or replace");
-        Ok(VorgangIdPutResponse::Status201_Created {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
-    }
+/// Deletes a single Vorgang
+/// # Errors
+/// Can fail due to database errors
+#[instrument(skip_all, fields( vg_id=%path_params.api_id))]
+pub async fn vorgang_delete(
+    server: &LTZFServer,
+    path_params: &params::ApiIdPathParam,
+) -> Result<()> {
+    db::delete::delete_vorgang_by_api_id(path_params.api_id, server).await?;
+    info!(target: "obj", "Deleted Vorgang {}", path_params.api_id);
+    Ok(())
 }
 
-#[async_trait]
-impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
+/// Inserts a single vorgang, bypassing the merge algorithm.
+/// If called, the state of the request body is then the exact state of the database
+/// Only available to admin level permissions
+///
+/// # Errors
+/// Can fail due to database errors
+#[instrument(skip_all, fields( vg_id=%path_params.api_id))]
+pub async fn vorgang_id_put(
+    server: &LTZFServer,
+    creator_index: i32,
+    path_params: &params::ApiIdPathParam,
+    body: &models::Vorgang,
+) -> Result<PutResponse> {
+    let mut tx = server.sqlx_db.begin().await?;
+    let api_id = path_params.api_id;
+    let db_id = sqlx::query!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
+        .map(|x| x.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if let Some(db_id) = db_id {
+        debug!("Match found: {db_id}");
+        let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
 
-    #[doc = "`VorgangPut` - PUT /api/v2/vorgang"]
-    #[instrument(skip_all, fields(claims=%claims.0, scraper=%header_params.x_scraper_id))]
-    async fn vorgang_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        header_params: &models::VorgangPutHeaderParams,
-        body: &models::Vorgang,
-    ) -> Result<VorgangPutResponse> {
-        // technically not necessary since all authenticated scopes are allowed, still, better be explicit about that
-        if claims.0 != APIScope::KeyAdder
-            && claims.0 != APIScope::Admin
-            && claims.0 != APIScope::Collector
-        {
-            warn!("Permission Level too low");
-            return Ok(VorgangPutResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
+        if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
+            return Ok(PutResponse::NotMod);
         }
-        let rval =
-            merge::execute::run_integration(body, header_params.x_scraper_id, claims.1, self).await;
-        match rval {
-            Ok(()) => {
-                info!("Integration Successful");
-                Ok(VorgangPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                })
-            }
-            Err(e) => {
-                warn!("Unsuccessful Integration Attempt: {e}");
-                match &e {
-                    LTZFError::Validation { source } => match **source {
-                        DataValidationError::Conflict { .. }
-                        | DataValidationError::AmbiguousMatch { .. } => {
-                            Ok(VorgangPutResponse::Status409_Conflict {
-                                x_rate_limit_limit: None,
-                                x_rate_limit_remaining: None,
-                                x_rate_limit_reset: None,
-                            })
-                        }
-                        _ => Err(e),
-                    },
-                    _ => Err(e),
+        debug!("Found to be different enough to not be exactly the same. Deleting...");
+        delete::delete_vorgang_by_api_id(api_id, server).await?;
+        debug!("Delete successful, now inserting...");
+    } else {
+        debug!("No Match found");
+    }
+    match insert::insert_vorgang(body, Uuid::nil(), creator_index, &mut tx, server).await {
+        Ok(_) => {
+            info!(target: "obj", "PUT by ID Vorgang {}", path_params.api_id);
+            info!("Successful insert or replace");
+            tx.commit().await?;
+            Ok(PutResponse::Success)
+        }
+        Err(e) => match &e {
+            LTZFError::Validation { source } => match &(**source) {
+                DataValidationError::MalformedVorgang { reason } => {
+                    tx.rollback().await?;
+                    Ok(PutResponse::BadReq(reason.clone()))
                 }
+                _ => Err(e),
+            },
+            _ => Err(e),
+        },
+    }
+}
+
+/// Main endpoint collectors call to drop off their payloads.
+///
+/// # Errors
+/// Can fail due to:
+/// - Database Errors
+/// - Ambiguous merges (Conflict)
+/// - Errors in the merge process
+#[instrument(skip_all, fields( scraper=%header_params.0))]
+pub async fn vorgang_put(
+    server: &LTZFServer,
+    creator_index: i32,
+    header_params: &params::XScraperId,
+    body: &models::Vorgang,
+) -> Result<PutResponse> {
+    let rval = merge::execute::run_integration(body, header_params.0, creator_index, server).await;
+    match rval {
+        Ok(()) => {
+            info!("Integration Successful");
+            Ok(PutResponse::Success)
+        }
+        Err(e) => {
+            warn!("Unsuccessful Integration Attempt: {e}");
+            match &e {
+                LTZFError::Validation { source } => match &(**source) {
+                    DataValidationError::Conflict { .. }
+                    | DataValidationError::AmbiguousMatch { .. } => Ok(PutResponse::Conflict),
+                    DataValidationError::MalformedVorgang { reason } => {
+                        Ok(PutResponse::BadReq(reason.clone()))
+                    }
+                    _ => Err(e),
+                },
+                _ => Err(e),
             }
         }
     }
 }
 
-#[async_trait]
-impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
-    #[doc = "`VorgangGetById` - GET /`api/v2/vorgang/{vorgang_id`}"]
-    #[instrument(skip_all, fields(vg=%path_params.vorgang_id))]
-    async fn vorgang_get_by_id(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        header_params: &models::VorgangGetByIdHeaderParams,
-        path_params: &models::VorgangGetByIdPathParams,
-    ) -> Result<VorgangGetByIdResponse> {
-        // TODO: find a better way to handle admin-only info for every object
-        // in the past this was done by optional authentication, but that
-        // turned out not to neatly fit into the oapi spec.
-        // for now this is just a disabled feature
-        let claims = (APIScope::Collector, 0);
+/// Get a Vorgang by its `api_id`
+/// used extensively, because documents are usually only listed as their ids, and this endpoint is
+/// meant to fetch the function
+///
+/// # Errors
+/// Can fail due to database errors
+#[instrument(skip_all, fields(vg=%path_params.api_id))]
+pub async fn vorgang_get_by_id(
+    server: &LTZFServer,
+    header_params: &params::IfModSince,
+    path_params: &params::ApiIdPathParam,
+) -> Result<GetSingleResponse<models::Vorgang>> {
+    // TODO: find a better way to handle admin-only info for every object
+    // in the past this was done by optional authentication, but that
+    // turned out not to neatly fit into the oapi spec.
+    // for now this is just a disabled feature
+    let claims = (APIScope::Collector, 0);
 
-        let mut tx = self.sqlx_db.begin().await?;
+    let mut tx = server.sqlx_db.begin().await?;
 
-        let dbid = if let Some(if_modified_since) = header_params.if_modified_since {
+    let dbid = if let Some(if_modified_since) = header_params.if_modified_since {
             sqlx::query_scalar!(
                 "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
                     SELECT 1 FROM station s WHERE s.zp_modifiziert > $2::timestamptz AND s.vg_id = vorgang.id
                 )",
-                path_params.vorgang_id,
+                path_params.api_id,
                 if_modified_since
             )
         } else {
             sqlx::query_scalar!(
                 "SELECT id FROM vorgang WHERE api_id = $1",
-                path_params.vorgang_id
+                path_params.api_id
             )
         }
             .fetch_optional(&mut *tx)
             .await?;
 
-        let res = match (header_params.if_modified_since, dbid) {
-            (_, Some(dbid)) => {
-                let mut result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
-                if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
-                    result.touched_by = as_option(
-                        sqlx::query!(
-                            "SELECT * FROM scraper_touched_vorgang sts
+    let res = match (header_params.if_modified_since, dbid) {
+        (_, Some(dbid)) => {
+            let mut result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
+            if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
+                result.touched_by = sqlx::query!(
+                    "SELECT * FROM scraper_touched_vorgang sts
                             INNER JOIN api_keys ON api_keys.id = sts.collector_key
                             WHERE vg_id = $1",
-                            dbid
-                        )
-                        .map(|r| models::TouchedByInner {
-                            key: Some(r.key_hash),
-                            scraper_id: Some(r.scraper),
-                        })
-                        .fetch_all(&mut *tx)
-                        .await?,
-                    );
-                }
-                info!("Successful retrieval");
-                Ok(VorgangGetByIdResponse::Status200_Success {
-                    body: result,
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
+                    dbid
+                )
+                .map(|r| models::TouchedByInner {
+                    key: Some(r.key_hash),
+                    scraper_id: Some(r.scraper),
                 })
+                .fetch_all(&mut *tx)
+                .await?;
             }
-            (Some(if_modified_since), None) => {
-                info!(
-                    "Successful Retrieval, was unchanged since {}",
-                    if_modified_since
-                );
-                Ok(VorgangGetByIdResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                })
-            }
-            (None, None) => {
-                warn!("Vorgang was not found");
-                Ok(VorgangGetByIdResponse::Status404_NotFound {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                })
-            }
+            info!("Successful retrieval");
+            Ok(GetSingleResponse::Success(Box::new(result)))
+        }
+        (Some(if_modified_since), None) => {
+            info!(
+                "Successful Retrieval, was unchanged since {}",
+                if_modified_since
+            );
+            Ok(GetSingleResponse::NotMod)
+        }
+        (None, None) => {
+            warn!("Vorgang was not found");
+            Ok(GetSingleResponse::NotFound)
+        }
+    };
+
+    tx.commit().await?;
+    res
+}
+
+/// Used to get a filtered list of Vorgang objects.
+/// # Errors
+/// Can fail due to database errors or invalid filter constraints
+#[instrument(skip_all)]
+pub async fn vorgang_get(
+    server: &LTZFServer,
+    header_params: &params::IfModSince,
+    query_params: &params::VorgangGetQueryParams,
+) -> Result<ListingGetResponse<models::Vorgang>> {
+    let mut tx = server.sqlx_db.begin().await?;
+    if let Some(range) = find_applicable_date_range(
+        None,
+        None,
+        None,
+        query_params.since,
+        query_params.until,
+        header_params.if_modified_since,
+    ) {
+        let parameters = retrieve::VGGetParameters {
+            lower_date: range.since,
+            parlament: query_params.p,
+            upper_date: range.until,
+            vgtyp: query_params.vgtyp,
+            wp: query_params.wp.map(i32::from),
+            inifch: query_params.fach.clone(),
+            iniorg: query_params.org.clone(),
+            inipsn: query_params.person.clone(),
         };
-
-        tx.commit().await?;
-        res
-    }
-
-    #[doc = "`VorgangGet` - GET /api/v2/vorgang"]
-    #[instrument(skip_all)]
-    async fn vorgang_get(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        header_params: &models::VorgangGetHeaderParams,
-        query_params: &models::VorgangGetQueryParams,
-    ) -> Result<VorgangGetResponse> {
-        let mut tx = self.sqlx_db.begin().await?;
-        if let Some(range) = find_applicable_date_range(
-            None,
-            None,
-            None,
-            query_params.since,
-            query_params.until,
-            header_params.if_modified_since,
-        ) {
-            let parameters = retrieve::VGGetParameters {
-                lower_date: range.since,
-                parlament: query_params.p,
-                upper_date: range.until,
-                vgtyp: query_params.vgtyp,
-                wp: query_params.wp,
-                inifch: query_params.fach.clone(),
-                iniorg: query_params.org.clone(),
-                inipsn: query_params.person.clone(),
-            };
-            let result = retrieve::vorgang_by_parameter(
-                parameters,
-                query_params.page,
-                query_params.per_page,
-                &mut tx,
-            )
-            .await?;
-            if result.1.is_empty() {
-                tx.rollback().await?;
-                if let Some(if_modified_since) = header_params.if_modified_since {
-                    info!("No modification to result set since {}", if_modified_since);
-                    Ok(VorgangGetResponse::Status304_NotModified {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    })
-                } else {
-                    info!(
-                        "Parameters did not yield any content: {:?}, ims=None",
-                        query_params
-                    );
-                    Ok(VorgangGetResponse::Status204_NoContent {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    })
-                }
+        let result = retrieve::vorgang_by_parameter(
+            parameters,
+            query_params.page,
+            query_params.per_page,
+            &mut tx,
+        )
+        .await?;
+        if result.1.is_empty() {
+            tx.rollback().await?;
+            if let Some(if_modified_since) = header_params.if_modified_since {
+                info!("No modification to result set since {}", if_modified_since);
+                Ok(ListingGetResponse::NotMod)
             } else {
-                tx.commit().await?;
-                let prp = &result.0;
-                info!("{} Objects matched query Parameters", result.1.len());
-                Ok(VorgangGetResponse::Status200_Successful {
-                    body: result.1,
-                    x_total_count: Some(prp.x_total_count),
-                    x_total_pages: Some(prp.x_total_pages),
-                    x_page: Some(prp.x_page),
-                    x_per_page: Some(prp.x_per_page),
-                    link: Some(prp.generate_link_header("/api/v2/vorgang")),
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                })
+                info!(
+                    "Parameters did not yield any content: {:?}, ims=None",
+                    query_params
+                );
+                Ok(ListingGetResponse::NoContent)
             }
         } else {
-            tx.rollback().await?;
-            warn!(
-                "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
-                query_params, header_params.if_modified_since
-            );
-            Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
+            tx.commit().await?;
+            let (prp, body) = result;
+            info!("{} Objects matched query Parameters", body.len());
+            Ok(ListingGetResponse::Success {
+                body,
+                prp,
+                path_prefix: "/api/v2/vorgang",
             })
         }
+    } else {
+        tx.rollback().await?;
+        warn!(
+            "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
+            query_params, header_params.if_modified_since
+        );
+        Ok(ListingGetResponse::BadReq)
     }
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_endpoints {
-
-    use axum::http::Method;
-    use axum_extra::extract::CookieJar;
+    use crate::api::{GetSingleResponse, ListingGetResponse, PutResponse};
+    use crate::models::{self, params};
+    use crate::utils::testing::{TestSetup, generate};
     use chrono::Utc;
-    use openapi::apis::collector_schnittstellen_vorgang::*;
-    use openapi::apis::data_administration_vorgang::*;
-    use openapi::apis::unauthorisiert_vorgang::*;
-
-    use openapi::models;
-    use openapi::models::VorgangIdPutPathParams;
-    use openapi::models::VorgangPutHeaderParams;
     use uuid::Uuid;
 
-    use crate::api::auth;
-    use crate::api::auth::APIScope;
-    use crate::utils::testing::{TestSetup, generate};
-    fn localhost() -> headers::Host {
-        use http::uri::Authority;
-        Authority::from_static("localhost").into()
-    }
     // Procedure (Vorgang) tests
     #[tokio::test]
-    async fn test_vorgang_get_by_id_endpoints() {
+    pub async fn test_vorgang_get_by_id_endpoints() {
         // Setup test server and database
         let scenario = TestSetup::new("test_vorgang_by_id_get").await;
         let server = &scenario.server;
         let test_vorgang = generate::default_vorgang();
         // First create the procedure
-        let create_response = server
-            .vorgang_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(auth::APIScope::Collector, 1),
-                &models::VorgangPutHeaderParams {
-                    x_scraper_id: test_vorgang.api_id,
-                },
-                &test_vorgang,
-            )
-            .await
-            .expect("Failed to get valid server respone when trying to push new Vorgang.");
-        assert_eq!(
-            create_response,
-            VorgangPutResponse::Status201_Created {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            }
-        );
+        super::vorgang_put(
+            server,
+            1,
+            &params::XScraperId(test_vorgang.api_id),
+            &test_vorgang,
+        )
+        .await
+        .expect("Failed to get valid server respone when trying to push new Vorgang.");
+
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         // Test cases for vorgang_get_by_id:
         // 1. Get existing procedure
         {
-            let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .expect(
-                    "Failed to get valid server respone when trying to get existing Vorgang by ID.",
-                );
+            let response = super::vorgang_get_by_id(
+                server,
+                &params::IfModSince {
+                    if_modified_since: None,
+                },
+                &params::ApiIdPathParam {
+                    api_id: test_vorgang.api_id,
+                },
+            )
+            .await
+            .expect(
+                "Failed to get valid server respone when trying to get existing Vorgang by ID.",
+            );
             match response {
-                VorgangGetByIdResponse::Status200_Success { body, .. } => {
+                super::GetSingleResponse::Success(body) => {
                     assert_eq!(body.api_id, test_vorgang.api_id);
                     assert_eq!(body.titel, test_vorgang.titel);
                 }
-                VorgangGetByIdResponse::Status304_NotModified { .. } => panic!(
+                super::GetSingleResponse::NotMod => panic!(
                     "Test server returned \"304: Not Modified\", even though \"if_modified_since\" was set to `None`."
                 ),
-                VorgangGetByIdResponse::Status404_NotFound { .. } => panic!(
+                super::GetSingleResponse::NotFound => panic!(
                     "Test server returned \"404: Not Found\", even though Vorgang was just pushed with positive response code."
                 ),
+                _ => panic!("Unexpected response"),
             }
         }
 
         // 2. Get non-existent procedure
         {
             let non_existent_id = Uuid::now_v7();
-            let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: non_existent_id,
-                    },
-                )
-                .await
-                .expect(
-                    "Failed to get valid server respone when trying to get existing Vorgang by ID.",
-                );
-            assert_eq!(
-                response,
-                VorgangGetByIdResponse::Status404_NotFound {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                }
+            let response = super::vorgang_get_by_id(
+                server,
+                &params::IfModSince {
+                    if_modified_since: None,
+                },
+                &params::ApiIdPathParam {
+                    api_id: non_existent_id,
+                },
+            )
+            .await
+            .expect(
+                "Failed to get valid server respone when trying to get existing Vorgang by ID.",
             );
+            assert!(matches!(response, GetSingleResponse::NotFound));
         }
 
         // 3. Get procedure with invalid ID
         {
             let invalid_id = Uuid::nil();
-            let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
+            let response = super::vorgang_get_by_id(server,
+                    &params::IfModSince {
                         if_modified_since: None,
                     },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: invalid_id,
+                    &params::ApiIdPathParam {
+                        api_id: invalid_id,
                     },
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get Vorgang by an invalid ID (nil).");
-            assert_eq!(
-                response,
-                VorgangGetByIdResponse::Status404_NotFound {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            assert!(matches!(response, GetSingleResponse::NotFound));
         }
-        let response = server
-            .vorgang_get_by_id(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &models::VorgangGetByIdHeaderParams {
+        let response = super::vorgang_get_by_id(
+            server,
+                &params::IfModSince {
                     if_modified_since: Some(chrono::Utc::now()),
                 },
-                &models::VorgangGetByIdPathParams {
-                    vorgang_id: test_vorgang.api_id,
+                &params::ApiIdPathParam {
+                    api_id: test_vorgang.api_id,
                 },
             )
             .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang by ID with update time limitations.");
-        assert_eq!(
-            response,
-            VorgangGetByIdResponse::Status304_NotModified {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
+        assert!(matches!(response, GetSingleResponse::NotMod));
         scenario.teardown().await;
     }
 
     #[tokio::test]
-    async fn test_vorgang_get_filtered_endpoints_empty() {
+    pub async fn test_vorgang_get_filtered_endpoints_empty() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_empty").await;
         let server = &scenario.server;
         let test_vorgang = generate::default_vorgang();
         // First create the procedure
-        {
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutHeaderParams {
-                        x_scraper_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                create_response,
-                VorgangPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                },
-                "Failed to create test procedure"
-            );
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        }
+        super::vorgang_put(
+            server,
+            1,
+            &params::XScraperId(test_vorgang.api_id),
+            &test_vorgang,
+        )
+        .await
+        .expect("Failed to get valid server respone when trying to push new Vorgang.");
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
         // 2. Get procedures with invalid parameters
         {
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
+            let response = super::vorgang_get(
+                server,
+                    &params::IfModSince {
                         if_modified_since: None,
                     },
-                    &models::VorgangGetQueryParams {
+                    &params::VorgangGetQueryParams {
                         page: None,
                         per_page: None,
                         p: None,
@@ -567,23 +397,13 @@ mod test_endpoints {
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang with invalid date range.");
-            assert_eq!(
-                response,
-                VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
+            assert!(matches!(response, ListingGetResponse::BadReq));
+            let response = super::vorgang_get(
+                server,
+                    &params::IfModSince {
                         if_modified_since: None,
                     },
-                    &models::VorgangGetQueryParams {
+                    &params::VorgangGetQueryParams {
                         page: None,
                         per_page: None,
                         p: None,
@@ -598,20 +418,13 @@ mod test_endpoints {
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang with date range in the future.");
-            assert_eq!(
-                response,
-                VorgangGetResponse::Status204_NoContent {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            assert!(matches!(response, ListingGetResponse::NoContent));
         }
         scenario.teardown().await;
     }
 
     #[tokio::test]
-    async fn test_vorgang_get_filtered_endpoints_success() {
+    pub async fn test_vorgang_get_filtered_endpoints_success() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_success").await;
         let server = &scenario.server;
         let test_vorgang = models::Vorgang {
@@ -626,46 +439,31 @@ mod test_endpoints {
         };
         {
             // First create a procedure with specific parameters
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutHeaderParams {
-                        x_scraper_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                create_response,
-                VorgangPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                }
-            );
+            let create_response = super::vorgang_put(
+                server,
+                1,
+                &params::XScraperId(test_vorgang.api_id),
+                &test_vorgang,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
+            assert!(matches!(create_response, PutResponse::Success));
         }
         {
             // Then get it with matching filters
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
+            let response = super::vorgang_get(
+                server,
+                    &params::IfModSince {
                         if_modified_since: None,
                     },
-                    &models::VorgangGetQueryParams {
+                    &params::VorgangGetQueryParams {
                         page: Some(0),
                         per_page: Some(32),
                         p: Some(models::Parlament::Bt),
                         since: None,
                         until: None,
                         vgtyp: Some(test_vorgang.typ),
-                        wp: Some(i32::try_from(test_vorgang.wahlperiode).expect("Failed to convert Wahlperiode as it exceeds i32::MAX.")),
+                        wp: Some(test_vorgang.wahlperiode),
                         fach: None,
                         org: None,
                         person: None,
@@ -673,12 +471,7 @@ mod test_endpoints {
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang with valid filters.");
-            match response {
-                VorgangGetResponse::Status200_Successful { body, .. } => {
-                    assert!(!body.is_empty());
-                }
-                response => panic!("Expected successful operation response, got {response:?}"),
-            }
+            assert!(matches!(response, ListingGetResponse::Success {body, ..} if !body.is_empty()));
         }
 
         // Cleanup
@@ -686,91 +479,41 @@ mod test_endpoints {
     }
 
     #[tokio::test]
-    async fn test_vorgang_put_endpoint() {
+    pub async fn test_vorgang_put_endpoint() {
         // Setup test server and database
         let scenario = TestSetup::new("test_vorgang_put").await;
         let server = &scenario.server;
-        let host = localhost();
-        let cookies = CookieJar::new();
 
         // Test cases for vorgang_id_put:
         // 1. Update existing procedure with valid data and admin permissions
         {
             let test_vorgang = generate::default_vorgang();
-            let response = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangIdPutPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                response,
-                VorgangIdPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-        }
-
-        // 2. Update procedure with insufficient permissions (Collector)
-        {
-            let test_vorgang = generate::default_vorgang();
-            let response = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangIdPutPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang without permissions.");
-            assert_eq!(
-                response,
-                VorgangIdPutResponse::Status403_Forbidden {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            let response = super::vorgang_id_put(
+                server,
+                1,
+                &params::ApiIdPathParam {
+                    api_id: test_vorgang.api_id,
+                },
+                &test_vorgang,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
+            assert!(matches!(response, PutResponse::Success));
         }
 
         // Test cases for vorgang_put:
         // 1. Create new procedure with valid data and collector permissions
         {
             let test_vorgang = generate::default_vorgang();
-            let response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutHeaderParams {
-                        x_scraper_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                response,
-                VorgangPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            let response = super::vorgang_put(
+                server,
+                1,
+                &params::XScraperId(test_vorgang.api_id),
+                &test_vorgang,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
+            assert!(matches!(response, PutResponse::Success));
         }
 
         // 2. Handle ambiguous matches (conflict)
@@ -781,73 +524,35 @@ mod test_endpoints {
             vg2.api_id = Uuid::now_v7();
             vg3.api_id = Uuid::now_v7();
 
-            let rsp1 = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(APIScope::Admin, 1),
-                    &VorgangIdPutPathParams {
-                        vorgang_id: vg1.api_id,
-                    },
-                    &vg1,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                rsp1,
-                VorgangIdPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            let rsp1 = super::vorgang_id_put(
+                server,
+                1,
+                &params::ApiIdPathParam { api_id: vg1.api_id },
+                &vg1,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
+            assert!(matches!(rsp1, PutResponse::Success));
 
-            let rsp2 = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(APIScope::Admin, 1),
-                    &VorgangIdPutPathParams {
-                        vorgang_id: vg2.api_id,
-                    },
-                    &vg2,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                rsp2,
-                VorgangIdPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            let rsp2 = super::vorgang_id_put(
+                server,
+                1,
+                &params::ApiIdPathParam { api_id: vg2.api_id },
+                &vg2,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
+            assert!(matches!(rsp2, PutResponse::Success));
 
-            let conflict_resp = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(APIScope::Admin, 1),
-                    &VorgangPutHeaderParams {
-                        x_scraper_id: Uuid::nil(),
-                    },
-                    &vg3,
-                )
-                .await
-                .expect(
-                    "Failed to get valid server respone when trying to push conflicting Vorgang.",
-                );
-            assert_eq!(
-                conflict_resp,
-                VorgangPutResponse::Status409_Conflict {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            let conflict_resp = super::vorgang_put(
+                server,
+                1,
+                &params::XScraperId(Uuid::nil()),
+                &vg3,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push conflicting Vorgang.");
+            assert!(matches!(conflict_resp, PutResponse::Conflict));
         }
 
         // Cleanup
@@ -855,7 +560,7 @@ mod test_endpoints {
     }
 
     #[tokio::test]
-    async fn test_vorgang_delete_endpoints() {
+    pub async fn test_vorgang_delete_endpoints() {
         // Setup test server and database
         let scenario = TestSetup::new("test_vorgang_delete").await;
         let server = &scenario.server;
@@ -865,100 +570,39 @@ mod test_endpoints {
         {
             let test_vorgang = generate::default_vorgang();
             // First create the procedure
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutHeaderParams {
-                        x_scraper_id: Uuid::now_v7(),
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert_eq!(
-                create_response,
-                VorgangPutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
+            let create_response = super::vorgang_put(
+                server,
+                1,
+                &params::XScraperId(Uuid::now_v7()),
+                &test_vorgang,
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to push new Vorgang.");
+            assert!(matches!(create_response, PutResponse::Success));
 
             // Then delete it
-            let response = server
-                .vorgang_delete(
-                    &Method::DELETE,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangDeletePathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to delete Vorgang.");
-            assert_eq!(
-                response,
-                VorgangDeleteResponse::Status204_NoContent {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
+            super::vorgang_delete(
+                server,
+                &params::ApiIdPathParam {
+                    api_id: test_vorgang.api_id,
                 },
-                "Failed to delete procedure with id {}",
-                test_vorgang.api_id
-            );
+            )
+            .await
+            .expect("Failed to get valid server respone when trying to delete Vorgang.");
         }
 
         // 2. Delete non-existent procedure
         {
             let non_existent_id = Uuid::now_v7();
-            let response = server
-                .vorgang_delete(
-                    &Method::DELETE,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangDeletePathParams {
-                        vorgang_id: non_existent_id,
-                    },
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to delete non-existent Vorgang.");
-            assert_eq!(
-                response,
-                VorgangDeleteResponse::Status404_NotFound {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-        }
-
-        // 3. Delete procedure with insufficient permissions
-        {
-            let test_vorgang = generate::default_vorgang();
-            let response = server
-                .vorgang_delete(
-                    &Method::DELETE,
-                    &localhost(),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangDeletePathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .expect("Failed to get valid server respone when trying to delete Vorgang w/ insufficient permissions.");
-            assert_eq!(
-                response,
-                VorgangDeleteResponse::Status403_Forbidden {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
+            super::vorgang_delete(
+                server,
+                &params::ApiIdPathParam {
+                    api_id: non_existent_id,
+                },
+            )
+            .await
+            .expect(
+                "Failed to get valid server respone when trying to delete non-existent Vorgang.",
             );
         }
 
@@ -966,39 +610,25 @@ mod test_endpoints {
         scenario.teardown().await;
     }
     #[tokio::test]
-    async fn test_malformed_data_vorgang() {
+    pub async fn test_malformed_data_vorgang() {
         // TODO test multiple conflicting stations
     }
 
     #[tokio::test]
-    async fn test_malformed_data_station() {
+    pub async fn test_malformed_data_station() {
         // TODO test multiple conflicting dokumente / stellungnahmen
     }
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
-mod test_failed_irl_scenarios {
-    use crate::{api::auth::APIScope, utils::testing::TestSetup};
-    use axum::http::Method;
-    use axum_extra::extract::CookieJar;
-    use openapi::{
-        apis::collector_schnittstellen_vorgang::{
-            CollectorSchnittstellenVorgang, VorgangPutResponse,
-        },
-        models,
-    };
+pub(crate) mod test_failed_irl_scenarios {
+    use crate::{models, utils::testing::TestSetup};
     use std::path::{Path, PathBuf};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
     use uuid::Uuid;
 
-    fn localhost() -> headers::Host {
-        use http::uri::Authority;
-        Authority::from_static("localhost").into()
-    }
-
-    async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
+    pub async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
         let file = tokio::fs::File::open(path)
             .await
             .expect("Failed to open JSON lines file.");
@@ -1019,29 +649,18 @@ mod test_failed_irl_scenarios {
                 let path = PathBuf::from($path);
                 let test_setup =
                     TestSetup::new(&concat!("scenario_test_", stringify!($name))).await;
-                let host = localhost();
-                let cookies = CookieJar::new();
                 let objects = read_jsonl(&path).await;
-                for obj in objects.iter() {
+                for obj in &objects {
                     tracing::trace!("next to be inserted: {}", obj.api_id);
-                    let response = test_setup
-                        .server
-                        .vorgang_put(
-                            &Method::PUT,
-                            &host,
-                            &cookies,
-                            &(APIScope::KeyAdder, 1),
-                            &models::VorgangPutHeaderParams {
-                                x_scraper_id: Uuid::nil(),
-                            },
-                            obj,
-                        )
-                        .await
-                        .unwrap();
-                    assert!(matches!(
-                        response,
-                        VorgangPutResponse::Status201_Created { .. }
-                    ));
+                    let response = super::vorgang_put(
+                        &test_setup.server,
+                        1,
+                        &crate::models::params::XScraperId(Uuid::nil()),
+                        obj,
+                    )
+                    .await
+                    .expect("Expected no internal failure after put");
+                    assert!(matches!(response, super::super::PutResponse::Success));
                 }
                 test_setup.teardown().await;
             }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM dokumententyp x WHERE x.value = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "162496c95322ed17d1c90dabcf606b61a38523549a3eacf4aad2a810f2110902"
+}

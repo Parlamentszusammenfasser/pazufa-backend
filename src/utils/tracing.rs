@@ -19,6 +19,7 @@ pub struct Logging {
 }
 
 impl Logging {
+    #[must_use]
     pub fn new(error: PathBuf, object: Option<PathBuf>) -> Self {
         Self {
             error_log: error,
@@ -26,6 +27,10 @@ impl Logging {
         }
     }
 
+    /// Error logging layer of the tracing subscriber
+    /// # Panics
+    /// Can panic if the log files cannot be created due to permission issues, full disks or other
+    /// IO Errors
     pub fn error_layer<S>(&self) -> Box<dyn Layer<S> + Send + Sync + 'static>
     where
         S: tracing::subscriber::Subscriber,
@@ -65,6 +70,11 @@ impl Logging {
             .with_filter(tracing::level_filters::LevelFilter::WARN)
             .boxed()
     }
+
+    /// Object logging layer of the tracing subscriber
+    /// # Panics
+    /// Can panic if the log files cannot be created due to permission issues, full disks or other
+    /// IO Errors
     pub fn object_log_layer<S>(&self) -> Box<dyn Layer<S> + Send + Sync + 'static>
     where
         S: tracing::subscriber::Subscriber,

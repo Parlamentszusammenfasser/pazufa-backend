@@ -1,11 +1,3 @@
-use super::MatchState;
-use crate::db::KeyIndex;
-use crate::db::insert::{self, insert_or_retrieve_autor};
-#[cfg(feature = "track-validation")]
-use crate::db::validate;
-use crate::error::{DataValidationError, LTZFError};
-use crate::utils::notify::notify_ambiguous_match;
-
 /// Handles merging of two datasets.
 /// vorgang, station and dokument are mergeable, meaning their data is not atomic.
 /// Stellungnahme is handled like dokument with the rest being overridable data points
@@ -15,19 +7,23 @@ use crate::utils::notify::notify_ambiguous_match;
 ///     - if it is mergeable and one merge candidate found, merge
 ///     - if it is not mergeable and has a match in the existing set, the existing element takes precedence and is not replaced
 ///     - if it is not mergeable and has no match it is added to the set.
-use crate::{LTZFServer, Result};
-use openapi::models;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
-
+/// basic data items are to be overridden by newer information.
+/// Excempt from this is the `api_id`, since this is a permanent document identifier.
+use super::MatchState;
 use super::candidates::{
     dokument_merge_candidates, station_merge_candidates, vorgang_merge_candidates,
 };
+use crate::db::KeyIndex;
+use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
+#[cfg(feature = "track-validation")]
+use crate::db::validate;
+use crate::error::{DataValidationError, LTZFError};
+use crate::utils::notify::notify_ambiguous_match;
+use crate::{LTZFServer, Result, models};
+use tracing::{debug, info, warn};
+use uuid::Uuid;
 
-/// basic data items are to be overridden by newer information.
-/// Excempt from this is the `api_id`, since this is a permanent document identifier.
-/// All
-pub async fn execute_merge_dokument(
+pub(crate) async fn execute_merge_dokument(
     model: &models::Dokument,
     candidate: i32,
     scraper_id: Uuid,
@@ -60,7 +56,7 @@ pub async fn execute_merge_dokument(
     .execute(&mut **tx)
     .await?;
     // schlagworte::UNION
-    insert::insert_dok_sw(db_id, model.schlagworte.clone().unwrap_or_default(), tx).await?;
+    insert::insert_dok_sw(db_id, &model.schlagworte, tx).await?;
     // autoren::UNION
     let mut aids = vec![];
     for a in &model.autoren {
@@ -107,16 +103,15 @@ pub async fn execute_merge_dokument(
     info!("Merging Dokument into Database successful");
     Ok(())
 }
-pub async fn insert_or_merge_dok(
-    dok: &models::StationDokumenteInner,
+pub(crate) async fn insert_or_merge_dok(
+    dok: &models::DokumentOrApiId,
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<Option<i32>> {
     match dok {
-        models::StationDokumenteInner::String(uuid) => {
-            let uuid = uuid::Uuid::parse_str(uuid)?;
+        models::DokumentOrApiId::ApiId(uuid) => {
             let id = sqlx::query!("SELECT id FROM dokument d WHERE d.api_id = $1", uuid)
                 .map(|r| r.id)
                 .fetch_optional(&mut **tx)
@@ -128,23 +123,18 @@ pub async fn insert_or_merge_dok(
                     input: format!("Supplied uuid `{uuid}` as document id without a body, but no such ID is in the database.") }.into())
             }
         }
-        models::StationDokumenteInner::Dokument(dok) => {
+        models::DokumentOrApiId::Dokument(dok) => {
             let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
             match matches {
                 MatchState::NoMatch => {
-                    let did = crate::db::insert::insert_dokument(
-                        dok.clone(),
-                        scraper_id,
-                        collector_key,
-                        tx,
-                        srv,
-                    )
-                    .await?;
+                    let did =
+                        crate::db::insert::insert_dokument(dok, scraper_id, collector_key, tx, srv)
+                            .await?;
                     Ok(Some(did))
                 }
                 MatchState::ExactlyOne(matchmod) => {
                     debug!(
-                        "Found exactly one match with db id: {}. Merging...",
+                        "Found exactly one Dokument with db id: {}. Merging...",
                         matchmod
                     );
                     execute_merge_dokument(dok, matchmod, scraper_id, collector_key, tx, srv)
@@ -170,7 +160,7 @@ pub async fn insert_or_merge_dok(
     }
 }
 
-pub async fn execute_merge_station(
+pub(crate) async fn execute_merge_station(
     model: &models::Station,
     candidate: i32,
     scraper_id: Uuid,
@@ -216,13 +206,13 @@ pub async fn execute_merge_station(
         SELECT $1, blub FROM UNNEST($2::text[]) as blub
         ON CONFLICT DO NOTHING",
         db_id,
-        model.additional_links.as_ref().map(|x| &x[..])
+        &model.additional_links[..]
     )
     .execute(&mut **tx)
     .await?;
 
     // schlagworte::UNION
-    insert::insert_station_sw(db_id, model.schlagworte.clone().unwrap_or_default(), tx).await?;
+    insert::insert_station_sw(db_id, &model.schlagworte, tx).await?;
 
     // dokumente::UNION
     let mut insert_ids = vec![];
@@ -246,7 +236,7 @@ pub async fn execute_merge_station(
 
     // stellungnahmen
     let mut insert_ids = vec![];
-    for stln in model.stellungnahmen.as_ref().unwrap_or(&vec![]) {
+    for stln in &model.stellungnahmen {
         if let Some(id) = insert_or_merge_dok(stln, scraper_id, collector_key, tx, srv).await? {
             insert_ids.push(id);
         }
@@ -290,7 +280,7 @@ pub async fn execute_merge_station(
     Ok(())
 }
 
-pub async fn execute_merge_vorgang(
+pub(crate) async fn execute_merge_vorgang(
     model: &models::Vorgang,
     candidate: i32,
     scraper_id: Uuid,
@@ -334,26 +324,21 @@ pub async fn execute_merge_vorgang(
     .execute(&mut **tx)
     .await?;
     // links
-    let links = model.links.clone().unwrap_or_default();
     sqlx::query!(
         "INSERT INTO rel_vorgang_links (vg_id, link)
         SELECT $1, blub FROM UNNEST($2::text[]) as blub
         ON CONFLICT DO NOTHING",
         db_id,
-        &links[..]
+        &model.links[..]
     )
     .execute(&mut **tx)
     .await?;
     // identifikatoren
-    let ident_list = model
-        .ids
-        .as_ref()
-        .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
-
-    let identtyp_list = model
-        .ids
-        .as_ref()
-        .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
+    let (mut ident_list, mut identtyp_list) = (vec![], vec![]);
+    for id in &model.ids {
+        ident_list.push(id.id.clone());
+        identtyp_list.push(id.typ.clone());
+    }
 
     sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator)
@@ -363,8 +348,8 @@ pub async fn execute_merge_vorgang(
         ON CONFLICT DO NOTHING
         ",
         db_id,
-        identtyp_list.as_ref().map(|x| &x[..]),
-        ident_list.as_ref().map(|x| &x[..])
+        &identtyp_list[..],
+        &ident_list[..]
     )
     .execute(&mut **tx)
     .await?;
@@ -372,11 +357,10 @@ pub async fn execute_merge_vorgang(
     for stat in &model.stationen {
         match station_merge_candidates(stat, db_id, tx, srv).await? {
             MatchState::NoMatch => {
-                insert::insert_station(stat.clone(), db_id, scraper_id, collector_key, tx, srv)
-                    .await?;
+                insert::insert_station(stat, db_id, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::ExactlyOne(statid) => {
-                // can be ignored bc same as db_id
+                debug!("Found exactly one Station with db id: {statid}. Merging...");
                 execute_merge_station(stat, statid, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::Ambiguous(matches) => {
@@ -396,59 +380,37 @@ pub async fn execute_merge_vorgang(
         .execute(&mut **tx)
         .await?;
 
-    if let Some(lobbyr) = &model.lobbyregister {
-        for l in lobbyr {
-            let aid = insert_or_retrieve_autor(&l.organisation, tx, srv).await?;
-            let lrid = sqlx::query!(
-                "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+    for l in &model.lobbyregister {
+        let aid = insert_or_retrieve_autor(&l.organisation, tx, srv).await?;
+        let lrid = sqlx::query!(
+            "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id",
-                &l.intention,
-                &l.interne_id,
-                &aid,
-                db_id,
-                &l.link
-            )
-            .map(|r| r.id)
-            .fetch_one(&mut **tx)
-            .await?;
-            sqlx::query!(
-                "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
-            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
-                lrid,
-                &l.betroffene_drucksachen
-            )
-            .execute(&mut **tx)
-            .await?;
-        }
-    }
-
-    sqlx::query!(
-        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
-        db_id,
-        collector_key,
-        scraper_id
-    )
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query!(
-        "WITH ranked_objects AS (
-        SELECT vg_id, scraper, 
-        ROW_NUMBER() OVER (
-            PARTITION BY vg_id
-            ORDER BY time_stamp DESC
-        ) AS rn 
-        FROM scraper_touched_vorgang
+            &l.intention,
+            &l.interne_id,
+            &aid,
+            db_id,
+            &l.link
         )
-        DELETE FROM scraper_touched_vorgang stv
-        USING ranked_objects ro
-        WHERE stv.vg_id=ro.vg_id AND
-        stv.scraper=ro.scraper AND
-        ro.rn > $1",
-        i64::from(srv.config.per_object_scraper_log_size)
+        .map(|r| r.id)
+        .fetch_one(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+            lrid,
+            &l.betroffene_drucksachen
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    update_scraper_touched_vorgang(
+        db_id,
+        srv.config.per_object_scraper_log_size,
+        collector_key,
+        scraper_id,
+        tx,
     )
-    .execute(&mut **tx)
     .await?;
 
     #[cfg(feature = "track-validation")]
@@ -468,7 +430,7 @@ pub async fn execute_merge_vorgang(
     Ok(())
 }
 
-pub async fn run_integration(
+pub(crate) async fn run_integration(
     model: &models::Vorgang,
     scraper_id: Uuid,
     collector_key: KeyIndex,
@@ -533,14 +495,12 @@ pub async fn run_integration(
     Ok(())
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod scenariotest {
     use crate::api::SortArrays;
+    use crate::models::{self, DokumentOrApiId};
     use crate::utils::testing::{TestSetup, generate};
     use crate::{LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
-    use openapi::models::{self, StationDokumenteInner};
-
     use uuid::Uuid;
 
     struct Scenario {
@@ -567,7 +527,7 @@ mod scenariotest {
             self.expected
                 .iter_mut()
                 .for_each(crate::api::SortArrays::sort_arrays);
-            self.expected.sort_by(|a, b| a.api_id.cmp(&b.api_id));
+            self.expected.sort_by_key(|a| a.api_id);
             self
         }
         fn with_test_object(mut self, obj: models::Vorgang) -> Self {
@@ -649,7 +609,7 @@ mod scenariotest {
                 .1
                 .iter_mut()
                 .for_each(crate::api::SortArrays::sort_arrays);
-            db_vorgangs.1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
+            db_vorgangs.1.sort_by_key(|a| a.api_id);
 
             tx.commit().await?;
             let equality = self
@@ -706,23 +666,18 @@ mod scenariotest {
         let mut vg = vg.clone();
         for s in &mut vg.stationen {
             for d in &mut s.dokumente {
-                if let StationDokumenteInner::Dokument(dok) = d {
-                    *d = StationDokumenteInner::String(
-                        dok.api_id
-                            .expect("Station Dokument is missing API id.")
-                            .to_string(),
+                if let DokumentOrApiId::Dokument(dok) = d {
+                    *d = DokumentOrApiId::ApiId(
+                        dok.api_id.expect("Station Dokument is missing API id."),
                     );
                 }
             }
-            if let Some(stellungnahme) = &mut s.stellungnahmen {
-                for d in stellungnahme {
-                    if let StationDokumenteInner::Dokument(dok) = d {
-                        *d = StationDokumenteInner::String(
-                            dok.api_id
-                                .expect("Station Stellungnahme is missing API id.")
-                                .to_string(),
-                        );
-                    }
+            for d in &mut s.stellungnahmen {
+                if let DokumentOrApiId::Dokument(dok) = d {
+                    *d = DokumentOrApiId::ApiId(
+                        dok.api_id
+                            .expect("Station Stellungnahme is missing API id."),
+                    );
                 }
             }
         }
@@ -771,30 +726,28 @@ mod scenariotest {
     async fn test_link_ini_ids_merging() {
         let vg = generate::default_vorgang();
         let mut vg_mod = vg.clone();
-        vg_mod.links = Some(vec!["https://example.com".to_string()]);
-        vg_mod.ids = Some(vec![models::VgIdent {
+        vg_mod.links = vec!["https://example.com".to_string()];
+        vg_mod.ids = vec![models::VgIdent {
             id: "einzigartig und anders".to_string(),
             typ: "initdrucks".to_owned(),
-        }]);
+        }];
         vg_mod.initiatoren = vec![generate::random::autor(0)];
 
         let mut vg_exp = vg.clone();
-        vg_exp.links = Some(
-            [].iter()
-                .chain(unsafe { vg.links.as_ref().unwrap_unchecked() }.iter())
-                .chain(unsafe { vg_mod.links.as_ref().unwrap_unchecked() }.iter())
-                .cloned()
-                .collect(),
-        ); //merged
-        unsafe { vg_exp.links.as_mut().unwrap_unchecked() }.sort();
-        vg_exp.ids = Some(
-            [].iter()
-                .chain(unsafe { vg.ids.as_ref().unwrap_unchecked() }.iter())
-                .chain(unsafe { vg_mod.ids.as_ref().unwrap_unchecked() }.iter())
-                .cloned()
-                .collect(),
-        ); //merged
-        unsafe { vg_exp.ids.as_mut().unwrap_unchecked() }.sort_by(|a, b| a.id.cmp(&b.id));
+        vg_exp.links = []
+            .iter()
+            .chain(vg.links.iter())
+            .chain(vg_mod.links.iter())
+            .cloned()
+            .collect(); //merged
+        vg_exp.links.sort();
+        vg_exp.ids = []
+            .iter()
+            .chain(vg.ids.iter())
+            .chain(vg_mod.ids.iter())
+            .cloned()
+            .collect(); //merged
+        vg_exp.ids.sort_by(|a, b| a.id.cmp(&b.id));
         vg_exp.initiatoren = []
             .iter()
             .chain(vg.initiatoren.iter())
@@ -839,7 +792,7 @@ mod scenariotest {
         let vg = generate::default_vorgang();
         let mut vg2 = vg.clone();
         vg2.api_id = uuid::uuid!("b18bee64-c0ff-eeee-ff1c-deadbeef3452");
-        vg2.ids = None;
+        vg2.ids = vec![];
 
         let mut stat = generate::default_station();
         stat.api_id = Some(uuid::uuid!("b18bee64-c0ff-eeee-ff1c-deadbeef4732"));
@@ -861,15 +814,12 @@ mod scenariotest {
     #[tokio::test]
     async fn test_schlagwort_duplicate_elimination_and_formatting() {
         let mut vg = generate::default_vorgang();
-        vg.stationen[0].schlagworte = Some(vec![
-            "AiNz".to_string(),
-            "ainz".to_string(),
-            "AINZ".to_string(),
-        ]);
+        vg.stationen[0].schlagworte =
+            vec!["AiNz".to_string(), "ainz".to_string(), "AINZ".to_string()];
         let vg2 = vg.clone();
 
         let mut vg_exp = vg.clone();
-        vg_exp.stationen[0].schlagworte = Some(vec!["ainz".to_string()]);
+        vg_exp.stationen[0].schlagworte = vec!["ainz".to_string()];
         let scenario = Scenario::builder("schlagwort_duplicate_elimination_and_formatting")
             .with_context(vec![vg])
             .with_test_object(vg2)
@@ -919,28 +869,30 @@ mod scenariotest {
         };
         let modified_docs_vorgang = models::Vorgang {
             stationen: vec![models::Station {
-                dokumente: vec![models::StationDokumenteInner::Dokument(
+                dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
                     modified_dokument.clone(),
-                )],
-                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(
+                ))],
+                stellungnahmen: vec![models::DokumentOrApiId::Dokument(Box::new(
                     modified_stellungnahme.clone(),
-                )]),
+                ))],
                 ..generate::default_station()
             }],
             ..generate::default_vorgang()
         };
         let expected_vorgang = models::Vorgang {
             stationen: vec![models::Station {
-                dokumente: vec![models::StationDokumenteInner::Dokument(models::Dokument {
-                    api_id: generate::default_dokument().api_id,
-                    ..modified_dokument.clone()
-                })],
-                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(
+                dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
+                    models::Dokument {
+                        api_id: generate::default_dokument().api_id,
+                        ..modified_dokument.clone()
+                    },
+                ))],
+                stellungnahmen: vec![models::DokumentOrApiId::Dokument(Box::new(
                     models::Dokument {
                         api_id: generate::default_stellungnahme().api_id,
                         ..modified_stellungnahme.clone()
                     },
-                )]),
+                ))],
                 ..generate::default_station()
             }],
             ..generate::default_vorgang()

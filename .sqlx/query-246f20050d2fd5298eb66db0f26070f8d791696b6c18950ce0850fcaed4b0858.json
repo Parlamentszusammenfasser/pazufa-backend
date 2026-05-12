@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM schlagwort x WHERE x.value = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "246f20050d2fd5298eb66db0f26070f8d791696b6c18950ce0850fcaed4b0858"
+}

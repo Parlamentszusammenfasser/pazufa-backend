@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id FROM dokument d \n        INNER JOIN dokumententyp dt ON dt.id = d.typ \n        WHERE \n        d.hash = $1 OR\n        d.api_id = $2 OR\n        (d.drucksnr = $3 AND dt.value = $4 \n            AND ($5 BETWEEN (d.zp_referenz-'12 hours'::interval) \n            AND (d.zp_referenz+'12 hours'::interval)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2426fd1274329fabcd01b0d63bde4ae9d31fb29d07d45f4505bd40881bbae9c7"
+}

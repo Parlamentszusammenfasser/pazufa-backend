@@ -1,23 +1,11 @@
+use super::RoundTimestamp;
+use super::{DeleteResponse, PutResponse};
+use crate::models::params;
+use crate::{LTZFError, LTZFServer, Result, models};
+use sqlx::PgTransaction;
 use std::collections::{BTreeMap, BTreeSet};
-
-use crate::api::WrappedAutor;
-use crate::api::auth::APIScope;
-use crate::db::retrieve::{count_existing_authors, count_existing_gremien};
-use crate::{LTZFError, LTZFServer, Result};
-use async_trait::async_trait;
-use axum::http::Method;
-use axum_extra::extract::CookieJar;
-use headers::Host;
-use openapi::apis::data_administration_miscellaneous::{
-    AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
-    DokumentDeleteIdResponse, DokumentPutIdResponse, EnumDeleteResponse, EnumPutResponse,
-    GremienDeleteByParamResponse, GremienPutResponse,
-};
-use openapi::models;
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
-
-use super::RoundTimestamp;
 
 // this query tries to resolve all potential unique constraint conflicts
 // on tables where the enumeration entry are part of a shared unique constraint.
@@ -76,265 +64,301 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$i
     } // match arm of macro
 ); // macro_rules
 
-#[async_trait]
-impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
-    /// `AutorenDeleteByParam` - DELETE /api/v2/autoren
-    #[instrument(skip_all, fields(query=?query_params))]
-    async fn autoren_delete_by_param(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::AutorenDeleteByParamQueryParams,
-    ) -> Result<AutorenDeleteByParamResponse> {
-        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
-            warn!("Permission level too low");
-            return Ok(AutorenDeleteByParamResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let empty_qp = models::AutorenDeleteByParamQueryParams {
-            person: None,
-            fach: None,
-            org: None,
-        };
-        if *query_params == empty_qp {
-            warn!(
-                "You tried to delete all Authors with an empty filter. This is not possible for safety reasons. Try to give me at least one filter"
-            );
-            return Ok(AutorenDeleteByParamResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-
-        let mut tx = self.sqlx_db.begin().await?;
-        let n_deleted = sqlx::query!(
-            "DELETE FROM autor a WHERE 
+/// Deletes Autoren from the database given some filtering parameters
+/// Does not delete anything with an empty filter to prevent accidents
+///
+/// # Errors
+/// Can fail if database operations fail.
+#[instrument(skip_all, fields(query=?query_params))]
+pub async fn autoren_delete_by_param(
+    server: &LTZFServer,
+    query_params: &params::AutorenDeleteByParamQueryParams,
+) -> Result<()> {
+    let mut tx = server.sqlx_db.begin().await?;
+    let n_deleted = sqlx::query!(
+        "DELETE FROM autor a WHERE 
             (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND
             a.organisation = COALESCE($2, a.organisation) AND
             (a.fachgebiet IS NULL OR a.fachgebiet = COALESCE($3, a.fachgebiet))",
-            query_params.person,
-            query_params.org,
-            query_params.fach
-        )
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        tx.commit().await?;
-        info!(target: "obj", "Successfully deleted {} authors matching psn:{:?} org:{:?} fch:{:?}", 
+        query_params.person,
+        query_params.org,
+        query_params.fach
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+    info!(target: "obj", "Successfully deleted {} authors matching psn:{:?} org:{:?} fch:{:?}", 
             n_deleted, query_params.person, query_params.org, query_params.fach);
 
-        info!("Successfully deleted matching authors");
-        return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        });
-    }
+    info!("Successfully deleted matching authors");
+    return Ok(());
+}
 
-    /// `GremienDeleteByParam` - DELETE /api/v2/gremien
-    #[instrument(skip_all, fields(query=?query_params, claim=%claims.0))]
-    async fn gremien_delete_by_param(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::GremienDeleteByParamQueryParams,
-    ) -> Result<GremienDeleteByParamResponse> {
-        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
-            warn!("Permission level too low");
-            return Ok(GremienDeleteByParamResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let empty_qp = models::GremienDeleteByParamQueryParams {
-            gr: None,
-            p: None,
-            wp: None,
-        };
-        if *query_params == empty_qp {
-            warn!(
-                "You tried to delete all Gremien with an empty filter. This is not possible for safety reasons. Try to give me at least one filter"
-            );
-            return Ok(GremienDeleteByParamResponse::Status204_NoContent {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let mut tx = self.sqlx_db.begin().await?;
-        let n_del = sqlx::query!(
-            "DELETE FROM gremium g WHERE 
+/// Deletes Gremien from the database given some filtering parameters
+/// Does not delete anything with an empty filter to prevent accidents
+///
+/// # Errors
+/// Can fail if database operations fail.
+#[instrument(skip_all, fields(query=?query_params))]
+pub async fn gremien_delete_by_param(
+    server: &LTZFServer,
+    query_params: &params::GremienDeleteByParamQueryParams,
+) -> Result<()> {
+    let mut tx = server.sqlx_db.begin().await?;
+    let n_del = sqlx::query!(
+        "DELETE FROM gremium g WHERE 
             g.name = COALESCE($1, g.name) AND
             g.wp = COALESCE($2, g.wp) AND
             g.parl = COALESCE((SELECT id FROM parlament p WHERE p.value = $3), g.parl)",
-            query_params.gr,
-            query_params.wp,
-            query_params.p.as_ref().map(ToString::to_string)
+        query_params.gr,
+        query_params.wp.map(i32::from),
+        query_params.p.as_ref().map(ToString::to_string)
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+    info!(target: "obj", "Deleted {} Gremien matching gr:{:?} wp:{:?} pa:{:?}",
+        n_del, query_params.gr, query_params.wp, query_params.p.as_ref().map(ToString::to_string)
+    );
+    info!("Deleted the requested Gremien");
+    return Ok(());
+}
+
+/// Deletes Enumeration Entries from the database given some filtering parameters
+/// Does not delete anything with an empty filter to prevent accidents
+///
+/// # Errors
+/// Can fail if database operations fail.
+#[instrument(skip_all, fields(name=?path_params.name))]
+pub async fn enum_delete(
+    server: &LTZFServer,
+    path_params: &params::EnumDeletePathParams,
+) -> Result<()> {
+    use models::EnumerationNames;
+
+    let mut tx = server.sqlx_db.begin().await?;
+    let n_del = match path_params.name {
+        EnumerationNames::Schlagworte => {
+            sqlx::query!(
+                "DELETE FROM schlagwort x WHERE x.value = $1",
+                path_params.item
+            )
+        }
+        EnumerationNames::Stationstypen => {
+            sqlx::query!(
+                "DELETE FROM stationstyp x WHERE x.value = $1",
+                path_params.item
+            )
+        }
+        EnumerationNames::Parlamente => {
+            sqlx::query!(
+                "DELETE FROM parlament x WHERE x.value = $1",
+                path_params.item
+            )
+        }
+        EnumerationNames::Vorgangstypen => {
+            sqlx::query!(
+                "DELETE FROM vorgangstyp x WHERE x.value = $1",
+                path_params.item
+            )
+        }
+        EnumerationNames::Dokumententypen => {
+            sqlx::query!(
+                "DELETE FROM dokumententyp x WHERE x.value = $1",
+                path_params.item
+            )
+        }
+        EnumerationNames::Vgidtypen => {
+            sqlx::query!(
+                "DELETE FROM vg_ident_typ x WHERE x.value = $1",
+                path_params.item
+            )
+        }
+    }
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+    info!(target: "obj", "Deleted {} Enumeration Entries from {}", 
+            n_del, path_params.name);
+    info!("Deleted the requested Entries");
+    Ok(())
+}
+async fn count_existing_authors(
+    tx: &mut sqlx::PgTransaction<'_>,
+    autoren: &[models::Autor],
+) -> Result<usize> {
+    let (mut person, mut organisation) = (vec![], vec![]);
+    for a in autoren {
+        person.push(a.person.clone());
+        organisation.push(a.organisation.clone());
+    }
+
+    let existing_obj_cnt = sqlx::query!(
+        "SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[]) as iv(person, orga)
+        WHERE EXISTS (
+            SELECT 1 FROM autor a WHERE 
+            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) 
+            AND a.organisation = iv.orga)",
+        &person[..] as &[Option<String>],
+        &organisation[..]
+    )
+    .map(|r| r.cnt)
+    .fetch_one(&mut **tx)
+    .await?
+    .unwrap_or_default();
+    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
+        message: format!("Failed to convert object count to usize: {e}"),
+    })
+}
+async fn count_existing_gremien(
+    tx: &mut sqlx::PgTransaction<'_>,
+    gremien: &[models::Gremium],
+) -> Result<usize> {
+    let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+    for gr in gremien {
+        names.push(gr.name.clone());
+        pvalues.push(gr.parlament.to_string());
+        wps.push(i32::from(gr.wahlperiode));
+        links.push(gr.link.clone());
+    }
+
+    let existing_obj_cnt = sqlx::query_scalar!("SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)
+        WHERE EXISTS (
+            SELECT 1 FROM gremium g 
+        INNER JOIN parlament p ON g.parl = p.id
+        WHERE 
+            g.name = input_vector.name AND
+            p.value = input_vector.pvalue AND
+            g.wp = input_vector.wp AND
+            (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)
         )
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        tx.commit().await?;
-        info!(target: "obj", "Deleted {} Gremien matching gr:{:?} wp:{:?} pa:{:?}",
-            n_del, query_params.gr, query_params.wp, query_params.p.as_ref().map(ToString::to_string)
-        );
-        info!("Deleted the requested Gremien");
-        return Ok(GremienDeleteByParamResponse::Status204_NoContent {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        });
-    }
+        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
+        .fetch_one(&mut **tx).await?.unwrap_or_default();
 
-    /// `EnumDelete` - DELETE /api/v2/enumeration/{name}/{item}
-    #[instrument(skip_all, fields(name=?path_params.name, claim=%claims.0))]
-    async fn enum_delete(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::EnumDeletePathParams,
-    ) -> Result<EnumDeleteResponse> {
-        use models::EnumerationNames;
-        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
-            warn!("Permission level too low");
-            return Ok(EnumDeleteResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let mut tx = self.sqlx_db.begin().await?;
-        let enum_tables: BTreeMap<EnumerationNames, &str> = FromIterator::from_iter(
-            vec![
-                (EnumerationNames::Schlagworte, "schlagwort"),
-                (EnumerationNames::Stationstypen, "stationstyp"),
-                (EnumerationNames::Parlamente, "parlament"),
-                (EnumerationNames::Vorgangstypen, "vorgangstyp"),
-                (EnumerationNames::Dokumententypen, "dokumententyp"),
-                (EnumerationNames::Vgidtypen, "vg_ident_typ"),
-            ]
-            .drain(..),
-        );
-        #[allow(
-            clippy::disallowed_methods,
-            reason = "Sqlx does not support dynamic table names for compile time checks."
-        )]
-        let n_del = sqlx::query(&format!(
-            "DELETE FROM {} x WHERE x.value = $1",
-            enum_tables[&path_params.name]
-        ))
-        .bind::<_>(&path_params.item)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        tx.commit().await?;
-        info!(target: "obj", "Deleted {} Enumeration Entries from {}", 
-            n_del, enum_tables[&path_params.name]);
-        info!("Deleted the requested Entries");
-        Ok(EnumDeleteResponse::Status204_NoContent {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
-    }
-
-    /// `AutorenPut` - PUT /api/v2/autoren
-    #[instrument(skip_all, fields(claim=%claims.0))]
-    async fn autoren_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        body: &models::AutorenPutRequest,
-    ) -> Result<AutorenPutResponse> {
-        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
-            warn!("Permission level too low");
-            return Ok(AutorenPutResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        // if replacing contains an index larger than the object list: Bad Request
-        // if replacing contains circular references (meaning a replacing object is identifiable with an object in the object list): Bad Request
-        let seen: BTreeSet<WrappedAutor> =
-            FromIterator::from_iter(body.objects.iter().map(|x| WrappedAutor { autor: x }));
-        if let Some(replc) = &body.replacing {
-            for rpl in replc {
-                if rpl.replaced_by as usize >= body.objects.len()
-                    || rpl
-                        .values
-                        .iter()
-                        .any(|x| seen.contains(&WrappedAutor { autor: x }))
-                {
-                    info!(
-                        "Semantically bad request: Either a circular replacement was detected or 
+    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
+        message: format!("Failed to convert object count to usize: {e}"),
+    })
+}
+enum PutReplaceValidation {
+    NotMod,
+    BadReq(String),
+    Fine,
+}
+async fn putreplacing_validation<F, T: utoipa::ToSchema + Clone + PartialEq + Ord>(
+    tx: &mut PgTransaction<'_>,
+    body: &models::ReplacementPutRequest<T>,
+    count_existing: F,
+) -> Result<PutReplaceValidation>
+where
+    F: AsyncFn(&mut PgTransaction<'_>, &[T]) -> Result<usize>,
+{
+    // if replacing contains an index larger than the object list: Bad Request
+    // if replacing contains circular references (meaning a replacing object is identifiable with an object in the object list): Bad Request
+    let seen: BTreeSet<&T> = body.objects.iter().collect();
+    for rpl in &body.replacing {
+        if rpl.replaced_by as usize >= body.objects.len()
+            || rpl.values.iter().any(|x| seen.contains(&x))
+        {
+            let w = "Semantically bad request: Either a circular replacement was detected or 
                         there were more replacement rules than new entries. 
                         An entry must be bound to at most one replacement rule."
-                    );
-                    return Ok(AutorenPutResponse::Status400_BadRequest {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-            }
+                .to_owned();
+            warn!("{w}");
+            return Ok(PutReplaceValidation::BadReq(w));
         }
-        let mut tx = self.sqlx_db.begin().await?;
-        // check if all authors are existent in the database
-        // check if none of the replacing authors are in the database
-        // if both: NotModified
-        let (mut person, mut organisation, mut fach, mut lobby) = (vec![], vec![], vec![], vec![]);
-        for a in &body.objects {
-            person.push(a.person.clone());
-            organisation.push(a.organisation.clone());
-            fach.push(a.fachgebiet.clone());
-            lobby.push(a.lobbyregister.clone());
+    }
+    // check if all authors are existent in the database
+    // check if none of the replacing authors are in the database
+    // if both: NotModified
+    if count_existing(tx, &body.objects).await? == body.objects.len() {
+        // flatten the replacement objects and check for existence
+        let flattened: Vec<T> = body
+            .replacing
+            .iter()
+            .flat_map(|o| o.values.iter())
+            .cloned()
+            .collect();
+        if count_existing(tx, &flattened).await? == 0 {
+            info!("All Entries already exist in the database and no replacement entry was found");
+            return Ok(PutReplaceValidation::NotMod);
         }
+    }
+    Ok(PutReplaceValidation::Fine)
+}
+async fn resolve_conflicts(
+    rep_old: &[i32],
+    rep_new: &[i32],
+    table: &str,
+    column: &str,
+    resol_query: Option<&str>,
+    tx: &mut PgTransaction<'_>,
+) -> Result<()> {
+    // first, delete potentially conflicting entries
+    if let Some(conflict_res_query) = resol_query {
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Query is huge and sqlx expects a string literal. For reasons of readability,
+                this is handled in a macro, which cannot be fed into sqlx::query!"
+        )]
+        sqlx::query(conflict_res_query)
+            .bind(rep_new)
+            .bind(rep_old)
+            .execute(&mut **tx)
+            .await?;
+    }
 
-        if count_existing_authors(&mut tx, &body.objects).await? == body.objects.len() {
-            // flatten the replacement objects and check for existence
-            if let Some(repl) = &body.replacing {
-                let flattened: Vec<models::Autor> =
-                    repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
-                if count_existing_authors(&mut tx, &flattened).await? == 0 {
-                    info!(
-                        "All Entries already exist in the database and no replacement entry was found"
-                    );
-                    return Ok(AutorenPutResponse::Status304_NotModified {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-            } else {
-                info!(
-                    "All Entries already exist in the database and no replacement entry was found"
-                );
-                return Ok(AutorenPutResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                });
-            }
-        }
-
-        debug!("Request was valid");
-        // insert all authors, fetch their IDs
-        let new_ids = sqlx::query!("
+    // then insert like this:
+    let query = format!(
+        "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+                UPDATE {table} 
+                SET {column} = (SELECT new FROM lookup WHERE old={column})
+                WHERE {column} = ANY($2::int4[])
+            "
+    );
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
+    )]
+    sqlx::query(&query)
+        .bind(rep_new)
+        .bind(rep_old)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+/// Inserts new Autor Entries into the database.
+/// Optionally does a PUT-REPLACE, replacing some authors by others and keeping all references in
+/// check.
+/// # Errors
+/// Can fail due to
+/// - Database Errors
+/// - Validation Errors of the replacement logic
+#[instrument(skip_all)]
+pub async fn autoren_put(
+    server: &LTZFServer,
+    body: &models::ReplacementPutRequest<models::Autor>,
+) -> Result<PutResponse> {
+    let mut tx = server.sqlx_db.begin().await?;
+    match putreplacing_validation(&mut tx, body, count_existing_authors).await? {
+        PutReplaceValidation::Fine => {}
+        PutReplaceValidation::NotMod => return Ok(PutResponse::NotMod),
+        PutReplaceValidation::BadReq(s) => return Ok(PutResponse::BadReq(s)),
+    }
+    debug!("Request was valid");
+    // insert all authors, fetch their IDs
+    let (mut person, mut organisation, mut fach, mut lobby) = (vec![], vec![], vec![], vec![]);
+    for a in &body.objects {
+        person.push(&a.person);
+        organisation.push(&a.organisation);
+        fach.push(&a.fachgebiet);
+        lobby.push(&a.lobbyregister);
+    }
+    let new_ids = sqlx::query!("
         INSERT INTO autor(person, organisation, fachgebiet, lobbyregister) 
 
         SELECT ps, og, fc, lb FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[]) AS iv(ps, og, fc, lb)
@@ -345,920 +369,580 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         lobbyregister = EXCLUDED.lobbyregister
 
         RETURNING autor.id
-        ", &person[..] as &[Option<String>], &organisation[..], &fach[..] as &[Option<String>], &lobby[..] as &[Option<String>])
+        ", &person[..] as &[&Option<String>], &organisation[..] as &[&String], &fach[..] as &[&Option<String>], &lobby[..] as &[&Option<String>])
         .map(|r| r.id)
         .fetch_all(&mut *tx).await?;
 
-        if body.replacing.is_none() {
-            tx.commit().await?;
-            warn!(target: "obj", "Inserted Authors into the database with no replacements: {:?}",body.objects );
-            // if there is nothing to replace, we are done here
-            info!("New authors were introduced into the database");
-            warn!("CAREFUL: HEREBY DANGLING AUTHOR ENTRIES CAN BE CREATED");
-            return Ok(AutorenPutResponse::Status201_Created {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
+    if body.replacing.is_empty() {
+        tx.commit().await?;
+        warn!(target: "obj", "Inserted Authors into the database with no replacements: {:?}",body.objects );
+        // if there is nothing to replace, we are done here
+        info!("New authors were introduced into the database");
+        warn!("CAREFUL: HEREBY DANGLING AUTHOR ENTRIES CAN BE CREATED");
+        return Ok(PutResponse::Success);
+    }
+    // for each replacing autor:
+    // for each table referencing it: Update those tables with the new id
+    let mut rep_new: Vec<_> = vec![];
+    let mut rep_old: Vec<_> = vec![];
+    for entry in &body.replacing {
+        let (mut vperson, mut vorga) = (vec![], vec![]);
+        for value in &entry.values {
+            vperson.push(value.person.clone());
+            vorga.push(value.organisation.clone());
         }
-        // for each replacing autor:
-        // for each table referencing it: Update those tables with the new id
-        let mut rep_new: Vec<_> = vec![];
-        let mut rep_old: Vec<_> = vec![];
-        if let Some(replacing) = &body.replacing {
-            for entry in replacing {
-                let (mut vperson, mut vorga) = (vec![], vec![]);
-                for value in &entry.values {
-                    vperson.push(value.person.clone());
-                    vorga.push(value.organisation.clone());
-                }
-                let repl_with = new_ids[entry.replaced_by as usize];
-                let value_ids: Vec<_> = sqlx::query_scalar!(
-                    "SELECT a.id FROM
+        let repl_with = new_ids[entry.replaced_by as usize];
+        let value_ids: Vec<_> = sqlx::query_scalar!(
+            "SELECT a.id FROM
                     UNNEST($1::text[], $2::text[]) as iv(ps, og)
                     INNER JOIN autor a ON 
                     (a.person IS NULL AND iv.ps IS NULL OR a.person=iv.ps) AND 
                     a.organisation = iv.og",
-                    &vperson[..] as &[Option<String>],
-                    &vorga[..],
-                )
-                .fetch_all(&mut *tx)
-                .await?;
-                for gid in value_ids {
-                    rep_new.push(repl_with);
-                    rep_old.push(gid);
-                }
-            }
-        }
-
-        // tables referencing authors:
-        // table in question, column that references the author, query to delete conflicts _if_ the author is part of a unique identifier. can be empty if not applicable
-        let tables = vec![
-            (
-                "rel_dok_autor",
-                "aut_id",
-                Some(conflict_resolve_query!(
-                    "rel_dok_autor",
-                    "rda",
-                    "dok_id",
-                    "aut_id"
-                )),
-            ),
-            (
-                "rel_vorgang_init",
-                "in_id",
-                Some(conflict_resolve_query!(
-                    "rel_vorgang_init",
-                    "rvi",
-                    "vg_id",
-                    "in_id"
-                )),
-            ),
-            (
-                "rel_sitzung_experten",
-                "eid",
-                Some(conflict_resolve_query!(
-                    "rel_sitzung_experten",
-                    "rse",
-                    "sid",
-                    "eid"
-                )),
-            ),
-            (
-                "lobbyregistereintrag",
-                "organisation",
-                Some(conflict_resolve_query!(
-                    "lobbyregistereintrag",
-                    "lre",
-                    "vg_id",
-                    "organisation"
-                )),
-            ),
-        ];
-        for (table, column, conflict_res_query) in tables {
-            // first, delete potentially conflicting entries
-            if let Some(conflict_res_query) = conflict_res_query {
-                #[allow(
-                    clippy::disallowed_methods,
-                    reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
-                )]
-                sqlx::query(conflict_res_query)
-                    .bind(&rep_new[..])
-                    .bind(&rep_old[..])
-                    .execute(&mut *tx)
-                    .await?;
-            }
-
-            // then insert like this:
-            let query = format!(
-                "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-                UPDATE {table} 
-                SET {column} = (SELECT new FROM lookup WHERE old={column})
-                WHERE {column} = ANY($2::int4[])
-            "
-            );
-            #[allow(
-                clippy::disallowed_methods,
-                reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
-            )]
-            sqlx::query(&query)
-                .bind(&rep_new[..])
-                .bind(&rep_old[..])
-                .execute(&mut *tx)
-                .await?;
-        }
-        sqlx::query!(
-            "DELETE FROM autor a WHERE a.id = ANY($1::int4[])",
-            &rep_old[..]
+            &vperson[..] as &[Option<String>],
+            &vorga[..],
         )
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
-
-        // return 201Created
-        tx.commit().await?;
-        info!("Successful PUT-and-replace was executed");
-        info!(target: "obj", "Inserted Authors into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
-        Ok(AutorenPutResponse::Status201_Created {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
+        for gid in value_ids {
+            rep_new.push(repl_with);
+            rep_old.push(gid);
+        }
     }
 
-    /// `GremienPut` - PUT /api/v2/gremien
-    #[instrument(skip_all, fields(claim=%claims.0))]
-    async fn gremien_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        body: &models::GremienPutRequest,
-    ) -> Result<GremienPutResponse> {
-        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
-            warn!("Permission level too low");
-            return Ok(GremienPutResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        // check if replacing contain an index larger than the object list
-        // if so: Bad Request
-        if let Some(replc) = &body.replacing {
-            for rpl in replc {
-                if rpl.replaced_by as usize >= body.objects.len() {
-                    info!(
-                        "Semantically bad request: Either a circular replacement was detected or 
-                        there were more replacement rules than new entries. 
-                        An entry must be bound to at most one replacement rule."
-                    );
-                    return Ok(GremienPutResponse::Status400_BadRequest {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-            }
-        }
-        let mut tx = self.sqlx_db.begin().await?;
-        // check if all gremien are existent in the database
-        // check if none of the replacing gremien are in the database or replacing is None
-        // if both: NotModified
+    // tables referencing authors:
+    // table in question, column that references the author, query to delete conflicts _if_ the author is part of a unique identifier. can be empty if not applicable
+    #[rustfmt::skip]
+    let tables = vec![
+        ("rel_dok_autor", "aut_id", 
+         Some(conflict_resolve_query!("rel_dok_autor", "rda","dok_id","aut_id"))),
+        ("rel_vorgang_init", "in_id",
+         Some(conflict_resolve_query!("rel_vorgang_init", "rvi", "vg_id", "in_id"))),
+        ("rel_sitzung_experten", "eid",
+         Some(conflict_resolve_query!("rel_sitzung_experten", "rse", "sid","eid"))),
+        ("lobbyregistereintrag", "organisation",
+         Some(conflict_resolve_query!( "lobbyregistereintrag", "lre", "vg_id", "organisation"))),
+    ];
+    for (table, column, conflict_res_query) in tables {
+        resolve_conflicts(
+            &rep_old,
+            &rep_new,
+            table,
+            column,
+            conflict_res_query,
+            &mut tx,
+        )
+        .await?;
+    }
+    sqlx::query!(
+        "DELETE FROM autor a WHERE a.id = ANY($1::int4[])",
+        &rep_old[..]
+    )
+    .execute(&mut *tx)
+    .await?;
 
-        let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
-        for gr in &body.objects {
-            names.push(gr.name.clone());
-            pvalues.push(gr.parlament.to_string());
-            wps.push(i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
-                message: format!("Failed to convert Wahlperiode {}: {e}", gr.wahlperiode),
-            })?);
-            links.push(gr.link.clone());
-        }
-        if count_existing_gremien(&mut tx, &body.objects).await? == body.objects.len() {
-            // flatten the replacement objects and check for existence
-            if let Some(repl) = &body.replacing {
-                let flattened: Vec<models::Gremium> =
-                    repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
-                if count_existing_gremien(&mut tx, &flattened).await? == 0 {
-                    info!(
-                        "All Entries already exist in the database and no replacement entry was found"
-                    );
-                    return Ok(GremienPutResponse::Status304_NotModified {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-            } else {
-                info!(
-                    "All Entries already exist in the database and no replacement entry was found"
-                );
-                return Ok(GremienPutResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                });
-            }
-        }
-
-        debug!("Request was valid");
-        // insert all gremien, fetch their IDs
-        let new_ids = sqlx::query_scalar!("
+    // return 201Created
+    tx.commit().await?;
+    info!("Successful PUT-and-replace was executed");
+    info!(target: "obj", "Inserted Authors into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
+    Ok(PutResponse::Success)
+}
+/// Inserts new Gremium Entries into the database.
+/// Optionally does a PUT-REPLACE, replacing some authors by others and keeping all references in
+/// check.
+/// # Errors
+/// Can fail due to
+/// - Database Errors
+/// - Validation Errors of the replacement logic
+#[instrument(skip_all)]
+pub async fn gremien_put(
+    server: &LTZFServer,
+    body: &models::ReplacementPutRequest<models::Gremium>,
+) -> Result<PutResponse> {
+    let mut tx = server.sqlx_db.begin().await?;
+    match putreplacing_validation(&mut tx, body, count_existing_gremien).await? {
+        PutReplaceValidation::Fine => {}
+        PutReplaceValidation::NotMod => return Ok(PutResponse::NotMod),
+        PutReplaceValidation::BadReq(s) => return Ok(PutResponse::BadReq(s)),
+    }
+    debug!("Request was valid");
+    let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+    for gr in &body.objects {
+        names.push(&gr.name);
+        pvalues.push(gr.parlament.to_string());
+        wps.push(i64::from(gr.wahlperiode));
+        links.push(&gr.link);
+    }
+    // insert all gremien, fetch their IDs
+    let new_ids = sqlx::query_scalar!("
         INSERT INTO gremium(name, parl, wp, link) 
         
-        SELECT nm, p.id, wp, ln FROM UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) AS iv(nm, pname, wp, ln)
+        SELECT nm, p.id, wp, ln FROM UNNEST($1::text[], $2::text[], $3::int8[], $4::text[]) AS iv(nm, pname, wp, ln)
         INNER JOIN parlament p ON p.value = iv.pname
 
         ON CONFLICT ON CONSTRAINT unique_combo 
         DO UPDATE SET link = EXCLUDED.link
 
         RETURNING gremium.id
-        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
+        ", &names[..] as &[&String], &pvalues[..], &wps[..], &links[..] as &[&Option<String>])
         .fetch_all(&mut *tx).await?;
 
-        if body.replacing.is_none() {
-            tx.commit().await?;
-            // if there is nothing to replace, we are done here
-            warn!(target: "obj", "Inserted Gremien into the database with no replacements: {:?}", body.objects);
-            info!("New gremien were introduced into the database");
-            warn!("CAREFUL: HEREBY DANGLING GREMIUM ENTRIES CAN BE CREATED");
-            return Ok(GremienPutResponse::Status201_Created {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
+    if body.replacing.is_empty() {
+        tx.commit().await?;
+        // if there is nothing to replace, we are done here
+        warn!(target: "obj", "Inserted Gremien into the database with no replacements: {:?}", body.objects);
+        info!("New gremien were introduced into the database");
+        warn!("CAREFUL: HEREBY DANGLING GREMIUM ENTRIES CAN BE CREATED");
+        return Ok(PutResponse::Success);
+    }
+    // for each replacing gremium:
+    // for each table referencing it: Update those tables with the new id
+    let mut replacement_tuples = vec![];
+    for entry in &body.replacing {
+        let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
+        for value in &entry.values {
+            vnames.push(value.name.clone());
+            vwps.push(i32::from(value.wahlperiode));
+            vpvals.push(value.parlament.to_string());
         }
-        // for each replacing gremium:
-        // for each table referencing it: Update those tables with the new id
-        let mut replacement_tuples = vec![];
-        if let Some(replacing) = &body.replacing {
-            for entry in replacing {
-                let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
-                for value in &entry.values {
-                    vnames.push(value.name.clone());
-                    vwps.push(
-                        i32::try_from(value.wahlperiode).map_err(|e| LTZFError::Other {
-                            message: format!(
-                                "Failed to convert Wahlperiode {}: {e}",
-                                value.wahlperiode
-                            ),
-                        })?,
-                    );
-                    vpvals.push(value.parlament.to_string());
-                }
-                let repl_with = new_ids[entry.replaced_by as usize];
-                let value_ids: Vec<i32> = sqlx::query_scalar!(
-                    "SELECT g.id FROM
+        let repl_with = new_ids[entry.replaced_by as usize];
+        let value_ids: Vec<i32> = sqlx::query_scalar!(
+            "SELECT g.id FROM
                     UNNEST($1::text[], $2::text[], $3::int4[]) as iv(nm, pv, wp)
                     INNER JOIN parlament p ON p.value = iv.pv
                     INNER JOIN gremium g ON 
                     g.name=iv.nm AND g.parl = p.id AND g.wp=iv.wp",
-                    &vnames[..],
-                    &vpvals[..],
-                    &vwps[..],
-                )
-                .fetch_all(&mut *tx)
-                .await?;
-                replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
-            }
-        }
-        let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
-        let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
-        // tables that reference a gremium:
-        // - station(gr_id)
-        // - sitzung(gr_id)
-        let tables = vec![("station", "gr_id", None), ("sitzung", "gr_id", None)];
-        for (table, column, conflict_resolution_query) in tables {
-            // first, delete potentially conflicting entries
-            // currently not used because both tables are not identifying
-            if let Some(crq) = conflict_resolution_query {
-                #[allow(
-                    clippy::disallowed_methods,
-                    reason = "Sqlx does not support dynamic table names for compile time checks."
-                )]
-                sqlx::query(crq)
-                    .bind(&rep_new[..])
-                    .bind(&rep_old[..])
-                    .execute(&mut *tx)
-                    .await?;
-            }
-
-            // then insert like this:
-            #[allow(
-                clippy::disallowed_methods,
-                reason = "Sqlx does not support dynamic table names for compile time checks."
-            )]
-            sqlx::query(&format!(
-                "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-                UPDATE {table} 
-                SET {column} = (SELECT new FROM lookup WHERE old={column})
-                WHERE {column} = ANY($2::int4[])"
-            ))
-            .bind(&rep_new[..])
-            .bind(&rep_old[..])
-            .execute(&mut *tx)
-            .await?;
-        }
-        sqlx::query!(
-            "DELETE FROM gremium g WHERE g.id = ANY($1::int4[])",
-            &rep_old[..]
+            &vnames[..],
+            &vpvals[..],
+            &vwps[..],
         )
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
-
-        // return 201Created
-        tx.commit().await?;
-        info!("Successful PUT-and-replace was executed");
-        info!(target: "obj", "Inserted Gremien into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
-        Ok(GremienPutResponse::Status201_Created {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
+        replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
     }
+    let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
+    let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
+    // tables that reference a gremium:
+    // - station(gr_id)
+    // - sitzung(gr_id)
+    let tables = vec![("station", "gr_id", None), ("sitzung", "gr_id", None)];
+    for (table, column, conflict_resolution_query) in tables {
+        resolve_conflicts(
+            &rep_old,
+            &rep_new,
+            table,
+            column,
+            conflict_resolution_query,
+            &mut tx,
+        )
+        .await?;
+    }
+    sqlx::query!(
+        "DELETE FROM gremium g WHERE g.id = ANY($1::int4[])",
+        &rep_old[..]
+    )
+    .execute(&mut *tx)
+    .await?;
 
-    /// `EnumPut` - PUT /api/v2/enumeration/{name}
-    #[instrument(skip_all, fields(name=%path_params.name, claim=%claims.0))]
-    async fn enum_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::EnumPutPathParams,
-        body: &models::EnumPutRequest,
-    ) -> Result<EnumPutResponse> {
-        tracing::info!("{:?}", path_params);
-        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
-            return Ok(EnumPutResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
+    tx.commit().await?;
+    info!("Successful PUT-and-replace was executed");
+    info!(target: "obj", "Inserted Gremien into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
+    Ok(PutResponse::Success)
+}
+/// Inserts new Enumeration Entries into the database.
+/// Optionally does a PUT-REPLACE, replacing some authors by others and keeping all references in
+/// check.
+/// # Errors
+/// Can fail due to
+/// - Database Errors
+/// - Validation Errors of the replacement logic
+#[instrument(skip_all, fields(name=%path_params.name))]
+pub async fn enum_put(
+    server: &LTZFServer,
+    path_params: &params::EnumPathParams,
+    body: &models::ReplacementPutRequest<String>,
+) -> Result<PutResponse> {
+    tracing::info!("{:?}", path_params);
+
+    // check if replacing contain an index larger than the object list
+    // if so: Bad Request
+    for rpl in &body.replacing {
+        if rpl.replaced_by as usize >= body.objects.len() {
+            return Ok(PutResponse::BadReq(
+                "Length of .replaced_by > objects that can be replaced".to_owned(),
+            ));
         }
-        // check if replacing contain an index larger than the object list
-        // if so: Bad Request
-        if let Some(replc) = &body.replacing {
-            for rpl in replc {
-                if rpl.replaced_by as usize >= body.objects.len() {
-                    return Ok(EnumPutResponse::Status400_BadRequest {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-            }
-        }
-        let mut tx = self.sqlx_db.begin().await?;
-        // check if all gremien are existent in the database
-        // check if none of the replacing gremien are in the database or replacing is None
-        // if both: NotModified
-        let enum_tables: BTreeMap<models::EnumerationNames, &str> = FromIterator::from_iter(
-            vec![
-                (models::EnumerationNames::Schlagworte, "schlagwort"),
-                (models::EnumerationNames::Stationstypen, "stationstyp"),
-                (models::EnumerationNames::Parlamente, "parlament"),
-                (models::EnumerationNames::Vorgangstypen, "vorgangstyp"),
-                (models::EnumerationNames::Dokumententypen, "dokumententyp"),
-                (models::EnumerationNames::Vgidtypen, "vg_ident_typ"),
-            ]
-            .drain(..),
-        );
+    }
+    let mut tx = server.sqlx_db.begin().await?;
+    // check if all gremien are existent in the database
+    // check if none of the replacing gremien are in the database or replacing is None
+    // if both: NotModified
+    let enum_tables: BTreeMap<models::EnumerationNames, &str> = FromIterator::from_iter(
+        vec![
+            (models::EnumerationNames::Schlagworte, "schlagwort"),
+            (models::EnumerationNames::Stationstypen, "stationstyp"),
+            (models::EnumerationNames::Parlamente, "parlament"),
+            (models::EnumerationNames::Vorgangstypen, "vorgangstyp"),
+            (models::EnumerationNames::Dokumententypen, "dokumententyp"),
+            (models::EnumerationNames::Vgidtypen, "vg_ident_typ"),
+        ]
+        .drain(..),
+    );
 
-        #[allow(clippy::disallowed_methods, reason = "Sqlx does not support dynamic table names for compile time checks.")]
-        let present: i64 = sqlx::query_scalar(&format!(
-            "SELECT COUNT(1) as cnt FROM UNNEST($1::text[]) as item WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
-            enum_tables[&path_params.name]
-        )).bind(&body.objects[..])
-        .fetch_one(&mut *tx).await?;
-        let present = usize::try_from(present).map_err(|e| LTZFError::Other {
-            message: format!("Error converting expected object count: {e}"),
-        })?;
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "Sqlx does not support dynamic table names for compile time checks."
+    )]
+    let present: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(1) as cnt FROM UNNEST($1::text[]) as item 
+                    WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
+        enum_tables[&path_params.name]
+    ))
+    .bind(&body.objects[..])
+    .fetch_one(&mut *tx)
+    .await?;
+    let present = usize::try_from(present).map_err(|e| LTZFError::Other {
+        message: format!("Error converting expected object count: {e}"),
+    })?;
 
-        if present == body.objects.len() {
-            // flatten the replacement objects and check for existence
-            if let Some(repl) = &body.replacing {
-                let flattened: Vec<String> =
-                    repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
+    if present == body.objects.len() {
+        // flatten the replacement objects and check for existence
+        let flattened: Vec<String> = body
+            .replacing
+            .iter()
+            .flat_map(|o| o.values.iter())
+            .cloned()
+            .collect();
 
-                #[allow(
-                    clippy::disallowed_methods,
-                    reason = "Sqlx does not support dynamic table names for compile time checks."
-                )]
-                let present: i64 = sqlx::query_scalar(&format!(
-                    "SELECT COUNT(1) FROM UNNEST($1::text[]) as item WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
-                    enum_tables[&path_params.name]
-                )).bind(&flattened[..])
-                .fetch_one(&mut *tx).await?;
-
-                if present == 0 {
-                    return Ok(EnumPutResponse::Status304_NotModified {
-                        x_rate_limit_limit: None,
-                        x_rate_limit_remaining: None,
-                        x_rate_limit_reset: None,
-                    });
-                }
-            } else {
-                return Ok(EnumPutResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                });
-            }
-        }
-
-        // insert all enum entries, fetch their IDs
         #[allow(
             clippy::disallowed_methods,
             reason = "Sqlx does not support dynamic table names for compile time checks."
         )]
-        let new_ids: Vec<i32> = sqlx::query_scalar(&format!(
-            "INSERT INTO {} (value)
+        let present: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(1) FROM UNNEST($1::text[]) as item 
+                WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
+            enum_tables[&path_params.name]
+        ))
+        .bind(&flattened[..])
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if present == 0 {
+            return Ok(PutResponse::NotMod);
+        }
+    }
+
+    // insert all enum entries, fetch their IDs
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "Sqlx does not support dynamic table names for compile time checks."
+    )]
+    let new_ids: Vec<i32> = sqlx::query_scalar(&format!(
+        "INSERT INTO {} (value)
             SELECT item FROM UNNEST($1::text[]) as item 
             ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
             RETURNING id",
-            enum_tables[&path_params.name]
-        ))
-        .bind(&body.objects[..])
-        .fetch_all(&mut *tx)
-        .await?;
+        enum_tables[&path_params.name]
+    ))
+    .bind(&body.objects[..])
+    .fetch_all(&mut *tx)
+    .await?;
 
-        if body.replacing.is_none() {
-            tx.commit().await?;
-            // if there is nothing to replace, we are done here
-            // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
-            warn!(target: "obj", "Inserted Enumeration Entries into the database with no replacements: {:?}", body.objects);
-            warn!(
-                "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
-            );
-            return Ok(EnumPutResponse::Status201_Created {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        // for each replacing gremium:
-        // for each table referencing it: Update those tables with the new id
-        let mut replacement_tuples = vec![];
-        if let Some(replacing) = &body.replacing {
-            for entry in replacing {
-                // first, delete potentially conflicting entries
-                // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
-
-                // then insert like this:
-                let vitems: Vec<String> = entry.values.clone();
-                let repl_with = new_ids[entry.replaced_by as usize];
-                #[allow(
-                    clippy::disallowed_methods,
-                    reason = "Sqlx does not support dynamic table names for compile time checks."
-                )]
-                let value_ids: Vec<i32> = sqlx::query_scalar(&format!(
-                    "SELECT x.id  FROM
-                    UNNEST($1::text[]) as item
-                    INNER JOIN {} x ON x.value = item",
-                    enum_tables[&path_params.name]
-                ))
-                .bind(&vitems[..])
-                .fetch_all(&mut *tx)
-                .await?;
-                replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
-            }
-        }
-        let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
-        let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
-        // referencing tables:
-        // parlament: gremium(parl)
-        // dokumententyp: dokument(typ)
-        // stationstyp: station(typ)
-        // vg_ident_typ: rel_vorgang_ident(typ)
-        // vorgangstyp: vorgang(typ)
-        // schlagwort: rel_station_schlagwort(sw_id) / rel_dok_schlagwort(sw_id)
-        let enum_table_refs: BTreeMap<
-            models::EnumerationNames,
-            BTreeSet<(&'static str, &'static str, Option<&'static str>)>,
-        > = FromIterator::from_iter(
-            vec![
-                (
-                    models::EnumerationNames::Parlamente,
-                    // not a key component
-                    vec![("gremium", "parl", None)].drain(..).collect(),
-                ),
-                (
-                    models::EnumerationNames::Dokumententypen,
-                    vec![("dokument", "typ", None)].drain(..).collect(), // not a key component
-                ),
-                (
-                    models::EnumerationNames::Stationstypen,
-                    vec![("station", "typ", None)].drain(..).collect(), // not a key component
-                ),
-                (
-                    models::EnumerationNames::Vgidtypen,
-                    vec![(
-                        "rel_vorgang_ident",
-                        "typ",
-                        Some(conflict_resolve_query!(
-                            "rel_vorgang_ident",
-                            "rvi",
-                            "vg_id",
-                            "typ"
-                        )),
-                    )]
-                    .drain(..)
-                    .collect(),
-                ),
-                (
-                    models::EnumerationNames::Vorgangstypen,
-                    vec![("vorgang", "typ", Some(""))].drain(..).collect(), // not a key component
-                ),
-                (
-                    models::EnumerationNames::Schlagworte,
-                    // a key component, a key component
-                    vec![
-                        (
-                            "rel_dok_schlagwort",
-                            "sw_id",
-                            Some(conflict_resolve_query!(
-                                "rel_dok_schlagwort",
-                                "rds",
-                                "dok_id",
-                                "sw_id"
-                            )),
-                        ),
-                        (
-                            "rel_station_schlagwort",
-                            "sw_id",
-                            Some(conflict_resolve_query!(
-                                "rel_station_schlagwort",
-                                "rss",
-                                "stat_id",
-                                "sw_id"
-                            )),
-                        ),
-                    ]
-                    .drain(..)
-                    .collect(),
-                ),
-            ]
-            .drain(..),
+    if body.replacing.is_empty() {
+        tx.commit().await?;
+        // if there is nothing to replace, we are done here
+        // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
+        warn!(target: "obj", "Inserted Enumeration Entries into the database with no replacements: {:?}", body.objects);
+        warn!(
+            "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
         );
-        for (table, column, conflict_resolution_query) in &enum_table_refs[&path_params.name] {
-            if let Some(crq) = conflict_resolution_query {
-                #[allow(
-                    clippy::disallowed_methods,
-                    reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
-                )]
-                sqlx::query(crq)
-                    .bind(&rep_new[..])
-                    .bind(&rep_old[..])
-                    .execute(&mut *tx)
-                    .await?;
-            }
-            #[allow(
-                clippy::disallowed_methods,
-                reason = "Sqlx does not support dynamic table names for compile time checks."
-            )]
-            sqlx::query(&format!(
-                "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-                UPDATE {table} 
-                SET {column} = (SELECT new FROM lookup WHERE old={column})
-                WHERE {column} = ANY($2::int4[])"
-            ))
-            .bind(&rep_new[..])
-            .bind(&rep_old[..])
-            .execute(&mut *tx)
-            .await?;
-        }
+        return Ok(PutResponse::Success);
+    }
+    // for each replacing:
+    // for each table referencing it: Update those tables with the new id
+    let mut replacement_tuples = vec![];
+    for entry in &body.replacing {
+        // first, delete potentially conflicting entries
+        // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
+
+        // then insert like this:
+        let vitems: Vec<String> = entry.values.clone();
+        let repl_with = new_ids[entry.replaced_by as usize];
         #[allow(
             clippy::disallowed_methods,
             reason = "Sqlx does not support dynamic table names for compile time checks."
         )]
-        sqlx::query(&format!(
-            "DELETE FROM {} x WHERE x.id = ANY($1::int4[])",
+        let value_ids: Vec<i32> = sqlx::query_scalar(&format!(
+            "SELECT x.id  FROM
+                    UNNEST($1::text[]) as item
+                    INNER JOIN {} x ON x.value = item",
             enum_tables[&path_params.name]
         ))
-        .bind(&rep_old[..])
+        .bind(&vitems[..])
+        .fetch_all(&mut *tx)
+        .await?;
+        replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
+    }
+    let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
+    let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
+
+    /// in that order:
+    /// - table to replace in,
+    /// - column name to replace,
+    /// - conflict resolution query if necessary
+    /// if No conflict resolution query is passed alongside, the values in `column` are just
+    /// replaced 1:1 with the new ones.
+    /// If there is a conflict resolution query to be run, it is run before the replacements
+    ///
+    ///
+    /// Conflict resolution queries are there to swap out values that are part of a database key.
+    type ReplacementTuple = (&'static str, &'static str, Option<&'static str>);
+    // referencing tables:
+    // parlament: gremium(parl)
+    // dokumententyp: dokument(typ)
+    // stationstyp: station(typ)
+    // vg_ident_typ: rel_vorgang_ident(typ)
+    // vorgangstyp: vorgang(typ)
+    // schlagwort: rel_station_schlagwort(sw_id) / rel_dok_schlagwort(sw_id)
+    #[rustfmt::skip]
+    let mut enum_table_refs: BTreeMap<models::EnumerationNames, BTreeSet<ReplacementTuple>> = BTreeMap::new();
+    enum_table_refs.insert(
+        models::EnumerationNames::Parlamente,
+        [("gremium", "parl", None)].into_iter().collect(), // not a key component
+    );
+    enum_table_refs.insert(
+        models::EnumerationNames::Dokumententypen,
+        [("dokument", "typ", None)].into_iter().collect(), // not a key component
+    );
+    enum_table_refs.insert(
+        models::EnumerationNames::Stationstypen,
+        [("station", "typ", None)].into_iter().collect(), // not a key component
+    );
+    #[rustfmt::skip]
+    enum_table_refs.insert(
+        models::EnumerationNames::Vgidtypen,
+        [(
+            "rel_vorgang_ident", "typ",
+            Some(conflict_resolve_query!("rel_vorgang_ident", "rvi", "vg_id", "typ")),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    enum_table_refs.insert(
+        models::EnumerationNames::Vorgangstypen,
+        [("vorgang", "typ", Some(""))].into_iter().collect(), // not a key component
+    );
+    #[rustfmt::skip]
+    enum_table_refs.insert(
+        models::EnumerationNames::Schlagworte,
+        // a key component, a key component
+        [("rel_dok_schlagwort", "sw_id",
+          Some(conflict_resolve_query!("rel_dok_schlagwort","rds","dok_id", "sw_id")),
+        ),
+        ("rel_station_schlagwort", "sw_id",
+         Some(conflict_resolve_query!( "rel_station_schlagwort", "rss", "stat_id", "sw_id")),
+        ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    for (table, column, conflict_resolution_query) in &enum_table_refs[&path_params.name] {
+        resolve_conflicts(
+            &rep_old,
+            &rep_new,
+            table,
+            column,
+            *conflict_resolution_query,
+            &mut tx,
+        )
+        .await?;
+    }
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "Sqlx does not support dynamic table names for compile time checks."
+    )]
+    sqlx::query(&format!(
+        "DELETE FROM {} x WHERE x.id = ANY($1::int4[])",
+        enum_tables[&path_params.name]
+    ))
+    .bind(&rep_old[..])
+    .execute(&mut *tx)
+    .await?;
+
+    // return 201Created
+    tx.commit().await?;
+    info!(target: "obj", "Inserted Enum into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
+    Ok(PutResponse::Success)
+}
+
+/// Deletes a document by its supplied `api_id`
+/// # Errors
+/// Can fail due to database errors
+#[instrument(skip_all, fields(dok=%path_params.api_id))]
+pub async fn dokument_delete_id(
+    server: &LTZFServer,
+    path_params: &params::ApiIdPathParam,
+) -> Result<DeleteResponse> {
+    let mut tx = server.sqlx_db.begin().await?;
+    sqlx::query!("DELETE FROM dokument WHERE api_id = $1", path_params.api_id)
         .execute(&mut *tx)
         .await?;
-
-        // return 201Created
-        tx.commit().await?;
-        info!(target: "obj", "Inserted Enum into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
-        Ok(EnumPutResponse::Status201_Created {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
-    }
-
-    /// `DokumentDeleteId` - DELETE /`api/v2/dokument/{api_id`}
-    #[instrument(skip_all, fields(dok=%path_params.api_id, claim=%claims.0))]
-    async fn dokument_delete_id(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::DokumentDeleteIdPathParams,
-    ) -> Result<DokumentDeleteIdResponse> {
-        if claims.0 != super::auth::APIScope::Admin && claims.0 != super::auth::APIScope::KeyAdder {
-            warn!("Permission level too low");
-            return Ok(DokumentDeleteIdResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
+    tx.commit().await?;
+    info!(target: "obj", "Deleted Dokument {}", path_params.api_id);
+    info!("Success");
+    return Ok(DeleteResponse::Success);
+}
+/// Inserts a document by its supplied `api_id`
+/// only for administrative purposes, can create dangling references
+/// # Errors
+/// Can fail due to database errors
+#[instrument(skip_all, fields(dok=%path_params.api_id))]
+pub async fn dokument_put_id(
+    server: &LTZFServer,
+    creator_keyidx: i32,
+    path_params: &params::ApiIdPathParam,
+    body: &models::Dokument,
+) -> Result<PutResponse> {
+    let mut tx = server.sqlx_db.begin().await?;
+    let did = sqlx::query!(
+        "SELECT id FROM dokument WHERE api_id = $1",
+        path_params.api_id
+    )
+    .map(|r| r.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(did) = did {
+        let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
+        if dok.with_round_timestamps() == body.with_round_timestamps() {
+            info!("Dokument was not modified");
+            return Ok(PutResponse::NotMod);
         }
-        let mut tx = self.sqlx_db.begin().await?;
         sqlx::query!("DELETE FROM dokument WHERE api_id = $1", path_params.api_id)
             .execute(&mut *tx)
             .await?;
-        tx.commit().await?;
-        info!(target: "obj", "Deleted Dokument {}", path_params.api_id);
-        info!("Success");
-        return Ok(DokumentDeleteIdResponse::Status204_NoContent {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        });
     }
-
-    /// `DokumentPutId` - PUT /`api/v2/dokument/{api_id`}
-    #[instrument(skip_all, fields(dok=%path_params.api_id, claim=%claims.0))]
-    async fn dokument_put_id(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::DokumentPutIdPathParams,
-        body: &models::Dokument,
-    ) -> Result<DokumentPutIdResponse> {
-        if claims.0 != super::auth::APIScope::Admin && claims.0 != super::auth::APIScope::KeyAdder {
-            warn!("Permission level too low");
-            return Ok(DokumentPutIdResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let mut tx = self.sqlx_db.begin().await?;
-        let did = sqlx::query!(
-            "SELECT id FROM dokument WHERE api_id = $1",
-            path_params.api_id
-        )
-        .map(|r| r.id)
-        .fetch_optional(&mut *tx)
+    let id = crate::db::insert::insert_dokument(body, Uuid::nil(), creator_keyidx, &mut tx, server)
         .await?;
-        if let Some(did) = did {
-            let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
-            if dok.with_round_timestamps() == body.with_round_timestamps() {
-                info!("Dokument was not modified");
-                return Ok(DokumentPutIdResponse::Status304_NotModified {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                });
-            }
-            sqlx::query!("DELETE FROM dokument WHERE api_id = $1", path_params.api_id)
-                .execute(&mut *tx)
-                .await?;
-        }
-        let id =
-            crate::db::insert::insert_dokument(body.clone(), Uuid::nil(), claims.1, &mut tx, self)
-                .await?;
-        let api_id = sqlx::query!("SELECT api_id FROM dokument WHERE id= $1", id)
-            .map(|r| r.api_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    let api_id = sqlx::query!("SELECT api_id FROM dokument WHERE id= $1", id)
+        .map(|r| r.api_id)
+        .fetch_one(&mut *tx)
+        .await?;
 
-        tx.commit().await?;
-        info!(target: "obj", "PUT Dokument {}", api_id);
-        info!("Created or updated successfully");
-        return Ok(DokumentPutIdResponse::Status201_Created {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        });
-    }
+    tx.commit().await?;
+    info!(target: "obj", "PUT Dokument {}", api_id);
+    info!("Created or updated successfully");
+    return Ok(PutResponse::Success);
 }
 
-#[allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #[cfg(test)]
 mod test_authorisierte_sonstige {
-    use crate::api::auth::APIScope;
+    use super::super::{LTZFServer, PutResponse};
+    use super::{autoren_delete_by_param, enum_delete, gremien_delete_by_param};
+    use crate::api::vorgang;
+    use crate::api::{ListingGetResponse, misc};
     use crate::db::merge::execute::run_integration;
-    use axum::http::Method;
-    use axum_extra::extract::CookieJar;
-    use openapi::apis::data_administration_miscellaneous::{
-        AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
-        EnumDeleteResponse, EnumPutResponse, GremienDeleteByParamResponse, GremienPutResponse,
-    };
-    use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
-    use openapi::apis::miscellaneous_unauthorisiert::{
-        GremienGetResponse, MiscellaneousUnauthorisiert,
-    };
-    use openapi::models::{self, EnumerationNames, StationDokumenteInner};
-
-    use crate::LTZFServer;
+    use crate::models::{self, DokumentOrApiId, EnumerationNames, params};
     use crate::utils::testing::{TestSetup, generate};
     use tracing_test::traced_test;
 
-    fn localhost() -> headers::Host {
-        use http::uri::Authority;
-        Authority::from_static("localhost").into()
-    }
     async fn insert_default_vorgang(server: &LTZFServer) {
         let vorgang = generate::default_vorgang();
-        let rsp = server
-            .vorgang_id_put(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::VorgangIdPutPathParams {
-                    vorgang_id: vorgang.api_id,
-                },
-                &vorgang,
-            )
-            .await
-            .expect("Failed to create Vorgang.");
-        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
+        vorgang::vorgang_id_put(
+            server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
     }
     async fn fetch_all_authors(server: &LTZFServer) -> Vec<models::Autor> {
-        let autoren = server
-            .autoren_get(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &models::AutorenGetQueryParams {
-                    page: None,
-                    per_page: None,
-                    fach: None,
-                    org: None,
-                    person: None,
-                },
-            )
-            .await
-            .expect("Failed to get Autoren.");
+        let autoren = misc::autoren_get(
+            server,
+            &params::AutorenGetQueryParams {
+                page: None,
+                per_page: None,
+                fach: None,
+                org: None,
+                person: None,
+            },
+        )
+        .await
+        .expect("Failed to get Autoren.");
         match autoren {
-            openapi::apis::miscellaneous_unauthorisiert::AutorenGetResponse::Status200_Success { body, ..} => body,
-            openapi::apis::miscellaneous_unauthorisiert::AutorenGetResponse::Status204_NoContent { .. } => vec![],
+            ListingGetResponse::Success { body, .. } => body,
+            ListingGetResponse::NoContent => vec![],
+            _ => panic!("Error"),
         }
     }
     async fn fetch_all_gremien(server: &LTZFServer) -> Vec<models::Gremium> {
-        let gremien = server
-            .gremien_get(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &models::GremienGetQueryParams {
-                    page: None,
-                    per_page: None,
-                    gr: None,
-                    p: None,
-                    wp: None,
-                },
-            )
-            .await
-            .expect("Failed to get Gremien.");
+        let gremien = misc::gremien_get(
+            server,
+            &params::GremienGetQueryParams {
+                page: None,
+                per_page: None,
+                gr: None,
+                p: None,
+                wp: None,
+            },
+        )
+        .await
+        .expect("Failed to get Gremien.");
         match gremien {
-            GremienGetResponse::Status200_Success { body, .. } => body,
-            GremienGetResponse::Status204_NoContent { .. } => vec![],
+            ListingGetResponse::Success { body, .. } => body,
+            ListingGetResponse::NoContent => vec![],
+            _ => panic!("Error"),
         }
     }
     async fn fetch_all_enumvars(server: &LTZFServer, name: EnumerationNames) -> Vec<String> {
-        let entries = server
-            .enum_get(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &models::EnumGetPathParams { name },
-                &models::EnumGetQueryParams {
-                    page: None,
-                    per_page: None,
-                    contains: None,
-                },
-            )
-            .await
-            .expect("Failed to get Enum.");
+        let entries = misc::enum_get(
+            server,
+            &params::EnumPathParams { name },
+            &params::EnumGetQueryParams {
+                page: None,
+                per_page: None,
+                contains: None,
+            },
+        )
+        .await
+        .expect("Failed to get Enum.");
         match entries {
-            openapi::apis::miscellaneous_unauthorisiert::EnumGetResponse::Status200_Success {
-                body,
-                ..
-            } => body,
+            ListingGetResponse::Success { body, .. } => body,
             _ => vec![],
         }
     }
     #[tokio::test]
     async fn test_autor_delete() {
         let scenario = TestSetup::new("test_autor_delete").await;
-        let r = scenario
-            .server
-            .autoren_delete_by_param(
-                &Method::DELETE,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::Collector, 1),
-                &models::AutorenDeleteByParamQueryParams {
-                    fach: None,
-                    org: None,
-                    person: None,
-                },
-            )
-            .await
-            .expect("Failed to delete Autor");
-        assert_eq!(
-            r,
-            AutorenDeleteByParamResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
         insert_default_vorgang(&scenario.server).await;
         let autoren = fetch_all_authors(&scenario.server).await;
-        let r = scenario
-            .server
-            .autoren_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::AutorenDeleteByParamQueryParams {
-                    fach: None,
-                    org: None,
-                    person: None,
-                },
-            )
-            .await
-            .expect("Failed to delete Autor");
-        assert_eq!(
-            r,
-            AutorenDeleteByParamResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
-        assert_eq!(
-            autoren,
-            fetch_all_authors(&scenario.server).await,
-            "Expected no deleted item due to no filter applied"
-        );
-
-        let r = scenario
-            .server
-            .autoren_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::AutorenDeleteByParamQueryParams {
-                    fach: None,
-                    org: Some("Mysterium der Ministerien".to_string()),
-                    person: None,
-                },
-            )
-            .await
-            .expect("Failed to delete Autor.");
-        assert_eq!(
-            r,
-            AutorenDeleteByParamResponse::Status204_NoContent {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
+        autoren_delete_by_param(
+            &scenario.server,
+            &params::AutorenDeleteByParamQueryParams {
+                fach: None,
+                org: Some("Mysterium der Ministerien".to_string()),
+                person: None,
+            },
+        )
+        .await
+        .expect("Failed to delete Autor.");
         let autoren_now = fetch_all_authors(&scenario.server).await;
         assert!(
             autoren.len() > autoren_now.len(),
             "Expected: {autoren:?}, Got {autoren_now:?}"
         );
         let autoren = autoren_now;
-        let r = scenario
-            .server
-            .autoren_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::AutorenDeleteByParamQueryParams {
-                    fach: None,
-                    org: None,
-                    person: Some("Harald Maria Töpfer".to_string()),
-                },
-            )
-            .await
-            .expect("Failed to delete Autor.");
-        assert_eq!(
-            r,
-            AutorenDeleteByParamResponse::Status204_NoContent {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
+        autoren_delete_by_param(
+            &scenario.server,
+            &params::AutorenDeleteByParamQueryParams {
+                fach: None,
+                org: None,
+                person: Some("Harald Maria Töpfer".to_string()),
+            },
+        )
+        .await
+        .expect("Failed to delete Autor.");
         let autoren_now = fetch_all_authors(&scenario.server).await;
         assert!(autoren.len() > autoren_now.len());
 
@@ -1267,81 +951,25 @@ mod test_authorisierte_sonstige {
 
     async fn enum_delete_with(
         server: &LTZFServer,
-        pp: &models::EnumDeletePathParams,
-    ) -> crate::Result<EnumDeleteResponse> {
-        server
-            .enum_delete(
-                &Method::DELETE,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                pp,
-            )
-            .await
+        pp: &params::EnumDeletePathParams,
+    ) -> crate::Result<()> {
+        enum_delete(server, pp).await
     }
     #[tokio::test]
     async fn test_enum_delete() {
         let scenario = TestSetup::new("test_enum_delete").await;
-        let r = scenario
-            .server
-            .enum_delete(
-                &Method::DELETE,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::Collector, 1),
-                &models::EnumDeletePathParams {
-                    item: "absolutely".to_string(),
-                    name: models::EnumerationNames::Dokumententypen,
-                },
-            )
-            .await
-            .expect("Failed to delete Enum.");
-        assert_eq!(
-            r,
-            EnumDeleteResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
         insert_default_vorgang(&scenario.server).await;
 
-        let r = enum_delete_with(
+        enum_delete_with(
             &scenario.server,
-            &models::EnumDeletePathParams {
+            &params::EnumDeletePathParams {
                 item: "preparl-entwurf".to_string(),
                 name: models::EnumerationNames::Dokumententypen,
             },
         )
         .await
         .expect("Failed to delete Enum.");
-        assert!(matches!(r, EnumDeleteResponse::Status204_NoContent { .. }));
 
-        scenario.teardown().await;
-    }
-
-    #[tokio::test]
-    async fn test_gremien_delete_forbidden() {
-        let scenario = TestSetup::new("test_gremien_delete_forbidden").await;
-        let r = scenario
-            .server
-            .gremien_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::Collector, 1),
-                &models::GremienDeleteByParamQueryParams {
-                    gr: None,
-                    p: None,
-                    wp: None,
-                },
-            )
-            .await
-            .expect("Failed to delete Gremium.");
-        assert!(matches!(
-            r,
-            GremienDeleteByParamResponse::Status403_Forbidden { .. }
-        ));
         scenario.teardown().await;
     }
 
@@ -1363,46 +991,28 @@ mod test_authorisierte_sonstige {
             ..std_station.clone()
         });
 
-        let rsp = scenario
-            .server
-            .vorgang_id_put(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::VorgangIdPutPathParams {
-                    vorgang_id: vorgang.api_id,
-                },
-                &vorgang,
-            )
-            .await
-            .expect("Failed to create Vorgang.");
-        assert!(matches!(
-            rsp,
-            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }
-        ));
+        vorgang::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
         // and now retrival and checks
         let gremien = fetch_all_gremien(&scenario.server).await;
-        let r = scenario
-            .server
-            .gremien_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::GremienDeleteByParamQueryParams {
-                    gr: Some("rrrrrr".to_string()),
-                    p: None,
-                    wp: None,
-                },
-            )
-            .await
-            .expect("Failed to delete Gremium.");
-        assert!(matches!(
-            r,
-            GremienDeleteByParamResponse::Status204_NoContent { .. }
-        ));
-
+        gremien_delete_by_param(
+            &scenario.server,
+            &params::GremienDeleteByParamQueryParams {
+                gr: Some("rrrrrr".to_string()),
+                p: None,
+                wp: None,
+            },
+        )
+        .await
+        .expect("Failed to delete Gremium.");
         let gremien_after_delete = fetch_all_gremien(&scenario.server).await;
         assert!(
             gremien.len() == 2 && gremien_after_delete.len() == 1,
@@ -1410,89 +1020,40 @@ mod test_authorisierte_sonstige {
         );
         let gremien = gremien_after_delete;
 
-        let r = scenario
-            .server
-            .gremien_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::GremienDeleteByParamQueryParams {
-                    gr: None,
-                    p: Some(models::Parlament::Bt),
-                    wp: None,
-                },
-            )
-            .await
-            .expect("Failed to delete Gremium.");
-        assert!(matches!(
-            r,
-            GremienDeleteByParamResponse::Status204_NoContent { .. }
-        ));
+        gremien_delete_by_param(
+            &scenario.server,
+            &params::GremienDeleteByParamQueryParams {
+                gr: None,
+                p: Some(models::Parlament::Bt),
+                wp: None,
+            },
+        )
+        .await
+        .expect("Failed to delete Gremium.");
+
         let gremien_after_delete = fetch_all_gremien(&scenario.server).await;
         assert!(gremien.len() == 1 && gremien_after_delete.is_empty());
-        let r = scenario
-            .server
-            .gremien_delete_by_param(
-                &Method::GET,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::GremienDeleteByParamQueryParams {
-                    gr: None,
-                    p: None,
-                    wp: Some(20),
-                },
-            )
-            .await
-            .expect("Failed to delete Gremium.");
-        assert!(matches!(
-            r,
-            GremienDeleteByParamResponse::Status204_NoContent { .. }
-        ));
+        gremien_delete_by_param(
+            &scenario.server,
+            &params::GremienDeleteByParamQueryParams {
+                gr: None,
+                p: None,
+                wp: Some(20),
+            },
+        )
+        .await
+        .expect("Failed to delete Gremium.");
+
         let new_gremien = fetch_all_gremien(&scenario.server).await;
         assert!(gremien.len() > new_gremien.len());
         scenario.teardown().await;
     }
 
-    async fn gp_with(
-        server: &LTZFServer,
-        gpr: &models::GremienPutRequest,
-    ) -> crate::Result<GremienPutResponse> {
-        server
-            .gremien_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                gpr,
-            )
-            .await
-    }
     #[tokio::test]
-    async fn test_gremium_put() {
+    pub async fn test_gremium_put() {
         let scenario = TestSetup::new("test_gremium_put").await;
         insert_default_vorgang(&scenario.server).await;
 
-        // check permissions
-        let response = scenario
-            .server
-            .gremien_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::Collector, 1),
-                &models::GremienPutRequest {
-                    objects: vec![],
-                    replacing: None,
-                },
-            )
-            .await
-            .expect("Failed to create Gremium.");
-        assert!(matches!(
-            response,
-            GremienPutResponse::Status403_Forbidden { .. }
-        ));
         let other_gremium = models::Gremium {
             link: None,
             name: "Ausschuss für Ware Diggah".to_string(),
@@ -1501,38 +1062,32 @@ mod test_authorisierte_sonstige {
         };
         // check insert without conflict
         let gremien = fetch_all_gremien(&scenario.server).await;
-        let response = gp_with(
+        let response = super::gremien_put(
             &scenario.server,
-            &models::GremienPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![other_gremium.clone()],
-                replacing: None,
+                replacing: vec![],
             },
         )
         .await
         .expect("Failed to create Gremium.");
-        assert!(matches!(
-            response,
-            GremienPutResponse::Status201_Created { .. }
-        ));
+        assert!(matches!(response, PutResponse::Success));
         let gremien_new = fetch_all_gremien(&scenario.server).await;
         assert!(gremien.len() < gremien_new.len());
         assert!(gremien_new.contains(&other_gremium));
         let gremien = gremien_new;
 
         // check insert with conflict
-        let response = gp_with(
+        let response = super::gremien_put(
             &scenario.server,
-            &models::GremienPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![other_gremium.clone()],
-                replacing: None,
+                replacing: vec![],
             },
         )
         .await
         .expect("Failed to create Gremium.");
-        assert!(matches!(
-            response,
-            GremienPutResponse::Status304_NotModified { .. }
-        ));
+        assert!(matches!(response, PutResponse::NotMod));
         let gremien_new = fetch_all_gremien(&scenario.server).await;
         assert_eq!(gremien.len(), gremien_new.len());
         let gremien = gremien_new;
@@ -1544,92 +1099,53 @@ mod test_authorisierte_sonstige {
             parlament: models::Parlament::Bv,
             wahlperiode: 42,
         };
-        let response = gp_with(
+        let response = super::gremien_put(
             &scenario.server,
-            &models::GremienPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![repl_grm.clone()],
-                replacing: Some(vec![models::GremienPutRequestReplacingInner {
+                replacing: vec![models::ReplacementPutRequestInner {
                     replaced_by: 0,
                     values: vec![other_gremium.clone()],
-                }]),
+                }],
             },
         )
         .await
         .expect("Failed to create Gremium.");
-        assert!(matches!(
-            response,
-            GremienPutResponse::Status201_Created { .. }
-        ));
+        assert!(matches!(response, PutResponse::Success));
         let gremien_new = fetch_all_gremien(&scenario.server).await;
         assert_eq!(gremien.len(), gremien_new.len());
         assert!(gremien_new.contains(&repl_grm));
 
         // malformed request
-        let response = gp_with(
+        let response = super::gremien_put(
             &scenario.server,
-            &models::GremienPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![models::Gremium {
                     link: None,
                     name: "Ausschuss für Ware Diggah2".to_string(),
                     parlament: models::Parlament::Bv,
                     wahlperiode: 42,
                 }],
-                replacing: Some(vec![models::GremienPutRequestReplacingInner {
+                replacing: vec![models::ReplacementPutRequestInner {
                     replaced_by: 1,
                     values: vec![other_gremium.clone()],
-                }]),
+                }],
             },
         )
         .await
         .expect("Failed to create Gremium.");
-        assert!(matches!(
-            response,
-            GremienPutResponse::Status400_BadRequest { .. }
-        ));
+        assert!(matches!(response, PutResponse::BadReq(_)));
         let gremien_new = fetch_all_gremien(&scenario.server).await;
         assert_eq!(gremien.len(), gremien_new.len());
 
         scenario.teardown().await;
     }
 
-    async fn ap_with(
-        server: &LTZFServer,
-        apr: &models::AutorenPutRequest,
-    ) -> crate::Result<AutorenPutResponse> {
-        server
-            .autoren_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                apr,
-            )
-            .await
-    }
     #[tokio::test]
     async fn test_autor_put() {
         let scenario = TestSetup::new("test_autor_put").await;
         insert_default_vorgang(&scenario.server).await;
 
-        // check permissions
-        let response = scenario
-            .server
-            .autoren_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::Collector, 1),
-                &models::AutorenPutRequest {
-                    objects: vec![],
-                    replacing: None,
-                },
-            )
-            .await
-            .expect("Failed to create Autor.");
-        assert!(matches!(
-            response,
-            AutorenPutResponse::Status403_Forbidden { .. }
-        ));
         let other_autor = models::Autor {
             fachgebiet: Some("Blattzerfetzung".to_string()),
             lobbyregister: Some("https://example.com/einzigartig".to_string()),
@@ -1638,108 +1154,95 @@ mod test_authorisierte_sonstige {
         };
         // check insert without conflict
         let autoren = fetch_all_authors(&scenario.server).await;
-        let response = ap_with(
+        let response = super::autoren_put(
             &scenario.server,
-            &models::AutorenPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![other_autor.clone()],
-                replacing: None,
+                replacing: vec![],
             },
         )
         .await
         .expect("Failed to create Autor.");
-        assert!(matches!(
-            response,
-            AutorenPutResponse::Status201_Created { .. }
-        ));
+        assert!(matches!(response, PutResponse::Success));
         let autoren_new = fetch_all_authors(&scenario.server).await;
         assert!(autoren.len() < autoren_new.len());
         assert!(autoren_new.contains(&other_autor));
         let autoren = autoren_new;
 
         // check insert with conflict
-        let response = ap_with(
+        let response = super::autoren_put(
             &scenario.server,
-            &models::AutorenPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![other_autor.clone()],
-                replacing: None,
+                replacing: vec![],
             },
         )
         .await
         .expect("Failed to create Autor.");
-        assert!(matches!(
-            response,
-            AutorenPutResponse::Status304_NotModified { .. }
-        ));
+        assert!(matches!(response, PutResponse::NotMod));
+
         let autoren_new = fetch_all_authors(&scenario.server).await;
         assert_eq!(autoren.len(), autoren_new.len());
         let autoren = autoren_new;
 
         // check replace
-        let repl_grm = models::Autor {
+        let repl_aut = models::Autor {
             fachgebiet: Some("Blattzusammensetzung".to_string()),
             lobbyregister: Some("https://example.com/einzigartig/hahadochnicht".to_string()),
             person: Some("Karla Kolumna".to_string()),
             organisation: "Wasserstoffwirtschaftsverband der Ostgoten".to_string(),
         };
-        let response = ap_with(
+        let response = super::autoren_put(
             &scenario.server,
-            &models::AutorenPutRequest {
-                objects: vec![repl_grm.clone()],
-                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+            &models::ReplacementPutRequest {
+                objects: vec![repl_aut.clone()],
+                replacing: vec![models::ReplacementPutRequestInner {
                     replaced_by: 0,
                     values: vec![other_autor.clone()],
-                }]),
+                }],
             },
         )
         .await
         .expect("Failed to create Autor.");
-        assert!(matches!(
-            response,
-            AutorenPutResponse::Status201_Created { .. }
-        ));
-        let gremien_new = fetch_all_authors(&scenario.server).await;
-        assert_eq!(autoren.len(), gremien_new.len());
-        assert!(gremien_new.contains(&repl_grm));
+        assert!(matches!(response, PutResponse::Success));
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), autoren_new.len());
+        assert!(autoren_new.contains(&repl_aut));
+        assert!(!autoren_new.contains(&other_autor));
 
         // malformed request
-        let response = ap_with(
+        let response = super::autoren_put(
             &scenario.server,
-            &models::AutorenPutRequest {
-                objects: vec![repl_grm.clone()],
-                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+            &models::ReplacementPutRequest {
+                objects: vec![repl_aut.clone()],
+                replacing: vec![models::ReplacementPutRequestInner {
                     replaced_by: 1,
                     values: vec![other_autor.clone()],
-                }]),
+                }],
             },
         )
         .await
         .expect("Failed to create Autor.");
-        assert!(matches!(
-            response,
-            AutorenPutResponse::Status400_BadRequest { .. }
-        ));
-        let gremien_new = fetch_all_authors(&scenario.server).await;
-        assert_eq!(autoren.len(), gremien_new.len());
+        assert!(matches!(response, PutResponse::BadReq(_)));
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), autoren_new.len());
 
         // circular reference
-        let response = ap_with(
+        let response = super::autoren_put(
             &scenario.server,
-            &models::AutorenPutRequest {
-                objects: vec![repl_grm.clone()],
-                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+            &models::ReplacementPutRequest {
+                objects: vec![repl_aut.clone()],
+                replacing: vec![models::ReplacementPutRequestInner {
                     replaced_by: 0,
-                    values: vec![repl_grm.clone()],
-                }]),
+                    values: vec![repl_aut.clone()],
+                }],
             },
         )
         .await
         .expect("Failed to create Autor.");
-        assert!(matches!(
-            response,
-            AutorenPutResponse::Status400_BadRequest { .. }
-        ));
-        let gremien_new = fetch_all_authors(&scenario.server).await;
-        assert_eq!(autoren.len(), gremien_new.len());
+        assert!(matches!(response, PutResponse::BadReq(_)));
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), autoren_new.len());
 
         // test case of merging two foreign keys: currently disabled !!THIS IS A TODO!!
         let mod_autor = models::Autor {
@@ -1750,9 +1253,8 @@ mod test_authorisierte_sonstige {
         mod_stln.autoren.push(mod_autor.clone());
 
         let mut modified_default = generate::default_vorgang();
-        if let Some(dokument) = &mut modified_default.stationen[0].stellungnahmen {
-            dokument[0] = StationDokumenteInner::Dokument(mod_stln);
-        }
+        modified_default.stationen[0].stellungnahmen[0] =
+            DokumentOrApiId::Dokument(Box::new(mod_stln));
 
         run_integration(&modified_default, uuid::Uuid::nil(), 1, &scenario.server)
             .await
@@ -1760,22 +1262,19 @@ mod test_authorisierte_sonstige {
         let all_authors = fetch_all_authors(&scenario.server).await;
         assert!(all_authors.contains(&mod_autor));
 
-        let response = ap_with(
+        let response = super::autoren_put(
             &scenario.server,
-            &models::AutorenPutRequest {
+            &models::ReplacementPutRequest {
                 objects: vec![generate::default_autor_person()],
-                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+                replacing: vec![models::ReplacementPutRequestInner {
                     replaced_by: 0,
                     values: vec![mod_autor.clone()],
-                }]),
+                }],
             },
         )
         .await
         .expect("Failed to create Autor.");
-        assert!(
-            matches!(&response, AutorenPutResponse::Status201_Created { .. }),
-            "{response:?}"
-        );
+        assert!(matches!(&response, PutResponse::Success), "{response:?}");
         let all_authors_new = fetch_all_authors(&scenario.server).await;
         assert!(all_authors_new.len() < all_authors.len());
 
@@ -1785,47 +1284,15 @@ mod test_authorisierte_sonstige {
     async fn ep_with(
         server: &LTZFServer,
         tp: models::EnumerationNames,
-        body: &models::EnumPutRequest,
-    ) -> crate::Result<EnumPutResponse> {
-        server
-            .enum_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::KeyAdder, 1),
-                &models::EnumPutPathParams { name: tp },
-                body,
-            )
-            .await
+        body: &models::ReplacementPutRequest<String>,
+    ) -> crate::Result<PutResponse> {
+        super::enum_put(server, &params::EnumPathParams { name: tp }, body).await
     }
 
     #[tokio::test]
     async fn test_enum_put() {
         let scenario = TestSetup::new("test_enum_put").await;
         insert_default_vorgang(&scenario.server).await;
-
-        // check permissions
-        let response = scenario
-            .server
-            .enum_put(
-                &Method::PUT,
-                &localhost(),
-                &CookieJar::new(),
-                &(APIScope::Collector, 1),
-                &models::EnumPutPathParams {
-                    name: models::EnumerationNames::Dokumententypen,
-                },
-                &models::EnumPutRequest {
-                    objects: vec![],
-                    replacing: None,
-                },
-            )
-            .await
-            .expect("Failed to create Enum.");
-        assert!(matches!(
-            response,
-            EnumPutResponse::Status403_Forbidden { .. }
-        ));
         let testcases = [
             (
                 models::EnumerationNames::Parlamente,
@@ -1863,17 +1330,14 @@ mod test_authorisierte_sonstige {
             let response = ep_with(
                 &scenario.server,
                 *tp,
-                &models::EnumPutRequest {
+                &models::ReplacementPutRequest {
                     objects: vec![new_entry.clone()],
-                    replacing: None,
+                    replacing: vec![],
                 },
             )
             .await
             .expect("Failed to create Enum.");
-            assert!(matches!(
-                response,
-                EnumPutResponse::Status201_Created { .. }
-            ));
+            assert!(matches!(response, PutResponse::Success));
             let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
             assert!(entries.len() < entries_new.len());
             assert!(entries_new.contains(new_entry));
@@ -1883,17 +1347,14 @@ mod test_authorisierte_sonstige {
             let response = ep_with(
                 &scenario.server,
                 *tp,
-                &models::EnumPutRequest {
+                &models::ReplacementPutRequest {
                     objects: vec![new_entry.clone()],
-                    replacing: None,
+                    replacing: vec![],
                 },
             )
             .await
             .expect("Failed to create Enum.");
-            assert!(matches!(
-                response,
-                EnumPutResponse::Status304_NotModified { .. }
-            ));
+            assert!(matches!(response, PutResponse::NotMod));
             let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
             assert_eq!(entries.len(), entries_new.len());
             let entries = entries_new;
@@ -1902,46 +1363,39 @@ mod test_authorisierte_sonstige {
             let response = ep_with(
                 &scenario.server,
                 *tp,
-                &models::EnumPutRequest {
+                &models::ReplacementPutRequest {
                     objects: vec![other_new_entry.clone()],
-                    replacing: Some(vec![models::EnumPutRequestReplacingInner {
+                    replacing: vec![models::ReplacementPutRequestInner {
                         replaced_by: 0,
                         values: vec![new_entry.clone()],
-                    }]),
+                    }],
                 },
             )
             .await
             .unwrap_or_else(|x| {
                 panic!("On test case {tp} // {new_entry} // {other_new_entry} with error {x}")
             });
-            assert!(matches!(
-                response,
-                EnumPutResponse::Status201_Created { .. }
-            ));
+            assert!(matches!(response, PutResponse::Success));
             let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
             assert_eq!(entries.len(), entries_new.len());
             assert!(entries_new.contains(other_new_entry));
             assert!(!entries_new.contains(new_entry));
 
             // malformed request
-
             let response = ep_with(
                 &scenario.server,
                 *tp,
-                &models::EnumPutRequest {
+                &models::ReplacementPutRequest {
                     objects: vec![other_new_entry.clone()],
-                    replacing: Some(vec![models::EnumPutRequestReplacingInner {
+                    replacing: vec![models::ReplacementPutRequestInner {
                         replaced_by: 1,
                         values: vec![new_entry.clone()],
-                    }]),
+                    }],
                 },
             )
             .await
             .expect("Failed to create Enum.");
-            assert!(matches!(
-                response,
-                EnumPutResponse::Status400_BadRequest { .. }
-            ));
+            assert!(matches!(response, PutResponse::BadReq(_)));
             let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
             assert_eq!(entries.len(), entries_new.len());
         }

@@ -1,4 +1,4 @@
-msrv = "1.86"
+msrv = "1.95"
 
 disallowed-macros = [
     { path = "sqlx::query_unchecked",        reason = "use `sqlx::query!` for compile-time checked queries" },

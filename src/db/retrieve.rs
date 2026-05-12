@@ -2,11 +2,10 @@ use std::str::FromStr;
 
 use crate::api::PaginationResponsePart;
 use crate::error::{DataValidationError, LTZFError, Result};
-use crate::utils::as_option;
-use openapi::models;
+use crate::models;
 use uuid::Uuid;
 
-pub async fn vorgang_by_id(
+pub(crate) async fn vorgang_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Vorgang> {
@@ -67,7 +66,7 @@ pub async fn vorgang_by_id(
     for sid in station_ids {
         stationen.push(station_by_id(sid, executor).await?);
     }
-    stationen.sort_by(|a, b| a.zp_start.cmp(&b.zp_start));
+    stationen.sort_by_key(|a| a.zp_start);
 
     // lobbyregistereinträge
     let mut lobbyreg_records =
@@ -117,25 +116,25 @@ pub async fn vorgang_by_id(
     }
 
     Ok(models::Vorgang {
-        touched_by: None,
-        lobbyregister: as_option(lobbyregs),
+        touched_by: vec![],
+        lobbyregister: lobbyregs,
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
-        wahlperiode: u32::try_from(pre_vg.wahlperiode).map_err(|e| LTZFError::Other {
+        wahlperiode: u16::try_from(pre_vg.wahlperiode).map_err(|e| LTZFError::Other {
             message: format!("Failed to convert vorgang wahlperiode as it is negative: {e}"),
         })?,
         verfassungsaendernd: pre_vg.verfaend,
         typ: models::Vorgangstyp::from_str(pre_vg.value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         initiatoren: init_inst,
-        ids: as_option(ids),
-        links: Some(links),
+        ids,
+        links,
         stationen,
     })
 }
 
-pub async fn station_by_id(
+pub(crate) async fn station_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Station> {
@@ -146,7 +145,7 @@ pub async fn station_by_id(
         ORDER BY d.link ASC",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
+    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
     .fetch_all(&mut **executor)
     .await?;
     let stellungnahmen = sqlx::query!(
@@ -156,10 +155,10 @@ pub async fn station_by_id(
         ORDER BY d.link ASC",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
+    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
     .fetch_all(&mut **executor)
     .await?;
-    let sw = sqlx::query!(
+    let schlagworte = sqlx::query!(
         "SELECT DISTINCT(value) FROM rel_station_schlagwort r
         LEFT JOIN schlagwort sw ON sw.id = r.sw_id
         WHERE r.stat_id = $1
@@ -170,7 +169,7 @@ pub async fn station_by_id(
     .fetch_all(&mut **executor)
     .await?;
 
-    let add_links = sqlx::query!("SELECT link FROM rel_station_link WHERE stat_id = $1", id)
+    let additional_links = sqlx::query!("SELECT link FROM rel_station_link WHERE stat_id = $1", id)
         .map(|r| r.link)
         .fetch_all(&mut **executor)
         .await?;
@@ -195,7 +194,7 @@ pub async fn station_by_id(
     .map(|x| {
         Result::<models::Gremium>::Ok(models::Gremium {
             name: x.name,
-            wahlperiode: u32::try_from(x.wp).map_err(|e| LTZFError::Other {
+            wahlperiode: u16::try_from(x.wp).map_err(|e| LTZFError::Other {
                 message: format!("Failed to convert gremium wahlperiode as it is negative: {e}"),
             })?,
             parlament: models::Parlament::from_str(&x.value).map_err(|_e| LTZFError::Other {
@@ -208,12 +207,12 @@ pub async fn station_by_id(
     .await??;
 
     Ok(models::Station {
-        touched_by: None,
+        touched_by: vec![],
         typ: models::Stationstyp::from_str(temp_stat.stattyp.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         dokumente: doks,
-        schlagworte: as_option(sw),
-        stellungnahmen: as_option(stellungnahmen),
+        schlagworte,
+        stellungnahmen,
         zp_start: temp_stat.zp_start,
         zp_modifiziert: Some(temp_stat.zp_modifiziert),
 
@@ -229,12 +228,12 @@ pub async fn station_by_id(
         gremium,
         api_id: Some(temp_stat.api_id),
         link: temp_stat.link,
-        additional_links: as_option(add_links),
+        additional_links,
         gremium_federf: temp_stat.gremium_isff,
     })
 }
 
-pub async fn dokument_by_id(
+pub(crate) async fn dokument_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Dokument> {
@@ -276,7 +275,7 @@ pub async fn dokument_by_id(
 
     Ok(models::Dokument {
         api_id: Some(rec.api_id),
-        touched_by: None,
+        touched_by: vec![],
         titel: rec.titel,
         kurztitel: rec.kurztitel,
         vorwort: rec.vorwort,
@@ -297,7 +296,7 @@ pub async fn dokument_by_id(
             })
             .transpose()?,
         zusammenfassung: rec.zusammenfassung,
-        schlagworte: as_option(schlagworte),
+        schlagworte,
         autoren,
         typ: models::Doktyp::from_str(rec.typ_value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
@@ -307,12 +306,12 @@ pub async fn dokument_by_id(
 
 /// the crucial part is how to find out which vg are connected to a DRCKS
 /// if there exists a station which contains a document mentioned in the top, its vorgang is connected
-pub async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<models::Top> {
+pub(crate) async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<models::Top> {
     let scaffold = sqlx::query!("SELECT titel, nummer FROM top WHERE id = $1", id)
         .fetch_one(&mut **tx)
         .await?;
     // ds
-    let doks = sqlx::query!(
+    let dokumente = sqlx::query!(
         "
     SELECT d.api_id
     FROM tops_doks td 
@@ -321,11 +320,11 @@ pub async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<mode
     ORDER BY d.link ASC",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
+    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
     .fetch_all(&mut **tx)
     .await?;
     // vgs
-    let vgs = sqlx::query!(
+    let vorgang_id = sqlx::query!(
         "
     SELECT DISTINCT(v.api_id) FROM station s    -- alle vorgänge von stationen,
 INNER JOIN vorgang v ON v.id = s.vg_id
@@ -351,12 +350,15 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
             message: format!("Failed to convert top number to u32 as it is negative: {e}"),
         })?,
         titel: scaffold.titel,
-        dokumente: as_option(doks),
-        vorgang_id: as_option(vgs),
+        dokumente,
+        vorgang_id,
     })
 }
 
-pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<models::Sitzung> {
+pub(crate) async fn sitzung_by_id(
+    id: i32,
+    tx: &mut sqlx::PgTransaction<'_>,
+) -> Result<models::Sitzung> {
     let scaffold = sqlx::query!(
         "SELECT a.api_id, a.public, a.termin, p.value as plm, a.link as as_link, a.titel, a.nummer,
         g.name as grname, g.wp, g.link as gr_link FROM sitzung a
@@ -396,17 +398,17 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     .fetch_all(&mut **tx)
     .await?;
 
-    let dids = sqlx::query!(
+    let dokumente = sqlx::query!(
         "SELECT api_id from rel_sitzung_doks rsd
         INNER JOIN dokument d ON d.id = rsd.did WHERE rsd.sid = $1",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
+    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
     .fetch_all(&mut **tx)
     .await?;
     Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
-        touched_by: None,
+        touched_by: vec![],
         nummer: u32::try_from(scaffold.nummer).map_err(|e| LTZFError::Other {
             message: format!("Failed to convert sitzung number to u32 as it is negative: {e}"),
         })?,
@@ -416,7 +418,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         gremium: models::Gremium {
             name: scaffold.grname,
             link: scaffold.gr_link,
-            wahlperiode: u32::try_from(scaffold.wp).map_err(|e| LTZFError::Other {
+            wahlperiode: u16::try_from(scaffold.wp).map_err(|e| LTZFError::Other {
                 message: format!(
                     "Failed to convert gremium wahlperiode to u32 as it is negative: {e}"
                 ),
@@ -429,8 +431,8 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         },
         tops,
         link: scaffold.as_link,
-        experten: as_option(experten),
-        dokumente: as_option(dids),
+        experten,
+        dokumente,
     })
 }
 
@@ -438,15 +440,15 @@ pub struct SitzungFilterParameters {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
-    pub wp: Option<u32>,
+    pub wp: Option<u16>,
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
 }
 /// returns a tuple made up of: (`total_count`, `retrieved_items`)
-pub async fn sitzung_by_param(
+pub(crate) async fn sitzung_by_param(
     params: &SitzungFilterParameters,
-    page: Option<i32>,
-    per_page: Option<i32>,
+    page: Option<u32>,
+    per_page: Option<u32>,
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Sitzung>)> {
     let mut as_list = sqlx::query!(
@@ -492,7 +494,7 @@ ORDER BY pre_table.lastmod ASC",
     .fetch_all(&mut **tx)
     .await?;
     let prp = PaginationResponsePart::new(
-        i32::try_from(as_list.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(as_list.len()).map_err(|e| LTZFError::Other {
             message: format!(
                 "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
             ),
@@ -524,10 +526,10 @@ pub struct VGGetParameters {
     pub vgtyp: Option<models::Vorgangstyp>,
 }
 /// returns (total number of available elements, chosen elements)
-pub async fn vorgang_by_parameter(
+pub(crate) async fn vorgang_by_parameter(
     params: VGGetParameters,
-    page: Option<i32>,
-    per_page: Option<i32>,
+    page: Option<u32>,
+    per_page: Option<u32>,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
     let mut vg_list = sqlx::query!(
@@ -558,7 +560,7 @@ params.lower_date, params.upper_date)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
     let prp = PaginationResponsePart::new(
-        i32::try_from(vg_list.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(vg_list.len()).map_err(|e| LTZFError::Other {
             message: format!(
                 "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
             ),
@@ -575,66 +577,4 @@ params.lower_date, params.upper_date)
         vector.push(super::retrieve::vorgang_by_id(id, executor).await?);
     }
     Ok((prp, vector))
-}
-
-pub(crate) async fn count_existing_gremien(
-    tx: &mut sqlx::PgTransaction<'_>,
-    gremien: &[models::Gremium],
-) -> Result<usize> {
-    let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
-    for gr in gremien {
-        names.push(gr.name.clone());
-        pvalues.push(gr.parlament.to_string());
-        wps.push(i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
-            message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}"),
-        })?);
-        links.push(gr.link.clone());
-    }
-
-    let existing_obj_cnt = sqlx::query_scalar!("SELECT COUNT(1) as cnt FROM 
-        UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)
-        WHERE EXISTS (
-            SELECT 1 FROM gremium g 
-        INNER JOIN parlament p ON g.parl = p.id
-        WHERE 
-            g.name = input_vector.name AND
-            p.value = input_vector.pvalue AND
-            g.wp = input_vector.wp AND
-            (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)
-        )
-        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
-        .fetch_one(&mut **tx).await?.unwrap_or_default();
-
-    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
-        message: format!("Failed to convert object count to usize: {e}"),
-    })
-}
-
-pub(crate) async fn count_existing_authors(
-    tx: &mut sqlx::PgTransaction<'_>,
-    autoren: &[models::Autor],
-) -> Result<usize> {
-    let (mut person, mut organisation) = (vec![], vec![]);
-    for a in autoren {
-        person.push(a.person.clone());
-        organisation.push(a.organisation.clone());
-    }
-
-    let existing_obj_cnt = sqlx::query!(
-        "SELECT COUNT(1) as cnt FROM 
-        UNNEST($1::text[], $2::text[]) as iv(person, orga)
-        WHERE EXISTS (
-            SELECT 1 FROM autor a WHERE 
-            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) 
-            AND a.organisation = iv.orga)",
-        &person[..] as &[Option<String>],
-        &organisation[..]
-    )
-    .map(|r| r.cnt)
-    .fetch_one(&mut **tx)
-    .await?
-    .unwrap_or_default();
-    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
-        message: format!("Failed to convert object count to usize: {e}"),
-    })
 }

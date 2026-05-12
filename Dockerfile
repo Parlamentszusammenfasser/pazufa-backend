@@ -1,26 +1,16 @@
-FROM rust:1.92-slim-bookworm AS builder
+FROM rust:1.95-slim-bookworm AS builder
 
 ARG RUSTFLAGS
 
-ENV SPEC_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3/docs/specs/openapi.yml"
-ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/commit/32c125523ec1831edb1fdb73de5dd99d313dae9b/docs/specs/tracks.toml"
-ENV OPENAPI_GENERATOR_VERSION="7.20.0"
+
+ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+0.0.5/docs/specs/tracks.toml"
 
 WORKDIR /app
 
 RUN apt update \
-    &&  apt install -y --no-install-recommends git libssl-dev pkg-config libpq5 maven jq curl ripgrep\
-    &&  rm -rf /var/lib/apt/lists/* \
-    && curl "https://raw.githubusercontent.com/OpenAPITools/openapi-generator/master/bin/utils/openapi-generator-cli.sh" > ./openapi-generator-cli \
-    && chmod u+x ./openapi-generator-cli
+    &&  apt install -y --no-install-recommends git libssl-dev pkg-config libpq5 jq curl ripgrep\
+    &&  rm -rf /var/lib/apt/lists/*
 
-# caching the first-time-run generators
-RUN echo 'openapi: 3.0.0\ninfo:\n  title: "spec"\n  version: "0.1.0"\npaths:\n  /none:\n    get:\n      responses:\n        "200":\n          description: "success"' > openapi.yml \
-    && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./rs-test \
-    && rm -rf rs-test openapi.yml
-
-RUN curl -o openapi.yml $SPEC_PATH \
-    && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./oapicode
 RUN curl -o tracks.toml $TRACK_PATH
 
 RUN adduser \
@@ -34,20 +24,16 @@ RUN adduser \
 
 
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build -r
-
 COPY build.rs ./
 COPY ./.git ./.git
 COPY ./.sqlx ./.sqlx
-COPY ./src ./src
 COPY ./migrations ./migrations
-
+COPY ./tracks.toml ./tracks.toml
+COPY ./src ./src
 
 ENV SQLX_OFFLINE=true
 
-RUN touch src/main.rs && cargo build --release
+RUN nice cargo build --release --locked
 
 FROM busybox:latest AS runner
 

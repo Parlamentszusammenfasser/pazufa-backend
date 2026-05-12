@@ -1,4 +1,3 @@
-use crate::db::validate::Regex;
 use snafu::prelude::*;
 use uuid::Uuid;
 
@@ -24,14 +23,18 @@ pub enum DataValidationError {
     #[snafu(display("Deliberate Conflict: {reason}"))]
     Conflict { reason: String },
 
-    #[snafu(display(
-        "Error compiling regex {regex:?} @ index {ci} with char {c}. Parsed so far: {parsed_so_far:?}"
-    ))]
-    RegexError {
-        regex: Vec<char>,
-        ci: usize,
-        c: char,
-        parsed_so_far: Regex,
+    //    #[snafu(display(
+    //        "Error compiling regex {regex:?} @ index {ci} with char {c}. Parsed so far: {parsed_so_far:?}"
+    //    ))]
+    //    RegexError {
+    //        regex: Vec<char>,
+    //        ci: usize,
+    //        c: char,
+    //        parsed_so_far: Regex,
+    //    },
+    #[snafu(display("Track Validation Failed"))]
+    TrackValidation {
+        source: track_validation::TrackValidationError,
     },
 
     #[snafu(display("The Vorgang could not be validated: {reason}"))]
@@ -64,7 +67,12 @@ pub enum DataValidationError {
     #[snafu(display(""))]
     QueryParametersNotSatisfied,
 }
-
+error_from!(
+    track_validation::TrackValidationError,
+    Validation,
+    DataValidationError,
+    TrackValidation
+);
 error_from!(uuid::Error, Validation, DataValidationError, UuidParse);
 
 #[derive(Debug, Snafu)]

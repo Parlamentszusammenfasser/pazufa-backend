@@ -1,0 +1,108 @@
+{
+  "api_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "dokumente": [
+    {
+      "api_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "autoren": [
+        {
+          "fachgebiet": "string",
+          "lobbyregister": "https://example.com/",
+          "organisation": "string",
+          "person": "string"
+        }
+      ],
+      "drucksnr": "string",
+      "hash": "string",
+      "kurztitel": "string",
+      "link": "https://example.com",
+      "meinung": 1,
+      "schlagworte": [
+        "string"
+      ],
+      "titel": "string",
+      "touched_by": [
+        {
+          "key": "string",
+          "scraper_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        }
+      ],
+      "typ": "preparl-entwurf",
+      "volltext": "string",
+      "vorwort": "string",
+      "zp_erstellt": "2026-04-30T06:22:44.229Z",
+      "zp_modifiziert": "2026-04-30T06:22:44.229Z",
+      "zp_referenz": "2026-04-30T06:22:44.229Z",
+      "zusammenfassung": "string"
+    },
+    "3fa85f64-5717-4462-b3fc-2c963f66afa6"
+  ],
+  "experten": [
+    {
+      "fachgebiet": "string",
+      "lobbyregister": "https://example.com/",
+      "organisation": "string",
+      "person": "string"
+    }
+  ],
+  "gremium": {
+    "link": "https://example.com/",
+    "name": "string",
+    "parlament": "BT",
+    "wahlperiode": 1824
+  },
+  "link": "string",
+  "nummer": 1073741824,
+  "public": true,
+  "termin": "2026-04-30T06:22:44.229Z",
+  "titel": "string",
+  "tops": [
+    {
+      "dokumente": [
+        {
+          "api_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "autoren": [
+            {
+              "fachgebiet": "string",
+              "lobbyregister": "https://example.com/",
+              "organisation": "string",
+              "person": "string"
+            }
+          ],
+          "drucksnr": "string",
+          "hash": "string",
+          "kurztitel": "string",
+          "link": "https://example.com",
+          "meinung": 1,
+          "schlagworte": [
+            "string"
+          ],
+          "titel": "string",
+          "touched_by": [
+            {
+              "key": "string",
+              "scraper_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            }
+          ],
+          "typ": "preparl-entwurf",
+          "volltext": "string",
+          "vorwort": "string",
+          "zp_erstellt": "2026-04-30T06:22:44.229Z",
+          "zp_modifiziert": "2026-04-30T06:22:44.229Z",
+          "zp_referenz": "2026-04-30T06:22:44.229Z",
+          "zusammenfassung": "string"
+        }
+      ],
+      "nummer": 1073741824,
+      "titel": "string",
+      "vorgang_id": [
+        "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+      ]
+    }
+  ],
+  "touched_by": [
+    {
+      "key": "string",
+      "scraper_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+    }
+  ]
+}

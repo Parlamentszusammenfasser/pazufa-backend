@@ -1,13 +1,11 @@
-#![allow(clippy::expect_used, reason = "Panic is allowed in test code.")]
 #![allow(
     clippy::disallowed_methods,
     reason = "Database setup and taredown requires use of `sqlx::query` as those cannot be statically verified."
 )]
-use sha256::digest;
-use std::sync::LazyLock;
-
 use crate::utils::tracing::Logging;
 use crate::{Configuration, LTZFServer};
+use sha256::digest;
+use std::sync::LazyLock;
 
 static MASTER_URL: LazyLock<String> = LazyLock::new(|| {
     dotenv::dotenv().ok();
@@ -100,11 +98,11 @@ impl TestSetup {
 
 pub(crate) mod generate {
 
-    use openapi::models;
+    use crate::models;
 
     pub(crate) mod random {
 
-        use openapi::models;
+        use crate::models;
         use rand::Rng;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
@@ -207,7 +205,6 @@ pub(crate) mod generate {
             let has_kurztitel = rng.random_bool(0.6);
             let has_vorwort = rng.random_bool(0.4);
             let has_zusammenfassung = rng.random_bool(0.5);
-            let has_schlagworte = rng.random_bool(0.7);
             let has_zp_erstellt = rng.random_bool(0.6);
 
             let num_autoren = rng.random_range(1..=3);
@@ -216,24 +213,18 @@ pub(crate) mod generate {
                 autoren.push(random_autor(rng));
             }
 
-            let schlagworte_count = if has_schlagworte {
-                rng.random_range(1..=5)
-            } else {
-                0
-            };
-            let schlagworte = if has_schlagworte {
+            let schlagworte_count = rng.random_range(0..=5);
+            let schlagworte = {
                 let mut words = Vec::new();
                 for _ in 0..schlagworte_count {
                     words.push(random_string(rng, "tag_", 3, 12));
                 }
-                Some(words)
-            } else {
-                None
+                words
             };
 
             models::Dokument {
                 api_id: Some(random_uuid(rng)),
-                touched_by: None,
+                touched_by: vec![],
                 drucksnr: if has_drucksnr {
                     Some(format!(
                         "{}/{}",
@@ -315,13 +306,12 @@ pub(crate) mod generate {
             let has_trojanergefahr = rng.random_bool(0.5);
             let has_schlagworte = rng.random_bool(0.6);
             let has_additional_links = rng.random_bool(0.3);
-            let has_stellungnahmen = rng.random_bool(0.4);
 
             let num_dokumente = rng.random_range(1..=4);
             let mut dokumente = Vec::new();
             for _ in 0..num_dokumente {
-                dokumente.push(models::StationDokumenteInner::Dokument(random_dokument(
-                    rng,
+                dokumente.push(models::DokumentOrApiId::Dokument(Box::new(
+                    random_dokument(rng),
                 )));
             }
 
@@ -330,14 +320,12 @@ pub(crate) mod generate {
             } else {
                 0
             };
-            let schlagworte = if has_schlagworte {
+            let schlagworte = {
                 let mut words = Vec::new();
                 for _ in 0..schlagworte_count {
                     words.push(random_string(rng, "station_", 5, 15));
                 }
-                Some(words)
-            } else {
-                None
+                words
             };
 
             let additional_links_count = if has_additional_links {
@@ -345,7 +333,7 @@ pub(crate) mod generate {
             } else {
                 0
             };
-            let additional_links = if has_additional_links {
+            let additional_links = {
                 let mut links = Vec::new();
                 for _ in 0..additional_links_count {
                     links.push(format!(
@@ -354,31 +342,23 @@ pub(crate) mod generate {
                         random_string(rng, "", 8, 16)
                     ));
                 }
-                Some(links)
-            } else {
-                None
+                links
             };
 
-            let stellungnahmen_count = if has_stellungnahmen {
-                rng.random_range(1..=2)
-            } else {
-                0
-            };
-            let stellungnahmen = if has_stellungnahmen {
+            let stellungnahmen_count = rng.random_range(0..=2);
+            let stellungnahmen = {
                 let mut stn = Vec::new();
                 for _ in 0..stellungnahmen_count {
-                    stn.push(models::StationDokumenteInner::Dokument(
+                    stn.push(models::DokumentOrApiId::Dokument(Box::new(
                         random_stellungnahme(rng),
-                    ));
+                    )));
                 }
-                Some(stn)
-            } else {
-                None
+                stn
             };
 
             models::Station {
                 api_id: Some(random_uuid(rng)),
-                touched_by: None,
+                touched_by: vec![],
                 titel: if has_titel {
                     Some(random_string(rng, "Station: ", 15, 50))
                 } else {
@@ -476,11 +456,6 @@ pub(crate) mod generate {
             let vgident_typ_variants = ["initdrucks", "vorgnr", "api-id", "sonstig"];
 
             let has_kurztitel = rng.random_bool(0.6);
-            let has_links = rng.random_bool(0.7);
-            let has_ids = rng.random_bool(0.8);
-            let has_lobbyregister = rng.random_bool(0.4);
-            let has_touched_by = rng.random_bool(0.3);
-
             let num_initiatoren = rng.random_range(1..=4);
             let mut initiatoren = Vec::new();
             for _ in 0..num_initiatoren {
@@ -500,12 +475,8 @@ pub(crate) mod generate {
                 });
             }
 
-            let links_count = if has_links {
-                rng.random_range(1..=3)
-            } else {
-                0
-            };
-            let links = if has_links {
+            let links_count = rng.random_range(1..=3);
+            let links = {
                 let mut link_list = Vec::new();
                 for _ in 0..links_count {
                     link_list.push(format!(
@@ -514,13 +485,11 @@ pub(crate) mod generate {
                         random_string(rng, "", 8, 16)
                     ));
                 }
-                Some(link_list)
-            } else {
-                None
+                link_list
             };
 
-            let ids_count = if has_ids { rng.random_range(1..=3) } else { 0 };
-            let ids = if has_ids {
+            let ids_count = rng.random_range(0..=3);
+            let ids = {
                 let mut id_list = Vec::new();
                 for _ in 0..ids_count {
                     id_list.push(models::VgIdent {
@@ -529,17 +498,11 @@ pub(crate) mod generate {
                             .to_owned(),
                     });
                 }
-                Some(id_list)
-            } else {
-                None
+                id_list
             };
 
-            let lobbyregister_count = if has_lobbyregister {
-                rng.random_range(1..=2)
-            } else {
-                0
-            };
-            let lobbyregister = if has_lobbyregister {
+            let lobbyregister_count = rng.random_range(1..=2);
+            let lobbyregister = {
                 let mut lobby_list = Vec::new();
                 for _ in 0..lobbyregister_count {
                     let betroffene_count = rng.random_range(1..=3);
@@ -564,21 +527,15 @@ pub(crate) mod generate {
                         betroffene_drucksachen: betroffene,
                     });
                 }
-                Some(lobby_list)
-            } else {
-                None
+                lobby_list
             };
 
             models::Vorgang {
                 api_id: random_uuid(rng),
-                touched_by: if has_touched_by {
-                    Some(vec![models::TouchedByInner {
-                        scraper_id: Some(random_uuid(rng)),
-                        key: Some(digest(random_string(rng, "key_", 10, 30))),
-                    }])
-                } else {
-                    None
-                },
+                touched_by: vec![models::TouchedByInner {
+                    scraper_id: Some(random_uuid(rng)),
+                    key: Some(digest(random_string(rng, "key_", 10, 30))),
+                }],
                 titel: random_string(rng, "Vorgang: ", 20, 80),
                 kurztitel: if has_kurztitel {
                     Some(random_string(rng, "Kurz: ", 10, 40))
@@ -620,7 +577,7 @@ pub(crate) mod generate {
             ];
             models::Sitzung {
                 api_id: Some(random_uuid(rng)),
-                touched_by: None,
+                touched_by: vec![],
                 titel: Some(random_string(rng, "", 16, 65)),
                 termin: random_date(rng),
                 gremium: models::Gremium {
@@ -633,20 +590,20 @@ pub(crate) mod generate {
                 public: rng.random_bool(0.5),
                 link: Some(random_string(rng, "https://", 4, 20)),
                 tops: vec![random_top(rng)],
-                dokumente: Some(vec![models::StationDokumenteInner::Dokument(
+                dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
                     random_dokument(rng),
-                )]),
-                experten: Some(vec![random_autor(rng)]),
+                ))],
+                experten: vec![random_autor(rng)],
             }
         }
         fn random_top(rng: &mut StdRng) -> models::Top {
             models::Top {
-                dokumente: Some(vec![models::StationDokumenteInner::Dokument(
+                dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
                     random_dokument(rng),
-                )]),
+                ))],
                 nummer: rng.random_range(1..=125),
                 titel: random_string(rng, "", 10, 25),
-                vorgang_id: None,
+                vorgang_id: vec![],
             }
         }
 
@@ -722,15 +679,15 @@ pub(crate) mod generate {
                     .to_utc(),
             ),
             trojanergefahr: Some(2u8),
-            schlagworte: Some(vec!["stationär".to_string()]),
-            touched_by: None,
-            stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(
+            schlagworte: vec!["stationär".to_string()],
+            touched_by: vec![],
+            stellungnahmen: vec![models::DokumentOrApiId::Dokument(Box::new(
                 default_stellungnahme(),
-            )]),
-            additional_links: Some(vec![
-                "https://example.com/videos/aus/der/hoelle".to_string(),
-            ]),
-            dokumente: vec![models::StationDokumenteInner::Dokument(default_dokument())],
+            ))],
+            additional_links: vec!["https://example.com/videos/aus/der/hoelle".to_string()],
+            dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
+                default_dokument(),
+            ))],
             gremium: default_gremium(),
         }
     }
@@ -758,7 +715,7 @@ pub(crate) mod generate {
                 Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
                 vorwort: Some("Vorwort".to_string()),
                 zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
-                schlagworte: Some(vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()]),
+                schlagworte: vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()],
                 zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                     .expect("Failed to parse static datetime. Test broken.")
                     .to_utc()),
@@ -768,7 +725,7 @@ pub(crate) mod generate {
                 zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                     .expect("Failed to parse static datetime. Test broken.")
                     .to_utc(),
-                touched_by: None,
+                touched_by: vec![],
             }
     }
     pub(crate) fn default_stellungnahme() -> models::Dokument {
@@ -787,7 +744,7 @@ pub(crate) mod generate {
                 Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
                 vorwort: Some("Stelluingsnahmenvorwort das völlig verschieden von dem Hauptdokument ist".to_string()),
                 zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
-                schlagworte: Some(vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()]),
+                schlagworte: vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()],
                 zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                     .expect("Failed to parse static datetime. Test broken.")
                     .to_utc()),
@@ -797,7 +754,7 @@ pub(crate) mod generate {
                 zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                     .expect("Failed to parse static datetime. Test broken.")
                     .to_utc(),
-                touched_by: None,
+                touched_by: vec![],
             }
     }
     pub(crate) fn default_autor_person() -> models::Autor {
@@ -837,7 +794,7 @@ pub(crate) mod generate {
     pub(crate) fn default_sitzung() -> models::Sitzung {
         models::Sitzung {
             api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef9999")),
-            touched_by: None,
+            touched_by: vec![],
             titel: Some("Klogespräche und -lektüre im 22. Jhd.".to_string()),
             termin: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                 .expect("Failed to parse static datetime. Test broken.")
@@ -847,20 +804,20 @@ pub(crate) mod generate {
             public: true,
             link: Some("https://klogefueh.le".to_string()),
             tops: vec![default_top()],
-            dokumente: Some(vec![models::StationDokumenteInner::Dokument(
+            dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
                 default_dokument(),
-            )]),
-            experten: Some(vec![default_autor_experte()]),
+            ))],
+            experten: vec![default_autor_experte()],
         }
     }
     pub(crate) fn default_top() -> models::Top {
         models::Top {
-            dokumente: Some(vec![models::StationDokumenteInner::Dokument(
+            dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
                 default_dokument(),
-            )]),
+            ))],
             nummer: 1,
             titel: "Lektüre und Haptik".to_string(),
-            vorgang_id: None,
+            vorgang_id: vec![],
         }
     }
     pub(crate) fn default_vorgang() -> models::Vorgang {
@@ -874,20 +831,20 @@ pub(crate) mod generate {
             typ: models::Vorgangstyp::GgZustimmung,
             verfassungsaendernd: false,
             wahlperiode: 20,
-            touched_by: None,
-            links: Some(vec!["https://example.com/ichmagmoneten".to_string()]),
+            touched_by: vec![],
+            links: vec!["https://example.com/ichmagmoneten".to_string()],
             initiatoren: at,
-            ids: Some(vec![models::VgIdent {
+            ids: vec![models::VgIdent {
                 id: "einzigartig".to_string(),
                 typ: "initdrucks".to_owned(),
-            }]),
-            lobbyregister: Some(vec![models::Lobbyregeintrag {
+            }],
+            lobbyregister: vec![models::Lobbyregeintrag {
                 betroffene_drucksachen: vec!["20/2014".to_string()],
                 intention: "Für die Klicks".to_string(),
                 interne_id: "as9d8fja9s8djf".to_string(),
                 link: "https://example.com/einig/gerecht/frei".to_string(),
                 organisation: default_autor_lobby(),
-            }]),
+            }],
         }
     }
 }

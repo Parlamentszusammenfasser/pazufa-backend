@@ -13,7 +13,6 @@ const MAX_COUNT: usize = 1024;
 
 #[derive(Serialize)]
 struct StatOutput {
-    spec_version: String,
     version: String,
     commit: String,
     #[cfg(feature = "track-validation")]
@@ -37,6 +36,7 @@ pub struct Statistics {
 
 impl Statistics {
     #[cfg(feature = "track-validation")]
+    #[must_use]
     pub fn new(track_path: &str) -> Self {
         Self {
             pathcounts: HashMap::new().into(),
@@ -82,6 +82,10 @@ impl Statistics {
         let cnt: u32 = *r.get(path).unwrap_or(&0);
         r.insert(path.to_owned(), cnt.saturating_add(1));
     }
+    /// Results in the string rep of status signals recorded by the system
+    /// # Panics
+    /// Can panic if serialization fails, but since the struct is well controlled, that is not
+    /// happening
     pub async fn output(&self) -> String {
         let out = StatOutput {
             unique_uas: u32::try_from(self.useragents.read().await.len()).unwrap_or(0),
@@ -100,8 +104,8 @@ impl Statistics {
             version: crate_version!().to_owned(),
             #[cfg(feature = "track-validation")]
             track_version: self.track_version.clone(),
-            spec_version: env!("OPENAPI_SERVER_VERSION").to_owned(),
         };
-        serde_json::to_string(&out).expect("Expected to be able to serialize StatOutput struct")
+        serde_json::to_string(&out)
+            .unwrap_or("Status Unavailable. Please consult a doctor.".to_owned())
     }
 }

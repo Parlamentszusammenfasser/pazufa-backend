@@ -21,6 +21,11 @@ struct Mail {
 pub struct MailBundle(UnboundedSender<Mail>);
 
 impl MailBundle {
+    /// Creates a new mail bundle
+    /// # Errors
+    /// Can Fail due to:
+    /// - missing credentials
+    /// - io errors
     pub fn new(config: &crate::Configuration) -> Result<Option<Self>> {
         let mailer = match config.build_mailer() {
             Ok(cm) => cm,

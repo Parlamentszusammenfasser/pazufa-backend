@@ -2,8 +2,16 @@
 name = "pazufa-backend"
 version = "0.2.8"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.95"
 authors = ["Benedikt Schäfer"]
+
+[lib]
+name = "pazufa_backend_lib"
+bench = false
+
+[[bin]]
+name = "pazufa-backend"
+bench = false
 
 [features]
 default = ["track-validation"]
@@ -17,22 +25,20 @@ axum-extra = {version = "0.12", features= ["cookie"]}
 axum-macros = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["alloc", "derive"] }
 serde_json = "1.0"
-tokio = { version = "1.0", features = ["sync", "macros", "rt-multi-thread"] }
+tokio = { version = "1.0", features = ["sync", "macros", "rt-multi-thread", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.0", features = ["fast-rng", "v7", "serde"] }
+uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
 clap = { version = "4.5", features = ["derive", "env", "cargo"] }
 lettre = "0.11"
-
 dotenv = "0.15"
 snafu = "0.8"
 sha256 = "1.5"
 rand = "0.9"
 futures = "0.3"
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate", "macros"], default-features = false }
-openapi = { version = "0.2", path = "oapicode", features = ["server"] }
 tower-http = { version = "0.6", features = ["limit", "cors", "compression-br", "compression-deflate", "compression-gzip", "compression-zstd"] }
 tower_governor = { version = "0.7" }
 async-trait = "0.1"
@@ -40,6 +46,13 @@ split-iter = "0.1.0"
 headers = "0.4.1"
 toml = { version = "1.0.7", features = ["serde"] }
 smallvec = { version = "1.15.1", features = ["union", "const_generics"] }
+anyhow = "1.0.102"
+utoipa = { version = "5.4.0", features = ["uuid", "url", "axum_extras", "chrono"] }
+utoipa-axum = "0.2.0"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+track-validation = {path = "track-validation"}
+crc = "3.4.0"
+ammonia = "4.1.2"
 
 [dev-dependencies]
 tracing-test = "0.2.5"

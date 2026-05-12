@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO gremium(name, parl, wp, link) \n        \n        SELECT nm, p.id, wp, ln FROM UNNEST($1::text[], $2::text[], $3::int8[], $4::text[]) AS iv(nm, pname, wp, ln)\n        INNER JOIN parlament p ON p.value = iv.pname\n\n        ON CONFLICT ON CONSTRAINT unique_combo \n        DO UPDATE SET link = EXCLUDED.link\n\n        RETURNING gremium.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int8Array",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "660f59532834cc2c73cf6c123f6b6d6a973fa3b8758c8f7c370bdbb437d8b697"
+}

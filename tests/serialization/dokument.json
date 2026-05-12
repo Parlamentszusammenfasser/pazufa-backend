@@ -1,0 +1,33 @@
+{
+  "api_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "autoren": [
+    {
+      "fachgebiet": "string",
+      "lobbyregister": "https://example.com/",
+      "organisation": "string",
+      "person": "string"
+    }
+  ],
+  "drucksnr": "string",
+  "hash": "string",
+  "kurztitel": "string",
+  "link": "string",
+  "meinung": 4,
+  "schlagworte": [
+    "string"
+  ],
+  "titel": "string",
+  "touched_by": [
+    {
+      "key": "string",
+      "scraper_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+    }
+  ],
+  "typ": "preparl-entwurf",
+  "volltext": "string",
+  "vorwort": "string",
+  "zp_erstellt": "2026-04-30T06:47:59.849Z",
+  "zp_modifiziert": "2026-04-30T06:47:59.849Z",
+  "zp_referenz": "2026-04-30T06:47:59.849Z",
+  "zusammenfassung": "string"
+}

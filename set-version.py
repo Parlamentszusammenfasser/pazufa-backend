@@ -28,16 +28,3 @@ replace(".woodpecker/deploy.yml", r"  - &version \"\d+\.\d+\.\d+\"", f"  - &vers
 
 replace("Dockerfile.deploy", r"ENV TRACK_PATH=\"https://.*\"", f"ENV TRACK_PATH=\"{trackfile}\"")
 replace(".woodpecker.yml", r"      TRACK_PATH: https://.*", f"      TRACK_PATH: {trackfile}")
-
-oapid = file["openapi"]
-
-replace("Dockerfile.deploy", r"ENV OPENAPI_GENERATOR_VERSION=\"\d+\.\d+\.\d+\"", f"ENV OPENAPI_GENERATOR_VERSION=\"{oapid["oapigen-version"]}\"")
-replace("oapigen.sh", r"OPENAPI_GENERATOR_VERSION=\"\d+\.\d+\.\d+\"", f"OPENAPI_GENERATOR_VERSION=\"{oapid["oapigen-version"]}\"")
-replace(".woodpecker.yml", r"      OPENAPI_GENERATOR_VERSION: \d+\.\d+\.\d+", f"      OPENAPI_GENERATOR_VERSION: {oapid["oapigen-version"]}")
-
-
-replace("Dockerfile.deploy", r"ENV SPEC_PATH=\"https://.*\"", f"ENV SPEC_PATH=\"{oapid["oapi-spec"]}\"")
-replace("oapigen.sh", r"SPEC_PATH=\"https://.*\"", f"SPEC_PATH=\"{oapid["oapi-spec"]}\"")
-replace(".woodpecker.yml", r"      SPEC_PATH: https://.*", f"      SPEC_PATH: {oapid["oapi-spec"]}")
-
-
