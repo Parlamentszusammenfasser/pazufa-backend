@@ -5,8 +5,9 @@ import tomllib
 from pathlib import Path
 import re
 
+
 def replace(file: str, pattern: str, replacement: str):
-    file=Path(file)
+    file = Path(file)
     text = file.read_text()
     new_text = re.sub(pattern, replacement, text)
     if text != new_text:
@@ -15,16 +16,27 @@ def replace(file: str, pattern: str, replacement: str):
     else:
         print(f"No changes needed in {file}")
 
+
 with open("variables.toml", "rb") as f:
-    file= tomllib.load(f)
+    file = tomllib.load(f)
 
 version = file["version"]["version"]
 trackfile = file["version"]["trackfile"]
 
-replace("Dockerfile.deploy", r"LABEL version=\"\d+\.\d+\.\d+\"", f"LABEL version=\"{version}\"")
-replace("Cargo.toml", "version\\s*=\\s*\"\\d+\\.\\d+\\.\\d+\"\n", f"version = \"{version}\"\n")
-replace(".woodpecker/deploy.yml", r"  - &version \"\d+\.\d+\.\d+\"", f"  - &version \"{version}\"")
+replace("Dockerfile", r"LABEL version=\"\d+\.\d+\.\d+\"", f'LABEL version="{version}"')
+replace(
+    "Cargo.toml", 'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n', f'version = "{version}"\n'
+)
+replace(
+    ".woodpecker/deploy.yml",
+    r"  - &version \"\d+\.\d+\.\d+\"",
+    f'  - &version "{version}"',
+)
 
 
-replace("Dockerfile.deploy", r"ENV TRACK_PATH=\"https://.*\"", f"ENV TRACK_PATH=\"{trackfile}\"")
-replace(".woodpecker.yml", r"      TRACK_PATH: https://.*", f"      TRACK_PATH: {trackfile}")
+replace("Dockerfile", r"ENV TRACK_PATH=\"https://.*\"", f'ENV TRACK_PATH="{trackfile}"')
+replace(
+    ".woodpecker/testing.yml",
+    r"      TRACK_PATH: https://.*",
+    f"      TRACK_PATH: {trackfile}",
+)

@@ -1,6 +1,6 @@
 # the variables that are to be set by set-version.py
 # these are used in various locations throughout the project
 [version]
-version="0.2.8"
+version="0.2.9"
 trackfile="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+0.0.5/docs/specs/tracks.toml"
 
