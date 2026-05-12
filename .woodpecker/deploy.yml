@@ -14,7 +14,7 @@ steps:
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
     settings:
       repo: pazufa/backend
-      dockerfile: Dockerfile.deploy
+      dockerfile: Dockerfile
       platforms: 
         - linux/amd64
         - linux/aarch64
