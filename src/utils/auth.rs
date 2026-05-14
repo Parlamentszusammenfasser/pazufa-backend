@@ -92,6 +92,10 @@ pub fn check_crc(key: &str) -> bool {
         crc::Crc::<u32>::new(&crc::CRC_32_CKSUM).checksum(&subkey.bytes().collect::<Vec<_>>());
     format!("{crc:08x}") == key[120..]
 }
+#[must_use]
+pub fn check_key(key: &str) -> bool {
+    key.len() == KEY_LENGTH && key.starts_with("pazufa-") && check_crc(key)
+}
 
 /// generates a new key within the database, returning the new key and the new salt.
 #[must_use]

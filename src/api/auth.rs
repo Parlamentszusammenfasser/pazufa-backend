@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
 use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
 use crate::utils::as_option;
-use crate::utils::auth::KEY_LENGTH;
 use crate::utils::header_params::HeaderParams;
 use crate::{LTZFServer, Result, error::LTZFError, models};
 use axum::extract::FromRequestParts;
@@ -68,7 +67,7 @@ impl Claims {
         }
 
         let tag = crate::utils::auth::keytag_of(&key);
-        if key.len() != KEY_LENGTH || !crate::utils::auth::check_crc(&key) {
+        if !crate::utils::auth::check_key(&key) {
             warn!("Incoming Key is not a valid key");
             return Err(crate::error::DataValidationError::Unauthorized {
                 reason: "The key is malformed (Checksum failed)".to_owned(),

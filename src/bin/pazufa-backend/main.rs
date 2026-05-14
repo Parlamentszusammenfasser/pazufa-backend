@@ -128,9 +128,15 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 }
 
 async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<()> {
+    if !util_auth::check_key(key) {
+        return Err(anyhow!(
+            "Initialization keyadder key did not pass Sanity check. Is it maybe malformed or corrupted? Generate a key with <backend binary> --generate-key"
+        ));
+    }
     let tag = util_auth::keytag_of(key);
     let salt = util_auth::generate_salt();
     let hash = util_auth::hash_full_key(&salt, key);
+
     tracing::info!("Master key of this session has keytag {}", tag);
 
     sqlx::query!(
@@ -252,22 +258,34 @@ fn initialize_logging(config: &Configuration) -> Logging {
     logging
 }
 
+#[allow(clippy::disallowed_macros, reason = "Explicitly requested by user.")]
+fn early_exits(config: &Configuration) {
+    if config.dump_config {
+        println!("{config:#?}");
+        exit(0);
+    }
+    if config.generate_key {
+        println!("{}", util_auth::generate_api_key());
+        exit(0);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     let config = Configuration::parse();
-    if config.dump_config {
-        #[allow(clippy::disallowed_macros, reason = "Explicitly requested by user.")]
-        {
-            println!("{config:#?}");
-        }
-        exit(0);
-    }
+    early_exits(&config);
+
     let logging = initialize_logging(&config);
     tracing::debug!("Logging initialized");
-
     tracing::debug!("Configuration: {:?}", &config);
+
+    let Some(ka_key) = &config.keyadder_key else {
+        return Err(anyhow!(
+            "Unable to start service without a master key. Please provide one via `--keyadder-key` or via PAZUFA_KEYADDER_KEY"
+        ));
+    };
 
     tracing::info!("Starting the Initialisation...");
     let listener = TcpListener::bind(format!("{}:{}", config.host, config.port))
@@ -280,7 +298,7 @@ async fn main() -> Result<()> {
     // Run Key Administrative Functions
 
     let mut tx = sqlx_db.begin().await?;
-    initialize_master_key(&config.keyadder_key, &mut tx).await?;
+    initialize_master_key(ka_key, &mut tx).await?;
     tx.commit().await?;
     tracing::debug!("Master Key initialized");
 

@@ -28,19 +28,20 @@ pub struct Configuration {
     pub mail_sender: Option<String>,
     #[arg(long, env = "MAIL_RECIPIENT")]
     pub mail_recipient: Option<String>,
-    #[arg(long, env = "LTZF_HOST", default_value = "0.0.0.0")]
+
+    #[arg(long, env = "PAZUFA_HOST", default_value = "0.0.0.0")]
     pub host: String,
-    #[arg(long, env = "LTZF_PORT", default_value = "80")]
+    #[arg(long, env = "PAZUFA_PORT", default_value = "80")]
     pub port: u16,
     #[arg(long, short, env = "DATABASE_URL", help = "URL to the database")]
     pub db_url: String,
 
     #[arg(
         long,
-        env = "LTZF_KEYADDER_KEY",
-        help = "The API Key that is used to add new Keys. This is saved in the database."
+        env = "PAZUFA_KEYADDER_KEY",
+        help = "The API Key that is used to add new Keys. This is saved in the database. Required to be set somehow if you want to run the backend itself"
     )]
-    pub keyadder_key: String,
+    pub keyadder_key: Option<String>,
 
     #[arg(long, env = "MERGE_TITLE_SIMILARITY", default_value = "0.8")]
     pub merge_title_similarity: f32,
@@ -73,16 +74,12 @@ pub struct Configuration {
         help = "The Trackfile describing which tracks are applicable. Usually hosted next to the tracks."
     )]
     pub track_path: String,
-    #[arg(
-        long,
-        env = "LTZF_ERROR_LOG",
-        default_value = "/var/log/pazufa-backend/error.log"
-    )]
+    #[arg(long, env = "PAZUFA_ERROR_LOG", default_value = "./error.log")]
     pub error_log_path: String,
 
     #[arg(
         long,
-        env = "LTZF_OBJECT_LOG",
+        env = "PAZUFA_OBJECT_LOG",
         help = "If you want to log object lifecycle operations(create/delete/merge/...), enter a path"
     )]
     pub object_log_path: Option<String>,
@@ -93,6 +90,12 @@ pub struct Configuration {
         the server will print it's configuration considering all inputs and then exit."
     )]
     pub dump_config: bool,
+
+    #[arg(
+        long,
+        help = "Generates a Key that conforms to pazufa's format, then exits with success"
+    )]
+    pub generate_key: bool,
 }
 
 impl Configuration {

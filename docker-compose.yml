@@ -13,7 +13,7 @@ services:
       POSTGRES_DB: pazufa
 
   pazufa-backend:
-    image: pazufa/backend:0.2.8
+    image: pazufa/backend:0.2.9
     restart: unless-stopped
 # use `docker compose up --build` to not use the repository image but build yourself instead
     build:
@@ -31,8 +31,8 @@ services:
       - pazufa-network
     environment:
       DATABASE_URL: "postgres://pazufa-user:pazufa-pass@pazufa-database:5432/pazufa" # required
-      RUST_LOG: "warn,pazufa_backend=info"                                                 # optional
-      LTZF_PORT: "8080"
-      LTZF_KEYADDER_KEY: "tegernsee-apfelsaft-co2grenzwert"             # required
+      RUST_LOG: "warn,pazufa_backend=info"                                           # optional
+      PAZUFA_PORT: "8080"
+      PAZUFA_KEYADDER_KEY: "pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6A3671B9"             # required
 networks:
   pazufa-network:
