@@ -1,0 +1,32 @@
+when:
+  - event: [pull_request]
+    branch: main
+
+labels:
+  pazufa_scope: generic
+  performance: high
+
+steps:
+  - name: check-tag-exists
+    image: alpine
+    commands:
+      - apk add --no-cache curl
+      - VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+      - echo "Checking if Docker Hub tag '$VERSION' already exists for pazufa/backend..."
+      - |
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          "https://hub.docker.com/v2/repositories/pazufa/backend/tags/$VERSION/")
+        if [ "$STATUS" = "200" ]; then
+          echo "ERROR: Tag $VERSION already exists on Docker Hub. Bump the version before merging." >&2
+          exit 1
+        fi
+      - echo "Tag $VERSION does not exist yet — OK."
+
+  - name: build-amd64-dry-run
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    settings:
+      repo: pazufa/backend
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+      dry_run: true

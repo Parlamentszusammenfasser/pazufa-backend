@@ -23,6 +23,11 @@ with open("variables.toml", "rb") as f:
 version = file["version"]["version"]
 trackfile = file["version"]["trackfile"]
 
+replace(
+    "docker-compose.yml",
+    r"    image: pazufa/backend:\d+\.\d+\.\d+",
+    f"    image: pazufa/backend:{version}",
+)
 replace("Dockerfile", r"LABEL version=\"\d+\.\d+\.\d+\"", f'LABEL version="{version}"')
 replace(
     "Cargo.toml", 'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n', f'version = "{version}"\n'
