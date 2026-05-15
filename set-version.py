@@ -32,6 +32,11 @@ replace("Dockerfile", r"LABEL version=\"\d+\.\d+\.\d+\"", f'LABEL version="{vers
 replace(
     "Cargo.toml", 'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n', f'version = "{version}"\n'
 )
+replace(
+    ".woodpecker/deploy.yml",
+    r"  - &version \"\d+\.\d+\.\d+\"",
+    f'  - &version "{version}"',
+)
 
 
 replace("Dockerfile", r"ENV TRACK_PATH=\"https://.*\"", f'ENV TRACK_PATH="{trackfile}"')
