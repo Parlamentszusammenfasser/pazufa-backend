@@ -42,6 +42,6 @@ replace(
 replace("Dockerfile", r"ENV TRACK_PATH=\"https://.*\"", f'ENV TRACK_PATH="{trackfile}"')
 replace(
     ".woodpecker/testing.yml",
-    r"      TRACK_PATH: https://.*",
-    f"      TRACK_PATH: {trackfile}",
+    r"  - &trackpath \"https://.*",
+    f'  - &trackpath "{trackfile}"',
 )

@@ -403,7 +403,7 @@ mod regression_test {
     }
 
     #[test]
-    fn issue44() {
+    fn issue44_empty_regex() {
         let mut parts = vec![];
 
         let re = Regex::from_parts(parts.clone());
@@ -417,7 +417,7 @@ mod regression_test {
         );
     }
     #[test]
-    fn issue45() {
+    fn issue45_empty_suffix() {
         let pool = vec![Regex::Lit('\u{623cd}')];
         let prefix = pool.into_iter().take(1).collect::<Vec<_>>();
         // This is the interesting part: suffix empty means the reduction is one level up
@@ -452,7 +452,7 @@ mod regression_test {
     }
 
     #[test]
-    fn issue45_2() {
+    fn issue45_empty_prefix() {
         let pool = "abop".chars().map(Regex::Lit);
         let mut prefix = pool.clone().take(0).collect::<Vec<_>>();
         let suffix = pool.rev().take(3).collect::<Vec<_>>();
