@@ -196,9 +196,13 @@ impl Regex {
         match self {
             Self::Star(inner) => Self::Star(inner.simplify().into()),
             Self::Choice(left, right) => {
-                Self::Choice(left.simplify().into(), right.simplify().into())
-                    .canonicalize_choice()
-                    .factor_prefix()
+                if *left == Self::Empty && *right == Self::Empty {
+                    Self::Empty
+                } else {
+                    Self::Choice(left.simplify().into(), right.simplify().into())
+                        .canonicalize_choice()
+                        .factor_prefix()
+                }
             }
             Self::Conc(inner) => Self::Conc(inner.into_iter().map(Self::simplify).collect()),
             other => other,
@@ -305,16 +309,17 @@ impl Regex {
             )]
             while let Some(left) = left.next() {
                 if let Some(right) = right.next() {
-                    if left == right {
+                    if left == right && left != Regex::Empty {
                         prefix.push(left);
                     } else {
                         new_left.push(left);
                         new_right.push(right);
                         break;
                     }
+                } else if left == Regex::Empty {
+                    continue;
                 } else {
                     new_left.push(left);
-                    break;
                 }
             }
             new_left.extend(left);
@@ -375,6 +380,107 @@ impl Regex {
         }
 
         Self::from_parts(absorbed)
+    }
+}
+
+#[cfg(test)]
+mod regression_test {
+    use super::*;
+
+    #[test]
+    fn issue89() {
+        let chr: char = '\u{1075cc}';
+
+        let parts = std::iter::repeat_n(Regex::Star(Regex::Lit(chr).into()), 1)
+            .chain(std::iter::repeat_n(Regex::Empty, 1))
+            .collect::<Vec<_>>();
+
+        let reduced = Regex::reduce_conc(parts);
+
+        let expected = Regex::Star(Regex::Lit(chr).into());
+
+        assert_eq!(reduced, expected);
+    }
+
+    #[test]
+    fn issue44() {
+        let mut parts = vec![];
+
+        let re = Regex::from_parts(parts.clone());
+
+        parts.push(Regex::Choice(Regex::Empty.into(), Regex::Empty.into()));
+        let expected = Regex::from_parts(parts);
+
+        assert_eq!(
+            Regex::Choice(re.clone().into(), re.clone().into(),).factor_prefix(),
+            expected
+        );
+    }
+    #[test]
+    fn issue45() {
+        let pool = vec![Regex::Lit('\u{623cd}')];
+        let prefix = pool.into_iter().take(1).collect::<Vec<_>>();
+        // This is the interesting part: suffix empty means the reduction is one level up
+        let suffix = [];
+        let longer = prefix
+            .iter()
+            .cloned()
+            .chain(suffix.iter().cloned())
+            .collect::<Vec<_>>();
+
+        let left_long = Regex::Choice(
+            Regex::from_parts(longer.clone()).into(),
+            Regex::from_parts(prefix.clone()).into(),
+        );
+        let right_long = Regex::Choice(
+            Regex::from_parts(prefix.clone()).into(),
+            Regex::from_parts(longer).into(),
+        );
+
+        let expected = Regex::from_parts(prefix);
+
+        assert_eq!(
+            left_long.factor_prefix().simplify(),
+            expected,
+            "Failed to correctly factor prefix if right is prefix of left. Other way not tested."
+        );
+        assert_eq!(
+            right_long.factor_prefix().simplify(),
+            expected,
+            "Failed to correctly factor prefix if left is prefix of right. Other way succeeded."
+        );
+    }
+
+    #[test]
+    fn issue45_2() {
+        let pool = "abop".chars().map(Regex::Lit);
+        let mut prefix = pool.clone().take(0).collect::<Vec<_>>();
+        let suffix = pool.rev().take(3).collect::<Vec<_>>();
+        let longer = prefix
+            .iter()
+            .cloned()
+            .chain(suffix.iter().cloned())
+            .collect::<Vec<_>>();
+
+        let left_long = Regex::Choice(
+            Regex::from_parts(longer.clone()).into(),
+            Regex::from_parts(prefix.clone()).into(),
+        );
+
+        // building `expected`
+        if !suffix.is_empty() {
+            prefix.push(Regex::Choice(
+                Regex::Empty.into(),
+                Regex::from_parts(suffix).into(),
+            ));
+        };
+        let expected = Regex::from_parts(prefix);
+
+        assert_eq!(
+            left_long.factor_prefix().simplify(),
+            expected,
+            "Failed to correctly factor prefix if right is prefix of left. Other way not tested."
+        );
     }
 }
 
@@ -649,11 +755,15 @@ mod test {
 
         let reduced = Regex::reduce_conc(parts);
 
-        let expected = Regex::Conc(
-            std::iter::repeat_n(Regex::Lit(chr), min)
-                .chain(std::iter::once(Regex::Star(Regex::Lit(chr).into())))
-                .collect::<Vec<_>>(),
-        );
+        let expected = if min > 0 {
+            Regex::Conc(
+                std::iter::repeat_n(Regex::Lit(chr), min)
+                    .chain(std::iter::once(Regex::Star(Regex::Lit(chr).into())))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            Regex::Star(Regex::Lit(chr).into())
+        };
 
         assert_eq!(reduced, expected);
     }
@@ -676,7 +786,7 @@ mod test {
     }
 
     #[test]
-    fn prefix_factoring_of_subset() {
+    fn prefix_factoring_of_subset_left() {
         let mut prefix = std::iter::from_fn(|| Some(Regex::Lit(rng().random::<char>())))
             .take(rng().random_range(0..32))
             .collect::<Vec<_>>();
@@ -693,15 +803,14 @@ mod test {
             Regex::from_parts(longer.clone()).into(),
             Regex::from_parts(prefix.clone()).into(),
         );
-        let right_long = Regex::Choice(
-            Regex::from_parts(prefix.clone()).into(),
-            Regex::from_parts(longer).into(),
-        );
 
-        prefix.push(Regex::Choice(
-            Regex::Empty.into(),
-            Regex::from_parts(suffix).into(),
-        ));
+        // building `expected`
+        if !suffix.is_empty() {
+            prefix.push(Regex::Choice(
+                Regex::Empty.into(),
+                Regex::from_parts(suffix).into(),
+            ));
+        };
         let expected = Regex::from_parts(prefix);
 
         assert_eq!(
@@ -709,10 +818,39 @@ mod test {
             expected,
             "Failed to correctly factor prefix if right is prefix of left. Other way not tested."
         );
+    }
+    #[test]
+    fn prefix_factoring_of_subset_right() {
+        let mut prefix = std::iter::from_fn(|| Some(Regex::Lit(rng().random::<char>())))
+            .take(rng().random_range(0..32))
+            .collect::<Vec<_>>();
+        let suffix = std::iter::from_fn(|| Some(Regex::Lit(rng().random::<char>())))
+            .take(rng().random_range(0..32))
+            .collect::<Vec<_>>();
+        let longer = prefix
+            .iter()
+            .cloned()
+            .chain(suffix.iter().cloned())
+            .collect::<Vec<_>>();
+
+        let right_long = Regex::Choice(
+            Regex::from_parts(prefix.clone()).into(),
+            Regex::from_parts(longer.clone()).into(),
+        );
+
+        // building `expected`
+        if !suffix.is_empty() {
+            prefix.push(Regex::Choice(
+                Regex::Empty.into(),
+                Regex::from_parts(suffix).into(),
+            ));
+        };
+        let expected = Regex::from_parts(prefix);
+
         assert_eq!(
             right_long.factor_prefix().simplify(),
             expected,
-            "Failed to correctly factor prefix if left is prefix of right. Other way succeeded."
+            "Failed to correctly factor prefix if right is prefix of left. Other way not tested."
         );
     }
 
