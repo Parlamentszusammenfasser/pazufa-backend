@@ -14,13 +14,13 @@ scraper development, please run:
 `docker stop <container>`, the `<container>` you can get via `docker ps`.
 
 It will be available on http://localhost:8080 and the `ltzf-api-key` you
-need is `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6A3671B9`. 
+need is `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9`. 
 Note that this key has full permissions within the backend and can push 
 past some sanity checks.
 If you want to specifically test with a limited scope to catch bugs in 
 your implementation, proceed as follows:
 
-- run `curl https://localhost:8080/api/v2/auth -X POST -d '{"scope": "collector"}' -H "Content-Type: application/json" -H "x-api-key: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6A3671B9"`
+- run `curl https://localhost:8080/api/v2/auth -X POST -d '{"scope": "collector"}' -H "Content-Type: application/json" -H "x-api-key: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9"`
 - take the key your backend generated, and plug it into `ltzf-api-key`
 
 Please also note that this requires port 8080 not to be occupied by any other
@@ -86,7 +86,7 @@ To reset the database to the empty-but-configured state, run:
 4. run `cargo build` to build the project
 5. run `cargo run -- --generate-key` to generate a master key with the
    correct format and set the resulting key as env variable: `PAZUFA_KEYADDER_KEY`
-   Alternatively take the one from above: `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6A3671B9`
+   Alternatively take the one from above: `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9`
 6. `cargo run` to run it.  Easy!
 
 You can configure the backend either via command line arguments or via 

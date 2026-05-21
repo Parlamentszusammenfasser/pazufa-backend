@@ -90,7 +90,7 @@ pub fn check_crc(key: &str) -> bool {
     let subkey = &key[..120];
     let crc =
         crc::Crc::<u32>::new(&crc::CRC_32_CKSUM).checksum(&subkey.bytes().collect::<Vec<_>>());
-    format!("{crc:08x}") == key[120..]
+    format!("{crc:08x}").eq_ignore_ascii_case(&key[120..])
 }
 #[must_use]
 pub fn check_key(key: &str) -> bool {
@@ -107,10 +107,21 @@ pub fn new_key() -> (String, String) {
 }
 #[cfg(test)]
 mod test {
+    use super::check_crc;
     #[test]
     fn test_keygen() {
         let key = super::generate_api_key();
         assert_eq!(key.len(), super::KEY_LENGTH);
         assert!(super::check_crc(&key));
+    }
+
+    #[test]
+    fn crc_check_casing_independent() {
+        let key = "pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9";
+        let key2 = "pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6A3671B9";
+        let key_err = "pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6A3671BB";
+        assert!(check_crc(key));
+        assert!(check_crc(key2));
+        assert!(!check_crc(key_err));
     }
 }

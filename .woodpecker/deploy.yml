@@ -3,7 +3,7 @@ when:
     branch: main
 
 variables:
-  - &version "0.2.10"
+  - &version "0.2.11"
 
 labels:
   pazufa_scope: generic
