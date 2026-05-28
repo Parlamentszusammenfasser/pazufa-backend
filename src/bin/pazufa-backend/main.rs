@@ -180,7 +180,7 @@ fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
             limiter.retain_recent();
         }
     });
-    let rate_limiter = GovernorLayer { config: rl_config };
+    let rate_limiter = GovernorLayer::new(rl_config);
     let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
     let request_size_limit = limit::RequestBodyLimitLayer::new(body_size_limit);
     let cors_layer = cors::CorsLayer::new()
@@ -272,7 +272,7 @@ fn early_exits(config: &Configuration) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     let config = Configuration::parse();
     early_exits(&config);

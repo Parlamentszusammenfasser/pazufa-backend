@@ -6,82 +6,178 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "api_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "api_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "drucksnr",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "drucksnr"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "typ",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "typ"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "titel",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "titel"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "kurztitel",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "kurztitel"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "vorwort",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "vorwort"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "volltext",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "volltext"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "zusammenfassung",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "zusammenfassung"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "zp_lastmod",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "zp_lastmod"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "zp_referenz",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "zp_referenz"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "zp_created",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "zp_created"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "link",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "link"
+          }
+        }
       },
       {
         "ordinal": 13,
         "name": "hash",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "hash"
+          }
+        }
       },
       {
         "ordinal": 14,
         "name": "meinung",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "meinung"
+          }
+        }
       },
       {
         "ordinal": 15,
         "name": "typ_value",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dokumententyp",
+            "name": "value"
+          }
+        }
       }
     ],
     "parameters": {

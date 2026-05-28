@@ -6,72 +6,156 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "api_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "api_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "titel",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "titel"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "zp_start",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "zp_start"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "zp_modifiziert",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "zp_modifiziert"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "link",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "link"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "trojanergefahr",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "trojanergefahr"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "gr_id",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "gr_id"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "gremium_isff",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "gremium_isff"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "typ",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "typ"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "vg_id",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "vg_id"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "exceptional",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "exceptional"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "parlv",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "parlament",
+            "name": "value"
+          }
+        }
       },
       {
         "ordinal": 13,
         "name": "stattyp",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "stationstyp",
+            "name": "value"
+          }
+        }
       }
     ],
     "parameters": {

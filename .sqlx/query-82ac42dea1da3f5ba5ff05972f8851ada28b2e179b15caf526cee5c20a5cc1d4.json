@@ -6,32 +6,68 @@
       {
         "ordinal": 0,
         "name": "scope",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "scope"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "named_scope",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "api_scope",
+            "name": "value"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "expires_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "expires_at"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "rotated_for",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "rotated_for"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "keytag",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "keytag"
+          }
+        }
       }
     ],
     "parameters": {

@@ -1,5 +1,5 @@
 use rand::distr::Alphanumeric;
-use rand::{Rng, rng};
+use rand::{RngExt, rng};
 use sha256::digest;
 
 pub const KEY_LENGTH: usize = 128;

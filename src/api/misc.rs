@@ -3,6 +3,7 @@ use crate::api::{GetSingleResponse, ListingGetResponse};
 use crate::models::params;
 use crate::{LTZFError, LTZFServer, Result, models};
 use sqlx::Row;
+use sqlx::SqlSafeStr;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use tracing::{info, instrument};
@@ -162,10 +163,13 @@ pub async fn enum_get(
         clippy::disallowed_methods,
         reason = "Sqlx does not support dynamic table names for compile time checks."
     )]
-    let mut filtered_ids = sqlx::query(&format!(
-        "SELECT v.id FROM {} v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
-        enum_tables[&path_params.name]
-    ))
+    let mut filtered_ids = sqlx::query(
+        sqlx::AssertSqlSafe(format!(
+            "SELECT v.id FROM {} v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
+            enum_tables[&path_params.name]
+        ))
+        .into_sql_str(),
+    )
     .bind::<_>(contains)
     .map(|r| r.get(0))
     .fetch_all(&mut *tx)
@@ -188,10 +192,13 @@ pub async fn enum_get(
         clippy::disallowed_methods,
         reason = "Sqlx does not support dynamic table names for compile time checks."
     )]
-    let values: Vec<String> = sqlx::query(&format!(
-        "SELECT v.value FROM {} v WHERE v.id = ANY($1::int4[])",
-        enum_tables[&path_params.name]
-    ))
+    let values: Vec<String> = sqlx::query(
+        sqlx::AssertSqlSafe(format!(
+            "SELECT v.value FROM {} v WHERE v.id = ANY($1::int4[])",
+            enum_tables[&path_params.name]
+        ))
+        .into_sql_str(),
+    )
     .bind::<_>(select_few)
     .map(|r| r.get(0))
     .fetch_all(&mut *tx)

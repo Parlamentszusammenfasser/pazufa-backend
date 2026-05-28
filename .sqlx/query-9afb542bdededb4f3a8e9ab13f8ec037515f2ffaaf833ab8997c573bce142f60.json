@@ -6,22 +6,46 @@
       {
         "ordinal": 0,
         "name": "link",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "gremium",
+            "name": "link"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "name",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "gremium",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "wp",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "gremium",
+            "name": "wp"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "parl",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "parlament",
+            "name": "value"
+          }
+        }
       }
     ],
     "parameters": {

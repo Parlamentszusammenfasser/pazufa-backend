@@ -3,6 +3,7 @@ use super::{DeleteResponse, PutResponse};
 use crate::models::params;
 use crate::{LTZFError, LTZFServer, Result, models};
 use sqlx::PgTransaction;
+use sqlx::SqlSafeStr;
 use std::collections::{BTreeMap, BTreeSet};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
@@ -305,7 +306,7 @@ async fn resolve_conflicts(
             reason = "Query is huge and sqlx expects a string literal. For reasons of readability,
                 this is handled in a macro, which cannot be fed into sqlx::query!"
         )]
-        sqlx::query(conflict_res_query)
+        sqlx::query(sqlx::AssertSqlSafe(conflict_res_query).into_sql_str())
             .bind(rep_new)
             .bind(rep_old)
             .execute(&mut **tx)
@@ -324,7 +325,7 @@ async fn resolve_conflicts(
         clippy::disallowed_methods,
         reason = "Query is inherently dynamic and therefore not supported by sqlx compile time checks."
     )]
-    sqlx::query(&query)
+    sqlx::query(sqlx::AssertSqlSafe(query).into_sql_str())
         .bind(rep_new)
         .bind(rep_old)
         .execute(&mut **tx)
@@ -592,11 +593,14 @@ pub async fn enum_put(
         clippy::disallowed_methods,
         reason = "Sqlx does not support dynamic table names for compile time checks."
     )]
-    let present: i64 = sqlx::query_scalar(&format!(
-        "SELECT COUNT(1) as cnt FROM UNNEST($1::text[]) as item 
+    let present: i64 = sqlx::query_scalar(
+        sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(1) as cnt FROM UNNEST($1::text[]) as item 
                     WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
-        enum_tables[&path_params.name]
-    ))
+            enum_tables[&path_params.name]
+        ))
+        .into_sql_str(),
+    )
     .bind(&body.objects[..])
     .fetch_one(&mut *tx)
     .await?;
@@ -617,11 +621,14 @@ pub async fn enum_put(
             clippy::disallowed_methods,
             reason = "Sqlx does not support dynamic table names for compile time checks."
         )]
-        let present: i64 = sqlx::query_scalar(&format!(
-            "SELECT COUNT(1) FROM UNNEST($1::text[]) as item 
+        let present: i64 = sqlx::query_scalar(
+            sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(1) FROM UNNEST($1::text[]) as item 
                 WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
-            enum_tables[&path_params.name]
-        ))
+                enum_tables[&path_params.name]
+            ))
+            .into_sql_str(),
+        )
         .bind(&flattened[..])
         .fetch_one(&mut *tx)
         .await?;
@@ -636,13 +643,16 @@ pub async fn enum_put(
         clippy::disallowed_methods,
         reason = "Sqlx does not support dynamic table names for compile time checks."
     )]
-    let new_ids: Vec<i32> = sqlx::query_scalar(&format!(
-        "INSERT INTO {} (value)
+    let new_ids: Vec<i32> = sqlx::query_scalar(
+        sqlx::AssertSqlSafe(format!(
+            "INSERT INTO {} (value)
             SELECT item FROM UNNEST($1::text[]) as item 
             ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
             RETURNING id",
-        enum_tables[&path_params.name]
-    ))
+            enum_tables[&path_params.name]
+        ))
+        .into_sql_str(),
+    )
     .bind(&body.objects[..])
     .fetch_all(&mut *tx)
     .await?;
@@ -671,12 +681,15 @@ pub async fn enum_put(
             clippy::disallowed_methods,
             reason = "Sqlx does not support dynamic table names for compile time checks."
         )]
-        let value_ids: Vec<i32> = sqlx::query_scalar(&format!(
-            "SELECT x.id  FROM
+        let value_ids: Vec<i32> = sqlx::query_scalar(
+            sqlx::AssertSqlSafe(format!(
+                "SELECT x.id  FROM
                     UNNEST($1::text[]) as item
                     INNER JOIN {} x ON x.value = item",
-            enum_tables[&path_params.name]
-        ))
+                enum_tables[&path_params.name]
+            ))
+            .into_sql_str(),
+        )
         .bind(&vitems[..])
         .fetch_all(&mut *tx)
         .await?;
@@ -760,10 +773,13 @@ pub async fn enum_put(
         clippy::disallowed_methods,
         reason = "Sqlx does not support dynamic table names for compile time checks."
     )]
-    sqlx::query(&format!(
-        "DELETE FROM {} x WHERE x.id = ANY($1::int4[])",
-        enum_tables[&path_params.name]
-    ))
+    sqlx::query(
+        sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {} x WHERE x.id = ANY($1::int4[])",
+            enum_tables[&path_params.name]
+        ))
+        .into_sql_str(),
+    )
     .bind(&rep_old[..])
     .execute(&mut *tx)
     .await?;

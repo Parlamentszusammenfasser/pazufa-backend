@@ -5,10 +5,11 @@
 use crate::utils::tracing::Logging;
 use crate::{Configuration, LTZFServer};
 use sha256::digest;
+use sqlx::SqlSafeStr;
 use std::sync::LazyLock;
 
 static MASTER_URL: LazyLock<String> = LazyLock::new(|| {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     std::env::var("DATABASE_URL").expect("Cannot run test without the DATABASE_URL environment variable set. The use of .env files is supported.")
 });
 
@@ -27,17 +28,26 @@ impl TestSetup {
             .await
             .expect("Failed to get current user.");
         let testuser = format!("test_{user}");
-        sqlx::query(&format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
-            .execute(&create_pool)
-            .await
-            .expect("Failed to drop existing database.");
-        let _ = sqlx::query(&format!("CREATE USER \"{testuser}\" with PASSWORD 'test';"))
-            .execute(&create_pool)
-            .await;
-        sqlx::query(&format!("CREATE DATABASE {dbname} WITH OWNER '{testuser}'"))
-            .execute(&create_pool)
-            .await
-            .expect("Failed to create test database.");
+        sqlx::query(
+            sqlx::AssertSqlSafe(format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
+                .into_sql_str(),
+        )
+        .execute(&create_pool)
+        .await
+        .expect("Failed to drop existing database.");
+        let _ = sqlx::query(
+            sqlx::AssertSqlSafe(format!("CREATE USER \"{testuser}\" with PASSWORD 'test';"))
+                .into_sql_str(),
+        )
+        .execute(&create_pool)
+        .await;
+        sqlx::query(
+            sqlx::AssertSqlSafe(format!("CREATE DATABASE {dbname} WITH OWNER '{testuser}'"))
+                .into_sql_str(),
+        )
+        .execute(&create_pool)
+        .await
+        .expect("Failed to create test database.");
 
         let new_pool = match (MASTER_URL.rfind('/'), MASTER_URL.rfind('@')) {
             (Some(slash_pos), Some(at_pos)) => format!(
@@ -88,10 +98,13 @@ impl TestSetup {
         }
     }
     pub(crate) async fn teardown(&self) {
-        sqlx::query(&format!("DROP DATABASE {} WITH (FORCE);", self.name))
-            .execute(&self.create_pool)
-            .await
-            .expect("Failed to drop test database.");
+        sqlx::query(
+            sqlx::AssertSqlSafe(format!("DROP DATABASE {} WITH (FORCE);", self.name))
+                .into_sql_str(),
+        )
+        .execute(&self.create_pool)
+        .await
+        .expect("Failed to drop test database.");
         let _ = std::fs::remove_file("testing_error.log");
     }
 }
@@ -103,7 +116,7 @@ pub(crate) mod generate {
     pub(crate) mod random {
 
         use crate::models;
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         use sha256::digest;

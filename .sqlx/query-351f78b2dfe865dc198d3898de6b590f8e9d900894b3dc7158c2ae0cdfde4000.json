@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "typ",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "vg_ident_typ",
+            "name": "value"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "ident",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "rel_vorgang_ident",
+            "name": "identifikator"
+          }
+        }
       }
     ],
     "parameters": {

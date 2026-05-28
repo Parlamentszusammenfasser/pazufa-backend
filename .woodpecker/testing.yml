@@ -25,6 +25,11 @@ steps:
       - nice cargo fmt --check
     environment:
       SQLX_OFFLINE: true
+  - name: auditing
+    image: rust:1.95-bookworm
+    commands:
+      - nice cargo install cargo-audit
+      - nice cargo audit 
 
   - name: checking-linting
     image: rust:1.95-bookworm

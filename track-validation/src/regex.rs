@@ -491,7 +491,7 @@ mod regression_test {
 )]
 mod test {
     use super::*;
-    use rand::{Rng, rng, seq::SliceRandom};
+    use rand::{RngExt, rng, seq::SliceRandom};
 
     #[test]
     fn plain_chars() {
