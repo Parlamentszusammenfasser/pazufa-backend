@@ -3,9 +3,13 @@ use std::fmt::{Display, Write};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::{LTZFServer, Result, error::DataValidationError};
-use lettre::{Message, Transport, message::header::ContentType};
+use lettre::{
+    Message, SmtpTransport, Transport,
+    message::{MessageBuilder, header::ContentType},
+};
 use uuid::Uuid;
 
+#[derive(Copy, Clone)]
 #[non_exhaustive]
 enum MailNotificationType {
     EnumAdded,
@@ -18,6 +22,83 @@ struct Mail {
     tp: MailNotificationType,
 }
 
+struct MailQueue {
+    mailer: SmtpTransport,
+    template: MessageBuilder,
+    ambiguous_match: Vec<Mail>,
+    variant_added: Vec<Mail>,
+    sonstig_unwrapped: Vec<Mail>,
+}
+
+impl MailQueue {
+    pub fn new(mailer: SmtpTransport, template: MessageBuilder) -> Self {
+        Self {
+            mailer,
+            template,
+            ambiguous_match: vec![],
+            variant_added: vec![],
+            sonstig_unwrapped: vec![],
+        }
+    }
+
+    pub fn enqueue(&mut self, mail: Mail) {
+        match mail.tp {
+            MailNotificationType::AmbiguousMatch => self.ambiguous_match.push(mail),
+            MailNotificationType::EnumAdded => self.variant_added.push(mail),
+            MailNotificationType::SonstigUnwrapped => self.sonstig_unwrapped.push(mail),
+        }
+    }
+
+    pub fn send(&mut self) {
+        for mail_type in [
+            MailNotificationType::AmbiguousMatch,
+            MailNotificationType::EnumAdded,
+            MailNotificationType::SonstigUnwrapped
+        ] {
+            self.send_type(mail_type);
+        }
+    }
+
+    fn send_type(&mut self, mail_type: MailNotificationType) {
+        let (mails, typ) = match mail_type {
+            MailNotificationType::AmbiguousMatch => (&mut self.ambiguous_match, "ambiguos matches"),
+            MailNotificationType::EnumAdded => (&mut self.variant_added, "new variants"),
+            MailNotificationType::SonstigUnwrapped => (&mut self.sonstig_unwrapped, "sonstig's unwrapped"),
+        };
+        if mails.is_empty() {
+            return;
+        }
+        let len = mails.len();
+        let email = match self.template
+            .clone()
+            .subject(format!("Found {len} {typ} since last check"))
+            .body(
+                mails
+                    .drain(..)
+                    .fold(String::new(), |mut a: String, n: Mail| {
+                        // Discarding error as writeln!(String, ...) can only fail if the formatter of the
+                        // arguments fails, which cannot happen for strings.
+                        let _ = writeln!(a, "=======================\n{}\n\n{}", n.subject, n.body);
+                        a
+                    }),
+            ) {
+            Ok(mail) => mail,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to send Mail about {len} new {typ}: Failed to build message.\n{e}"
+                );
+                return;
+            }
+        };
+        match self.mailer.send(&email) {
+            Ok(_) => tracing::info!("Sent Mail about {len} new {typ}"),
+            Err(e) => tracing::error!(
+                "Failed to send Mail about {len} new {typ}: Error during transport.\n{e}"
+            ),
+        }
+    }
+}
+
 pub struct MailBundle(UnboundedSender<Mail>);
 
 impl MailBundle {
@@ -27,7 +108,7 @@ impl MailBundle {
     /// - missing credentials
     /// - io errors
     pub fn new(config: &crate::Configuration) -> Result<Option<Self>> {
-        let mailer = match config.build_mailer() {
+        let (sender, recipient, mailer) = match config.build_mailer() {
             Ok(cm) => cm,
             Err(e) => {
                 tracing::warn!(
@@ -38,115 +119,30 @@ impl MailBundle {
             }
         };
 
-        let Some(mail_sender) = &config.mail_sender else {
-            tracing::warn!(
-                "Failed to create mailer: Missing Mail Sender.\nMailer will not be available",
-            );
-            return Ok(None);
-        };
-        let sender = lettre::message::Mailbox::new(
-            Some("PaZuFa".to_owned()),
-            mail_sender
-                .parse()
-                .map_err(|e| DataValidationError::InvalidFormat {
-                    field: "mail address".to_string(),
-                    message: format!("{e}"),
-                })?,
-        );
-        let Some(mail_recipient) = &config.mail_recipient else {
-            tracing::warn!(
-                "Failed to create mailer: Missing Mail Recipient.\nMailer will not be available",
-            );
-            return Ok(None);
-        };
-        let recipient: lettre::message::Mailbox =
-            mail_recipient
-                .parse()
-                .map_err(|e| DataValidationError::InvalidFormat {
-                    field: "mail address".to_string(),
-                    message: format!("{e}"),
-                })?;
-
         let (tx, mut rx) = unbounded_channel::<Mail>();
 
         tokio::spawn(async move {
-            let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(20));
-            let sender = sender;
-            let recipient = recipient;
-            let mut ambiguous_match = vec![];
-            let mut variant_added = vec![];
-            let mut sonstig_unwrapped = vec![];
+            let tick_duration = std::time::Duration::from_mins(1);
+            let mut state = MailQueue::new(
+                mailer,
+                Message::builder()
+                    .from(sender)
+                    .to(recipient)
+                    .header(ContentType::TEXT_PLAIN),
+            );
 
-            let send_mail_inner = |mails: &mut Vec<Mail>, typ: &str| {
-                let len = mails.len();
-                let email = match Message::builder()
-                    .from(sender.clone())
-                    .to(recipient.clone())
-                    .subject(format!("Found {len} {typ} since last check"))
-                    .header(ContentType::TEXT_PLAIN)
-                    .body(
-                        mails
-                            .drain(..)
-                            .fold(String::new(), |mut a: String, n: Mail| {
-                                // Discarding error as writeln!(String, ...) can only fail if the formatter of the
-                                // arguments fails, which cannot happen for strings.
-                                let _ = writeln!(
-                                    a,
-                                    "=======================\n{}\n\n{}",
-                                    n.subject, n.body
-                                );
-                                a
-                            }),
-                    ) {
-                    Ok(mail) => mail,
-                    Err(e) => {
-                        tracing::error!(
-                            "Failed to send Mail about {len} new {typ}: Failed to build message.\n{e}"
-                        );
-                        return;
-                    }
-                };
-                match mailer.send(&email) {
-                    Ok(_) => tracing::info!("Sent Mail about {len} new {typ}"),
-                    Err(e) => tracing::error!(
-                        "Failed to send Mail about {len} new {typ}: Error during transport.\n{e}"
-                    ),
-                }
-            };
-
-            let send_mail = |ambiguous_match: &mut Vec<Mail>,
-                             variant_added: &mut Vec<Mail>,
-                             sonstig_unwrapped: &mut Vec<Mail>| {
-                if !ambiguous_match.is_empty() {
-                    send_mail_inner(ambiguous_match, "ambiguos matches");
-                }
-                if !variant_added.is_empty() {
-                    send_mail_inner(variant_added, "new variants");
-                }
-                if !sonstig_unwrapped.is_empty() {
-                    send_mail_inner(sonstig_unwrapped, "sonstig's unwrapped");
-                }
-            };
-
-            loop {
-                tokio::select! {
-                    _ = tick_interval.tick() => {
-                        send_mail(&mut ambiguous_match, &mut variant_added, &mut sonstig_unwrapped);
-                    },
-                    mail = rx.recv() => {
-                        if let Some(mail) = mail {
-                            match mail.tp {
-                                MailNotificationType::AmbiguousMatch =>
-                                    ambiguous_match.push(mail),
-                                MailNotificationType::EnumAdded =>
-                                    variant_added.push(mail),
-                                MailNotificationType::SonstigUnwrapped =>
-                                    sonstig_unwrapped.push(mail),
+            'outer: while let Some(mail) = rx.recv().await {
+                state.enqueue(mail);
+                'inner: loop {
+                    tokio::select! {
+                        mail = rx.recv() => {
+                            if let Some(mail) = mail { state.enqueue(mail) } else {
+                                state.send();
+                                break 'outer;
                             }
-                        } else {
-                            // Either received None because all sender closed, i.e. the Bundle dropped.
-                            send_mail(&mut ambiguous_match, &mut variant_added, &mut sonstig_unwrapped);
-                            break;
+                        }
+                        () = tokio::time::sleep(tick_duration) => {
+                            break 'inner;
                         }
                     }
                 }

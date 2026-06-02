@@ -11,6 +11,9 @@ pub mod utils;
 pub use crate::api::{LTZFArc, LTZFServer};
 pub use crate::error::{LTZFError, Result};
 use clap::Parser;
+use lettre::message::Mailbox;
+use lettre::message::header::ContentType;
+use lettre::{Message, Transport};
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use std::default::Default;
 use std::fmt::Debug;
@@ -99,31 +102,96 @@ pub struct Configuration {
 }
 
 impl Configuration {
-    pub fn build_mailer(&self) -> Result<SmtpTransport> {
-        if let (
+    /// # Errors
+    ///
+    /// This function may fail under three conditions:
+    ///
+    /// 1. The configuration does not contain all relevant information details:
+    ///     1. `mail_server`
+    ///     1. `mail_user`
+    ///     1. `mail_password`
+    ///     1. `mail_sender`
+    ///     1. `mail_recipient`
+    /// 1. The authentication credentials are invalid and rejected by the server.
+    /// 1. The server is unreachable.
+    pub fn build_mailer(&self) -> Result<(Mailbox, Mailbox, SmtpTransport)> {
+        let (
             Some(mail_server),
             Some(mail_user),
             Some(mail_password),
-            Some(_mail_sender),
-            Some(_mail_recipient),
+            Some(mail_sender),
+            Some(mail_recipient),
         ) = (
             &self.mail_server,
             &self.mail_user,
             &self.mail_password,
             &self.mail_sender,
             &self.mail_recipient,
-        ) {
-            let mailer = SmtpTransport::relay(mail_server)?
-                .credentials(Credentials::new(mail_user.clone(), mail_password.clone()))
-                .build();
-            Ok(mailer)
-        } else {
-            Err(LTZFError::Infrastructure {
+        )
+        else {
+            return Err(LTZFError::Infrastructure {
                 source: Box::new(error::InfrastructureError::Configuration {
                     message: "Mail Configuration is incomplete".into(),
                     config: Box::new(self.clone()),
                 }),
-            })
+            });
+        };
+
+        let sender = lettre::message::Mailbox::new(
+            Some("PaZuFa".to_owned()),
+            mail_sender.parse().map_err(|e| LTZFError::Infrastructure {
+                source: Box::new(error::InfrastructureError::Configuration {
+                    message: format!("Parsing mail sender to valid mail address failed: {e}"),
+                    config: Box::new(self.clone()),
+                }),
+            })?,
+        );
+
+        let recipient: Mailbox = mail_recipient
+            .parse()
+            .map_err(|e| LTZFError::Infrastructure {
+                source: Box::new(error::InfrastructureError::Configuration {
+                    message: format!("Parsing mail recipient to valid mailbox failed: {e}"),
+                    config: Box::new(self.clone()),
+                }),
+            })?;
+
+        let mailer = SmtpTransport::relay(mail_server)?
+            .credentials(Credentials::new(mail_user.clone(), mail_password.clone()))
+            .build();
+        if !mailer.test_connection()? {
+            return Err(LTZFError::Infrastructure {
+                source: Box::new(error::InfrastructureError::Configuration {
+                    message:
+                        "Connection to SMTP server failed. Probably invalid authentication data."
+                            .into(),
+                    config: Box::new(self.clone()),
+                }),
+            });
         }
+
+        let Ok(message) = Message::builder()
+            .from(sender.clone())
+            .to(recipient.clone())
+            .subject("Backend started. Testing mail setup.")
+            .header(ContentType::TEXT_PLAIN)
+            .body(
+                "This is a test message, confirming the SMTP transport is configured correctly"
+                    .to_owned(),
+            )
+        else {
+            unreachable!();
+        };
+
+        mailer
+            .send(&message)
+            .map_err(|e| LTZFError::Infrastructure {
+                source: Box::new(error::InfrastructureError::Configuration {
+                    message: format!("Failed to send testmail using configuration: {e}"),
+                    config: Box::new(self.clone()),
+                }),
+            })?;
+
+        Ok((sender, recipient, mailer))
     }
 }
