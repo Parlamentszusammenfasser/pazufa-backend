@@ -34,7 +34,7 @@ COPY ./src ./src
 
 ENV SQLX_OFFLINE=true
 
-RUN nice cargo build --release --locked
+RUN nice cargo build --release --locked --bin pazufabot --bin pazufa-backend
 
 FROM busybox:latest AS runner
 
@@ -59,7 +59,7 @@ RUN mkdir -p /var/log/pazufa-backend && chmod 0766 /var/log/pazufa-backend && ch
 RUN mkdir /app && chmod 0766 /app && chown pazufa-backend /app
 
 COPY --from=builder --chmod=0400 --chown=pazufa-backend:pazufa-backend /app/tracks.toml /app/tracks.toml
-COPY --from=builder --chmod=0100 --chown=pazufa-backend:pazufa-backend /app/target/release/pazufa-backend /app/pazufa-backend
+COPY --from=builder --chmod=0100 --chown=pazufa-backend:pazufa-backend /app/target/release/pazufa-backend /app/target/release/pazufabot /app
 
 WORKDIR /app
 

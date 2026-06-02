@@ -7,18 +7,40 @@ use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
 use pazufa_backend_lib::models::{KeyTag, params};
 use std::sync::Arc;
 use tracing::warn;
+use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+
+#[derive(OpenApi)]
+#[openapi(paths(
+    auth_post,
+    auth_delete,
+    auth_status,
+    auth_rotate,
+    auth_listing,
+    auth_listing_keytag
+))]
+pub(super) struct AuthApi;
+
+pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+    OpenApiRouter::new()
+        .routes(routes!(auth_post, auth_delete))
+        .routes(routes!(auth_status,))
+        .routes(routes!(auth_rotate,))
+        .routes(routes!(auth_listing,))
+        .routes(routes!(auth_listing_keytag,))
+}
 
 #[utoipa::path(
         post,
-        operation_id = "auth_post", 
-        path = "/api/v2/auth",
+        path = "",
         tag = "Authentifizierung",
         security(("apiKey" = ["keyadder"])),
         request_body=CreateApiKey,
         responses(libauth::AuthPostResponse)
     )]
 #[tracing::instrument(skip_all)]
-pub async fn auth_post(
+async fn auth_post(
     Claims(scope, index): Claims,
     State(api_impl): State<Arc<LTZFServer>>,
     Json(body): Json<CreateApiKey>,
@@ -39,15 +61,14 @@ pub async fn auth_post(
 
 #[utoipa::path(
     get,
-    path = "/api/v2/auth/status",
-    operation_id = "auth_status",
+    path = "/status",
     tag = "Authentifizierung",
     description="Get some information about your own key",
     security(("apiKey" = ["collector", "admin", "keyadder"])),
     responses(libauth::AuthStatusResponse)
     )]
 #[tracing::instrument(skip_all)]
-pub async fn auth_status(
+async fn auth_status(
     claims: Claims,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> libauth::AuthStatusResponse {
@@ -79,14 +100,13 @@ pub async fn auth_status(
 /// 1. `some_key.rotated_for=old_key` => `some_key.deleted_by=some_key`, `old_key.rotated_for=new_key`
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/rotate",
+    path = "/rotate",
     tag = "Authentifizierung",
-    operation_id = "auth_rotate",
     description = "Key rotation endpoint for creating a new API key while maintaining the existing one for a transition period of one day.  The old key remains valid until the specified rotation_complete_date, after which it is automatically revoked. Rotates only the own key if it is not invalid.",
     security(("apiKey" = ["collector", "admin", "keyadder"])),
     responses(libauth::AuthRotateResponse)
 )]
-pub async fn auth_rotate(
+async fn auth_rotate(
     claims: Claims,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> libauth::AuthRotateResponse {
@@ -104,9 +124,8 @@ pub async fn auth_rotate(
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     delete,
-    path = "/api/v2/auth",
+    path = "",
     tag = "Authentifizierung",
-    operation_id = "auth_delete",
     security(("apiKey" = ["keyadder"])),
     description = "Key adder interface for removing API keys from the system. Allows administrators and key management services to revoke access by deleting an existing API key.",
     params(
@@ -114,7 +133,7 @@ pub async fn auth_rotate(
     ),
     responses(DeleteResponse)
     )]
-pub async fn auth_delete(
+async fn auth_delete(
     headers: HeaderMap,
     claims: Claims,
     State(api_impl): State<Arc<LTZFServer>>,
@@ -149,15 +168,14 @@ pub async fn auth_delete(
 
 #[utoipa::path(
     get,
-    path = "/api/v2/auth/keys",
+    path = "/keys",
     tag = "Authentifizierung",
-    operation_id = "auth_listing",
     security(("apiKey" = ["keyadder"])),
     params(params::ListingQueryParams),
     responses(AuthListingGetResponse<KeyTag>)
 )]
 #[tracing::instrument(skip_all)]
-pub async fn auth_listing(
+async fn auth_listing(
     claims: Claims,
     Query(query_params): Query<params::ListingQueryParams>,
     State(api_impl): State<Arc<LTZFServer>>,
@@ -178,14 +196,13 @@ pub async fn auth_listing(
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     get,
-    path = "/api/v2/auth/keys/{keytag}",
+    path = "/keys/{keytag}",
     tag = "Authentifizierung",
-    operation_id = "auth_listing_keytag",
     security(("apiKey" = ["keyadder"])),
     params(params::AuthListingKeytagPathParams),
     responses(libauth::AuthListingKeytagResponse)
 )]
-pub async fn auth_listing_keytag(
+async fn auth_listing_keytag(
     claims: Claims,
     Path(path_params): Path<params::AuthListingKeytagPathParams>,
     State(api_impl): State<Arc<LTZFServer>>,
@@ -207,7 +224,7 @@ pub async fn auth_listing_keytag(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use http::HeaderMap;
+    use axum::http::HeaderMap;
     use pazufa_backend_lib::api::auth::{self as libauth, APIScope, Claims};
     use pazufa_backend_lib::models::params::{self};
     use std::sync::Arc;

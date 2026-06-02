@@ -53,7 +53,7 @@ impl MailQueue {
         for mail_type in [
             MailNotificationType::AmbiguousMatch,
             MailNotificationType::EnumAdded,
-            MailNotificationType::SonstigUnwrapped
+            MailNotificationType::SonstigUnwrapped,
         ] {
             self.send_type(mail_type);
         }
@@ -63,13 +63,16 @@ impl MailQueue {
         let (mails, typ) = match mail_type {
             MailNotificationType::AmbiguousMatch => (&mut self.ambiguous_match, "ambiguos matches"),
             MailNotificationType::EnumAdded => (&mut self.variant_added, "new variants"),
-            MailNotificationType::SonstigUnwrapped => (&mut self.sonstig_unwrapped, "sonstig's unwrapped"),
+            MailNotificationType::SonstigUnwrapped => {
+                (&mut self.sonstig_unwrapped, "sonstig's unwrapped")
+            }
         };
         if mails.is_empty() {
             return;
         }
         let len = mails.len();
-        let email = match self.template
+        let email = match self
+            .template
             .clone()
             .subject(format!("Found {len} {typ} since last check"))
             .body(

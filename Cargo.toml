@@ -20,42 +20,41 @@ track-validation = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 
+ammonia = "4.1.2"
+anyhow = "1.0.102"
 axum = "0.8"
-axum-extra = {version = "0.12", features= ["cookie"]}
-axum-macros = "0.5"
+
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env", "cargo"] }
+crc = "3.4.0"
+
 dotenvy = "0.15"
+headers = "0.4.1"
+lettre = "0.11"
+
+rand = "0.10"
+
 serde = { version = "1.0", features = ["alloc", "derive"] }
 serde_json = "1.0"
-tokio = { version = "1.0", features = ["sync", "macros", "rt-multi-thread", "signal"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
-clap = { version = "4.5", features = ["derive", "env", "cargo"] }
-lettre = "0.11"
-snafu = "0.9"
 sha256 = "1.5"
-rand = "0.10"
-futures = "0.3"
+snafu = "0.9"
 sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate", "macros"], default-features = false }
+
+tokio = { version = "1.0", features = ["sync", "macros", "rt-multi-thread", "signal"] }
+toml = { version = "1.0.7", features = ["serde"] }
 tower-http = { version = "0.6", features = ["limit", "cors", "compression-br", "compression-deflate", "compression-gzip", "compression-zstd"] }
 tower_governor = { version = "0.8" }
-async-trait = "0.1"
-split-iter = "0.1.0"
-headers = "0.4.1"
-toml = { version = "1.0.7", features = ["serde"] }
-smallvec = { version = "1.15.1", features = ["union", "const_generics"] }
-anyhow = "1.0.102"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+track-validation = {path = "track-validation"}
+
 utoipa = { version = "5.4.0", features = ["uuid", "url", "axum_extras", "chrono"] }
 utoipa-axum = "0.2.0"
-utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
-track-validation = {path = "track-validation"}
-crc = "3.4.0"
-ammonia = "4.1.2"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "reqwest"] }
+uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
 
 [dev-dependencies]
 tracing-test = "0.2.5"
-http = "1"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }

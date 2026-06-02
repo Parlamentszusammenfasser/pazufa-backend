@@ -21,11 +21,14 @@ use tower_http::{compression::CompressionLayer, cors, limit};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use utoipa_swagger_ui::SwaggerUi;
 
 mod auth;
-mod misc;
+mod autoren;
+mod dokument;
+mod enumeration;
+mod gremien;
+mod kalender;
 mod sitzung;
 #[cfg(test)]
 mod testing;
@@ -37,6 +40,14 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[allow(clippy::needless_for_each, reason = "IT IS IN A FUCKING MACRO")]
 mod openapi {
+    use super::auth;
+    use super::autoren;
+    use super::dokument;
+    use super::enumeration;
+    use super::gremien;
+    use super::kalender;
+    use super::sitzung;
+    use super::vorgang;
     use utoipa::OpenApi;
     use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
     // initialize OpenAPI
@@ -47,6 +58,16 @@ mod openapi {
         version = "0.2.3",
         description = "Beschreibung der API des LTZF Projekts. Alle Listen, die vom Server kommen sind sortiert in\n  1. datum der letzten modifikation, absteigend\n  2. lexikographisch des titels falls nicht vorhanden"
         ),
+    nest(
+        (path = "/api/v2/auth",             api = auth::AuthApi),
+        (path = "/api/v2/autoren",          api = autoren::AutorenApi),
+        (path = "/api/v2/dokument",         api = dokument::DokumentApi),
+        (path = "/api/v2/enumeration",      api = enumeration::EnumApi),
+        (path = "/api/v2/gremien",          api = gremien::GremienApi),
+        (path = "/api/v2/kalender",         api = kalender::KalenderApi),
+        (path = "/api/v2/sitzung",          api = sitzung::SitzungApi),
+        (path = "/api/v2/vorgang",          api = vorgang::VorgangApi),
+    ),
     modifiers(&Security),
     tags((name= "Vorgang",                  description= "Endpoints related to legislative processes"),
          (name= "Sitzung",                  description= "Endpoints related to parliamentary sessions"),
@@ -196,38 +217,15 @@ fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
         .zstd(true);
 
     let (router, api) = OpenApiRouter::with_openapi(openapi::PazufAPI::openapi())
-        .routes(routes!(unauthentifiziert::status))
-        .routes(routes!(unauthentifiziert::ping))
-        .routes(routes!(auth::auth_rotate))
-        .routes(routes!(auth::auth_status))
-        .routes(routes!(auth::auth_post))
-        .routes(routes!(auth::auth_delete))
-        .routes(routes!(auth::auth_listing))
-        .routes(routes!(auth::auth_listing_keytag))
-        .routes(routes!(misc::enum_delete))
-        .routes(routes!(misc::gremien_delete_by_param))
-        .routes(routes!(misc::autoren_delete_by_param))
-        .routes(routes!(vorgang::vorgang_get))
-        .routes(routes!(vorgang::vorgang_put))
-        .routes(routes!(vorgang::vorgang_get_by_id))
-        .routes(routes!(vorgang::vorgang_delete))
-        .routes(routes!(vorgang::vorgang_id_put))
-        .routes(routes!(misc::autoren_get))
-        .routes(routes!(misc::gremien_get))
-        .routes(routes!(misc::dokument_get_by_id))
-        .routes(routes!(misc::enum_get))
-        .routes(routes!(misc::enum_put))
-        .routes(routes!(misc::autoren_put))
-        .routes(routes!(misc::gremien_put))
-        .routes(routes!(misc::dokument_put_id))
-        .routes(routes!(misc::dokument_delete_id))
-        .routes(routes!(sitzung::sid_put))
-        .routes(routes!(sitzung::kal_date_put))
-        .routes(routes!(sitzung::kal_get))
-        .routes(routes!(sitzung::kal_date_get))
-        .routes(routes!(sitzung::s_get))
-        .routes(routes!(sitzung::sitzung_delete))
-        .routes(routes!(sitzung::s_get_by_id))
+        .nest("/api/v2/auth", auth::router())
+        .nest("/api/v2/autoren", autoren::router())
+        .nest("/api/v2/dokument", dokument::router())
+        .nest("/api/v2/enumeration", enumeration::router())
+        .nest("/api/v2/gremien", gremien::router())
+        .nest("/api/v2/kalender", kalender::router())
+        .nest("/api/v2/sitzung", sitzung::router())
+        .nest("/api/v2/vorgang", vorgang::router())
+        .merge(unauthentifiziert::router())
         .split_for_parts();
 
     router

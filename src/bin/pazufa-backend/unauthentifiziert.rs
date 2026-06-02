@@ -8,9 +8,17 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tracing::debug;
 use utoipa::{IntoResponses, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+
+pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+    OpenApiRouter::new()
+        .routes(routes!(ping))
+        .routes(routes!(status))
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct PingQueryParams {
+struct PingQueryParams {
     /// time of ping as milliseconds since 1.1.1970
     #[serde(rename = "t")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -18,7 +26,7 @@ pub struct PingQueryParams {
 }
 #[allow(unused, reason = "It is used to build response schemata for utoipa")]
 #[derive(IntoResponses)]
-pub enum PingResponse {
+enum PingResponse {
     #[response(status = 200)]
     Pong,
     #[response(status = 400)]
@@ -48,12 +56,11 @@ impl IntoResponse for PingResponse {
     get,
     path="/ping",
     tag="Unauthorisiert",
-    operation_id = "ping",
     description = "Just does a round trip with minimal response",
     params(("t" = PingQueryParams, Query, description="Time of ping as milliseconds since epoch", exclusive_minimum=0)),
     responses(PingResponse)
 )]
-pub async fn ping(
+async fn ping(
     Query(query_params): Query<PingQueryParams>,
     State(_api_impl): State<Arc<LTZFServer>>,
 ) -> PingResponse {
@@ -81,7 +88,6 @@ pub async fn ping(
     get,
     path="/status",
     tag="Unauthorisiert",
-    operation_id = "status",
     description = "Retrieves the current status of the API",
     responses(
         (status = 200,
@@ -99,6 +105,6 @@ pub async fn ping(
         )
     )
 )]
-pub async fn status(State(api_impl): State<Arc<LTZFServer>>) -> Response {
+async fn status(State(api_impl): State<Arc<LTZFServer>>) -> Response {
     (StatusCode::OK, api_impl.statistics.output().await).into_response()
 }
