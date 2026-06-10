@@ -11,6 +11,7 @@ pub use enumerations::{Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdent
 pub use misc::{Autor, Gremium, KeyTag, TouchedByInner};
 use serde::{Deserialize, Deserializer, Serialize, de};
 pub use sitzung::{Sitzung, Top};
+use std::str::FromStr;
 use utoipa::ToSchema;
 pub use vorgang::{Lobbyregeintrag, Station, VgIdent, Vorgang};
 
@@ -44,56 +45,72 @@ fn de_full_text_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Strin
         Ok(s)
     }
 }
-
-fn de_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
-    let s = String::deserialize(deserializer)?;
+fn is_valid_string<E: serde::de::Error>(s: &str) -> Result<(), E> {
     if s.is_empty() {
         Err(de::Error::custom(
             "Strings must not be empty. please fill them with TODO markers, with a sensible default or with processed content",
         ))
-    } else if ammonia::is_html(&s) {
+    } else if ammonia::is_html(s) {
         Err(de::Error::custom(
             "String was recognized to contain html structure. 
                 This might indicate cross-site scripting",
         ))
     } else {
-        Ok(s)
+        Ok(())
     }
+}
+fn is_valid_link<E: serde::de::Error>(s: &str) -> Result<(), E> {
+    let Ok(uri) = axum::http::Uri::from_str(s) else {
+        return Err(de::Error::custom("This vector should only contain links"));
+    };
+    if uri.scheme().is_none() || uri.authority().is_none() {
+        return Err(de::Error::custom(
+            "This vector should only contain links with a scheme (like https)",
+        ));
+    }
+    Ok(())
+}
+fn de_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
+    let s = String::deserialize(deserializer)?;
+    is_valid_string(&s)?;
+    Ok(s)
+}
+fn de_link<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
+    let s = String::deserialize(deserializer)?;
+    is_valid_string(&s)?;
+    Ok(s)
 }
 
 fn de_optstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Option<String>, D::Error> {
     let os = <Option<String>>::deserialize(deserializer)?;
     if let Some(ref s) = os {
-        if s.is_empty() {
-            Err(de::Error::custom(
-                "Strings must not be empty. Please pass `null` instead or omit the field",
-            ))
-        } else if ammonia::is_html(s) {
-            Err(de::Error::custom(
-                "String was recognized to contain html structure. 
-                This might indicate cross-site scripting",
-            ))
-        } else {
-            Ok(os)
-        }
+        is_valid_string(s)?;
+        Ok(os)
     } else {
         Ok(os)
     }
+}
+fn de_optlink<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let os = <Option<String>>::deserialize(deserializer)?;
+    if let Some(ref s) = os {
+        is_valid_string(s)?;
+        is_valid_link(s)?;
+    }
+    Ok(os)
 }
 
 fn de_vecstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Vec<String>, D::Error> {
     let v = <Vec<String>>::deserialize(deserializer)?;
     for s in &v {
-        if s.is_empty() {
-            return Err(de::Error::custom(
-                "Strings must not be empty. Please omit them.",
-            ));
-        } else if ammonia::is_html(s) {
-            return Err(de::Error::custom(
-                "String was recognized to contain html structure. 
-                This might indicate cross-site scripting",
-            ));
-        }
+        is_valid_string(s)?;
+    }
+    Ok(v)
+}
+fn de_veclinks<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    let v = <Vec<String>>::deserialize(deserializer)?;
+    for s in &v {
+        is_valid_string(s)?;
+        is_valid_link(s)?;
     }
     Ok(v)
 }

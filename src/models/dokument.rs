@@ -1,7 +1,6 @@
-use super::{de_full_text_string, de_optstring, de_string, de_vecstring};
+use super::{de_full_text_string, de_link, de_optstring, de_string, de_vecstring};
 use crate::models;
 use serde::{Deserialize, Serialize, de, ser};
-use std::str::FromStr;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -73,7 +72,7 @@ pub struct Dokument {
     pub zp_erstellt: Option<chrono::DateTime<chrono::Utc>>,
 
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "de_link")]
     pub link: String,
 
     #[serde(deserialize_with = "de_string")]
@@ -121,11 +120,6 @@ impl<'de> Deserialize<'de> for Dokument {
         D: serde::Deserializer<'de>,
     {
         let unchecked = Dokument::deserialize(deserializer)?;
-        if let Err(e) = axum::http::Uri::from_str(&unchecked.link) {
-            return Err(de::Error::custom(format!(
-                "{e}: dokument.link must be a uri"
-            )));
-        }
         if let Some(meinung) = &unchecked.meinung
             && !(1..=5).contains(meinung)
         {

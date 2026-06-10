@@ -1,4 +1,4 @@
-use super::{de_optstring, de_string};
+use super::{de_optlink, de_optstring, de_string};
 use crate::models;
 use serde::{Deserialize, Serialize, de, ser};
 use std::str::FromStr;
@@ -31,7 +31,7 @@ pub struct Sitzung {
 
     #[schema(format = "uri")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "de_optlink", default)]
     pub link: Option<String>,
 
     pub tops: Vec<models::Top>,

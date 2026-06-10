@@ -1,4 +1,4 @@
-use super::{de_optstring, de_string};
+use super::{de_optlink, de_optstring, de_string};
 use crate::models;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, str::FromStr};
@@ -68,7 +68,7 @@ pub struct Gremium {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "de_optlink", default)]
     pub link: Option<String>,
 
     /// Name des betreffenden Gremiums. 'plenum', 'regierung', 'volk' sind reservierte namen

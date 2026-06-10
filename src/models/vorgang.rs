@@ -1,4 +1,4 @@
-use super::{de_optstring, de_string, de_vecstring};
+use super::{de_link, de_optlink, de_optstring, de_string, de_veclinks, de_vecstring};
 use crate::{api::RoundTimestamp, models};
 use serde::{Deserialize, Serialize, de, ser};
 use std::str::FromStr;
@@ -20,7 +20,7 @@ pub struct Lobbyregeintrag {
 
     /// Direktlink zum Lobbyregistereintrag
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "de_link")]
     pub link: String,
 
     /// Stringarray mit betroffenen Drucksachennummern. Wird in der Datenbank _nicht_ integriert und nur flach aufgelegt
@@ -100,7 +100,7 @@ pub struct Station {
     /// Link zu einer Übersichtsseite zu dieser Station. _NICHT_ zu einem Dokument (PDF)
     #[schema(format = "uri")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "de_optlink", default)]
     pub link: Option<String>,
 
     pub typ: models::Stationstyp,
@@ -121,7 +121,7 @@ pub struct Station {
 
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_vecstring")]
+    #[serde(deserialize_with = "de_veclinks")]
     pub additional_links: Vec<String>,
 
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
@@ -273,7 +273,7 @@ pub struct Vorgang {
 
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_vecstring")]
+    #[serde(deserialize_with = "de_veclinks")]
     pub links: Vec<String>,
 
     /// Liste von Personen oder Organisationen, die den Vorgang initiiert haben. Kann z.B. eine Person, eine Organisation oder ein Gremium sein.
@@ -380,6 +380,8 @@ impl std::fmt::Display for Vorgang {
 
 #[cfg(test)]
 mod serialization_tests {
+    use crate::utils::testing::generate;
+
     #[test]
     fn vorgang_fails_apiiddoks() {
         let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
@@ -398,6 +400,19 @@ mod serialization_tests {
         assert!(
             v.is_err(),
             "Expected to fail due to zp_start being equal for station 4 and 5"
+        );
+    }
+    #[test]
+    fn issue107_links_are_not_strings() {
+        let vorgang = super::Vorgang {
+            links: vec!["string".to_owned()],
+            ..generate::default_vorgang()
+        };
+        let vgstr = serde_json::to_string(&vorgang).expect("it is a static object");
+        let result: Result<super::Vorgang, _> = serde_json::from_str(&vgstr);
+        assert!(
+            matches!(result, Err(ref thing) if thing.to_string().contains("This vector should only contain links")),
+            "{result:?}"
         );
     }
 }
