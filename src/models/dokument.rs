@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
+#[serde(remote = "Self")]
 pub enum DokumentOrApiId {
     Dokument(Box<Dokument>),
     ApiId(Uuid),
@@ -184,6 +185,33 @@ impl std::fmt::Display for Dokument {
         )
     }
 }
+impl<'de> Deserialize<'de> for DokumentOrApiId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Ok(api_id) = Uuid::deserialize(value.clone()) {
+            return Ok(Self::ApiId(api_id));
+        }
+        match Dokument::deserialize(value.clone()) {
+            Ok(d) => Ok(Self::Dokument(Box::new(d))),
+            Err(e) => Err(serde::de::Error::custom(format!(
+                "Unable to parse value either as document or as API ID
+Document Parsing Error:\n{e}"
+            ))),
+        }
+    }
+}
+impl Serialize for DokumentOrApiId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Self::serialize(self, serializer)
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -228,6 +256,38 @@ mod dokument_deserialize {
         "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
         "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
         "autoren": []}"#;
+        let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
+        deser.expect_err("Success");
+    }
+    #[test]
+    fn issue110_nullbyte() {
+        let dokument = r#"{"titel": "kackstift", "typ": "entwurf", 
+        "volltext": "Peter Maffay <peter-maffay@roflkopter.lol> lorem ipsum \u0000 dolor set amet", 
+        "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
+        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
+        "autoren": []}"#;
+        let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
+        deser.expect_err("Success");
+
+        let dokument = r#"{"titel": "kackstift\u0000 karla", "typ": "entwurf", 
+        "volltext": "Petr Maffay <peter-maffay@roflkopter.lol> lorem ipsum dolor set amet", 
+        "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
+        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
+        "autoren": []}"#;
+        let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
+        deser.expect_err("Success");
+
+        // reproducer document
+        let dokument = r#"{
+      "titel": "NULDOC",
+      "typ": "preparl-entwurf",
+      "volltext": "Vorher \u0000 Nachher",
+      "link": "https://example.com",
+      "hash": "9as8duf9a8dsfjij9j",
+      "zp_referenz": "2024-01-01T00:00:00+00:00",
+      "zp_modifiziert": "2024-01-01T00:00:00+00:00",
+      "autoren": []
+    }"#;
         let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
         deser.expect_err("Success");
     }

@@ -34,12 +34,15 @@ pub struct ReplacementPutRequestInner<T: ToSchema> {
     #[serde(rename = "replaced_by")]
     pub replaced_by: u32,
 }
-
 fn de_full_text_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
     let s = String::deserialize(deserializer)?;
     if s.is_empty() {
         Err(de::Error::custom(
             "Strings must not be empty. please fill them with TODO markers, with a sensible default or with processed content",
+        ))
+    } else if s.chars().any(|c| c == '\0') {
+        Err(de::Error::custom(
+            "This text contains '\\0'. Please no shenanigans, law texts are boring",
         ))
     } else {
         Ok(s)
@@ -54,6 +57,11 @@ fn is_valid_string<E: serde::de::Error>(s: &str) -> Result<(), E> {
         Err(de::Error::custom(
             "String was recognized to contain html structure. 
                 This might indicate cross-site scripting",
+        ))
+    } else if s.chars().any(|c| c == '\0') {
+        Err(de::Error::custom(
+            "This text contains '\\0', which is rejected due to being a C-String delimiter. 
+If you believe, that the null char must be in your text, please file an issue",
         ))
     } else {
         Ok(())

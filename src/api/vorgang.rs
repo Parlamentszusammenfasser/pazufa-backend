@@ -626,7 +626,7 @@ pub(crate) mod test_failed_irl_scenarios {
     use std::path::{Path, PathBuf};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
-    use uuid::Uuid;
+    use uuid::{Timestamp, Uuid};
 
     pub async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
         let file = tokio::fs::File::open(path)
@@ -674,4 +674,80 @@ pub(crate) mod test_failed_irl_scenarios {
         "tests/scenarios/500_sqlx_query.jsonl",
         sqlx_ret_500_query_returned_no_rows
     );
+
+    /// This test does not assert anything, and crashes as failure case.
+    /// this reproduces #110, where a null byte in the full text caused issues when retrieving it
+    /// from postgres' VARCHAR.
+    /// This test is meant to test whether other control chars lead to similar crashes
+    #[tokio::test]
+    #[allow(
+        clippy::disallowed_macros,
+        reason = "eprintln is meant here only to give some consumer for errors"
+    )]
+    async fn issue110_crash() {
+        let test_setup = TestSetup::new("scenario_test_issue110_crash").await;
+        let pre1 = r#"{"api_id": ""#;
+        let pre2 = r#"",
+  "titel": "NUL repro",
+  "wahlperiode": 21,
+  "verfassungsaendernd": false,
+  "typ": "gg-einspruch",
+  "ids": [{ "id": "20/99999", "typ": "initdrucks" }],
+  "links": ["https://example.com"],
+  "initiatoren": [{ "person": "Test", "organisation": "Test", "fachgebiet": "Test", "lobbyregister":
+"https://www.lobbyregister.bundestag.de/suche/experte/12345" }],
+  "stationen": [{
+    "api_id": "88211bdc-60b9-4422-8b4f-ba78408aac4f",
+    "titel": "Station",
+    "zp_start": "2024-01-01T00:00:00+00:00",
+    "zp_modifiziert": "2024-01-01T00:00:00+00:00",
+    "gremium": { "parlament": "BT", "wahlperiode": 21, "link": "https://example.com", "name": "Ausschuss" },
+    "link": "https://example.com",
+    "typ": "preparl-regent",
+    "dokumente": [{
+      "api_id": "88211bdc-60b9-4422-8b4f-ba78408aac4f",
+      "titel": "NULDOC",
+      "typ": "preparl-entwurf",
+      "volltext": "Vorher "#;
+        let post = r#" Nachher",
+      "link": "https://example.com",
+      "hash": "afdu9a8sjdf8j193rj98j",
+      "zp_referenz": "2024-01-01T00:00:00+00:00",
+      "zp_modifiziert": "2024-01-01T00:00:00+00:00",
+      "autoren": []
+    }]
+  }]
+}"#;
+        let mut errors = vec![];
+        for i in 0u16..128 {
+            let uuid = Uuid::new_v7(Timestamp::from_gregorian_time(128_379_123_791_283, i));
+            let vgstr = format!("{pre1}{uuid}{pre2}\\u{i:04x}{post}");
+            let vg = serde_json::from_str(&vgstr);
+            let vg: models::Vorgang = match vg {
+                Ok(vg) => vg,
+                Err(e) => {
+                    errors.push((i, e));
+                    continue;
+                }
+            };
+            super::vorgang_put(
+                &test_setup.server,
+                1,
+                &crate::models::params::XScraperId(Uuid::nil()),
+                &vg,
+            )
+            .await
+            .expect("Expected no internal failure after put");
+            let _obj = super::vorgang_get_by_id(
+                &test_setup.server,
+                &models::params::IfModSince {
+                    if_modified_since: None,
+                },
+                &models::params::ApiIdPathParam { api_id: uuid },
+            )
+            .await;
+        }
+        eprintln!("{errors:#?}");
+        test_setup.teardown().await;
+    }
 }
