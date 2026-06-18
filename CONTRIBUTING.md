@@ -34,6 +34,17 @@ And they may receive one of the following, depending on the context:
 
 Depending on the context, we might assign special issue labels.
 
+## Testing
+To test the project, you need a version of the `tracks.toml` file to 
+construct the Server and the track validation successfully.
+
+NOTE: you need the file twice, currently: once in 
+`./pazufa-backend` and once in `./pazufa-backend-lib`
+If errors occur that are most likely narrowed down to that file, please
+fetch the version specified in `./variables.toml`
+Convenience command to fetch one and put it in all the right spots: 
+`curl -o pazufa-backend/tracks.toml https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+0.0.5/docs/specs/tracks.toml && cp pazufa-backend/tracks.toml pazufa-backend-lib`
+
 ## Version Control
 We work with three long-running branches:
 - main: our main release branch. Ideally only stable features land here.

@@ -17,3 +17,6 @@ snafu = "0.9"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
+
+[lints]
+workspace = true

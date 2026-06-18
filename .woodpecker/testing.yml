@@ -19,53 +19,55 @@ services:
 
 steps:
   - name: formatting
-    image: rust:1.95-bookworm
+    image: pazufa/rust-woodpecker:1.0.0 
     commands:
-      - rustup component add rustfmt
       - nice cargo fmt --check
     environment:
       SQLX_OFFLINE: true
-  - name: auditing
-    image: rust:1.95-bookworm
+
+  - name: machete
+    image: pazufa/rust-woodpecker:1.0.0 
     commands:
-      - nice cargo install cargo-audit
-      - nice cargo install cargo-machete
-      - nice cargo audit 
       - nice cargo machete --with-metadata
 
-  - name: checking-linting
-    image: rust:1.95-bookworm
+  - name: audit
+    image: pazufa/rust-woodpecker:1.0.0
+    commands:
+      - nice cargo audit 
+
+  - name: lint-check-lockfile
+    image: pazufa/rust-woodpecker:1.0.0
     commands:
       - nice cargo check --locked || ( echo "This probably indicates that cargo.lock is not up to date" && exit 1 )
-      - rustup component add clippy
       - nice cargo clippy --all-targets
     environment:
       SQLX_OFFLINE: true
 
-  - name: setupdb
-    image: rust:1.95-bookworm
+  - name: database-setup 
+    image: pazufa/rust-woodpecker:1.0.0 
     commands:
-      - curl -o tracks.toml $TP
       # setup database
-      - nice cargo install sqlx-cli  --no-default-features --features postgres,native-tls
       - sqlx database reset -yf
-      - nice cargo sqlx prepare --check -- --all-targets
+      - nice cargo sqlx prepare --check --workspace -- --all-targets
     environment:
-      TP: *trackpath
       DATABASE_URL: *dburl
 
   - name: testing
-    depends_on: [setupdb]
-    image: rust:1.95-bookworm
+    depends_on: [database-setup, lint-check-lockfile, machete, formatting]
+    image: pazufa/rust-woodpecker:1.0.0 
     commands:
       # run the backend once
       - nice cargo build
+      - curl -o tracks.toml $TP
       - echo "cargo run --bin pazufa-backend &
               sleep 5; 
               kill \$!" > run.sh
       - bash run.sh
+      - cp tracks.toml pazufa-backend-lib
+      - cp tracks.toml pazufa-backend
       - nice cargo test
     environment:
+      TP: *trackpath
       PAZUFA_PORT: 20200
       PAZUFA_KEYADDER_KEY: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9
       PAZUFA_TRACKFILE: tracks.toml

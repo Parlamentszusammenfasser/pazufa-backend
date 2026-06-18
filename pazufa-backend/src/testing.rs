@@ -72,7 +72,7 @@ impl TestSetup {
         let pool = sqlx::PgPool::connect(&new_pool)
             .await
             .expect("Failed to establish connection to database server.");
-        sqlx::migrate!()
+        sqlx::migrate!("../migrations")
             .run(&pool)
             .await
             .expect("Failed to run migrations.");

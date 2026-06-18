@@ -1,0 +1,12 @@
+FROM rust:1.95-bookworm AS base
+
+LABEL maintainer="Benedikt Schäfer"
+LABEL description="Image for CI with Rust with some prebuilt toolings"
+LABEL version="1.0.0"
+
+RUN rustup component add clippy
+RUN rustup component add rustfmt
+RUN cargo install sqlx-cli  --no-default-features --features postgres,native-tls --locked
+RUN cargo install cargo-audit  --locked
+RUN cargo install cargo-machete --locked
+

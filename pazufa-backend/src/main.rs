@@ -36,7 +36,7 @@ mod unauthentifiziert;
 mod vorgang;
 
 #[allow(unused, reason = "only has to be instantiated lazily")]
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../migrations");
 
 #[allow(clippy::needless_for_each, reason = "IT IS IN A FUCKING MACRO")]
 mod openapi {
@@ -143,7 +143,7 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
         return Err(anyhow!("Server Connection failed after 10 retries"));
     }
     tracing::debug!("Started Database Pool");
-    sqlx::migrate!().run(&sqlx_db).await?;
+    sqlx::migrate!("../migrations/").run(&sqlx_db).await?;
     tracing::debug!("Executed Migrations");
     Ok(sqlx_db)
 }

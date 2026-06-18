@@ -30,7 +30,19 @@ replace(
 )
 replace("Dockerfile", r"LABEL version=\"\d+\.\d+\.\d+\"", f'LABEL version="{version}"')
 replace(
-    "Cargo.toml", 'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n', f'version = "{version}"\n'
+    "pazufa-backend/Cargo.toml",
+    'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
+    f'version = "{version}"\n',
+)
+replace(
+    "pazufa-backend-lib/Cargo.toml",
+    'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
+    f'version = "{version}"\n',
+)
+replace(
+    "pazufa-backend-lib/Cargo.toml",
+    'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
+    f'version = "{version}"\n',
 )
 replace(
     ".woodpecker/deploy.yml",

@@ -1,0 +1,41 @@
+[package]
+name = "pazufa-backend"
+version = "0.2.12"
+edition = "2024"
+rust-version = "1.95"
+authors = ["Benedikt Schäfer"]
+
+[features]
+default = ["track-validation"]
+track-validation = []
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+
+anyhow = "1.0.102"
+axum = "0.8"
+
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env", "cargo"] }
+
+dotenvy = "0.15"
+
+serde = { version = "1.0", features = ["alloc", "derive"] }
+sha256 = "1.5"
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate", "macros"], default-features = false }
+
+tokio = { version = "1.0", features = ["sync", "macros", "rt-multi-thread", "signal"] }
+tower_governor = { version = "0.8" }
+tower-http = { version = "0.7", features = ["limit", "cors", "compression-br", "compression-deflate", "compression-gzip", "compression-zstd"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+utoipa = { version = "5.4.0", features = ["uuid", "url", "axum_extras", "chrono"] }
+utoipa-axum = "0.2.0"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "reqwest"] }
+uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
+
+pazufa-backend-lib = {path = "../pazufa-backend-lib/"}
+
+[lints]
+workspace = true
