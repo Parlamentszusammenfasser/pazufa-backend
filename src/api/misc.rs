@@ -19,9 +19,9 @@ pub async fn autoren_get(
     let mut tx = server.sqlx_db.begin().await?;
     let result = sqlx::query!(
         "SELECT a.id FROM autor a WHERE
-            ($1::text IS NULL AND person IS NULL OR person LIKE CONCAT('%',$1,'%')) AND
-            organisation LIKE CONCAT('%',$2::text,'%') AND
-            ($3::text IS NULL AND fachgebiet IS NULL OR fachgebiet LIKE CONCAT('%', $3, '%'))",
+            ($1::text IS NULL AND person IS NULL OR person ILIKE CONCAT('%',$1,'%')) AND
+            organisation ILIKE CONCAT('%',$2::text,'%') AND
+            ($3::text IS NULL AND fachgebiet IS NULL OR fachgebiet ILIKE CONCAT('%', $3, '%'))",
         query_params.person,
         query_params.org,
         query_params.fach,
@@ -79,7 +79,7 @@ pub async fn gremien_get(
             INNER JOIN parlament p ON p.id = g.parl 
             WHERE p.value = COALESCE($1, p.value) AND
             g.wp = COALESCE($2, g.wp) AND
-            ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))",
+            ($3::text IS NULL OR g.name ILIKE CONCAT('%',$3,'%'))",
         query_params.p.map(|x| x.to_string()),
         query_params.wp.map(i32::from),
         query_params.gr
@@ -165,7 +165,7 @@ pub async fn enum_get(
     )]
     let mut filtered_ids = sqlx::query(
         sqlx::AssertSqlSafe(format!(
-            "SELECT v.id FROM {} v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
+            "SELECT v.id FROM {} v WHERE v.value ILIKE CONCAT('%',$1::text,'%')",
             enum_tables[&path_params.name]
         ))
         .into_sql_str(),

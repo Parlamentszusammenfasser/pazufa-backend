@@ -459,7 +459,7 @@ pub(crate) async fn sitzung_by_param(
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
 		AND g.wp      = COALESCE($2, g.wp)
-        AND ($5::text IS NULL OR g.name LIKE CONCAT('%', $5, '%'))
+        AND ($5::text IS NULL OR g.name ILIKE CONCAT('%', $5, '%'))
         GROUP BY a.id
         ORDER BY lastmod
         ),
@@ -543,9 +543,9 @@ pub(crate) async fn vorgang_by_parameter(
             AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
             AND ($2::text IS NULL OR $2 = vt.value)
             AND ($3::text IS NULL OR $3 = ext_stat.parl)
-			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
-			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
-			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person ILIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
         GROUP BY vorgang.id
         ORDER BY lastmod
         )

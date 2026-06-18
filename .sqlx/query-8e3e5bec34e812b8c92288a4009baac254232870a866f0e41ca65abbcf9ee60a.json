@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT g.id FROM gremium g\n            INNER JOIN parlament p ON p.id = g.parl \n            WHERE p.value = COALESCE($1, p.value) AND\n            g.wp = COALESCE($2, g.wp) AND\n            ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))",
+  "query": "SELECT g.id FROM gremium g\n            INNER JOIN parlament p ON p.id = g.parl \n            WHERE p.value = COALESCE($1, p.value) AND\n            g.wp = COALESCE($2, g.wp) AND\n            ($3::text IS NULL OR g.name ILIKE CONCAT('%',$3,'%'))",
   "describe": {
     "columns": [
       {
@@ -26,5 +26,5 @@
       false
     ]
   },
-  "hash": "bb023c4d924ba57e12e47fa46a5da903fd1556ad46f79c9692275eb30b163181"
+  "hash": "8e3e5bec34e812b8c92288a4009baac254232870a866f0e41ca65abbcf9ee60a"
 }
