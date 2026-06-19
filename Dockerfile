@@ -34,6 +34,7 @@ COPY ./track-validation ./track-validation
 ENV SQLX_OFFLINE=true
 
 RUN nice cargo build --release --locked 
+RUN strip target/release/pazufa-backend
 
 RUN curl -o ./tracks.toml $TRACK_PATH
 
@@ -44,7 +45,7 @@ LABEL description="Backend for the PaZuFa"
 LABEL version="0.2.12"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-            CMD wget -q --spider "http://localhost:80" || exit 1
+            CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1
 
 
 COPY --from=builder /etc/passwd /etc/passwd
