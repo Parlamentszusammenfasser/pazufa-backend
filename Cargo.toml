@@ -2,6 +2,10 @@
 resolver = "3"
 members = ["pazufa-backend-lib", "pazufa-backend", "track-validation"]
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }

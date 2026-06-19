@@ -1,6 +1,6 @@
 when:
   - event: [pull_request]
-    branch: main
+    branch: [main, staging]
 
 labels:
   pazufa_scope: generic
@@ -11,8 +11,8 @@ steps:
     image: alpine
     commands:
       - apk add --no-cache curl
-      - VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "//;s/"//')
-      - echo "Checking if Docker Hub tag '$VERSION' already exists for pazufa/backend..."
+      - VERSION=$(grep '^version' pazufa-backend/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+      - echo "Checking if Docker Hub tag $VERSION already exists for pazufa/backend..."
       - |
         STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
           "https://hub.docker.com/v2/repositories/pazufa/backend/tags/$VERSION/")
