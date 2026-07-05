@@ -17,7 +17,9 @@ use tokio::net::TcpListener;
 use tower_governor::{
     GovernorLayer, governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor,
 };
-use tower_http::{compression::CompressionLayer, cors, limit};
+use tower_http::{
+    compression::CompressionLayer, cors, decompression::RequestDecompressionLayer, limit,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
@@ -92,7 +94,7 @@ mod openapi {
         API key of the Collector.
         - Expires based on 'expires_at' field when created (if not specified, defaults to 1 year)
         - Subject to rate limiting of 256 requests per second across all endpoints
-        - Subject to body size limit of 16 GB
+        - Subject to body size limit of 512 MB
         - Tokens can be revoked at any time by administrators
 
         API Key Rotation Policy:
@@ -202,7 +204,7 @@ fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
         }
     });
     let rate_limiter = GovernorLayer::new(rl_config);
-    let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
+    let body_size_limit = 1024 * 1024 * 512; // 512 MB
     let request_size_limit = limit::RequestBodyLimitLayer::new(body_size_limit);
     let cors_layer = cors::CorsLayer::new()
         .allow_methods(vec![Method::GET])
@@ -211,6 +213,11 @@ fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
         .allow_headers(tower_http::cors::Any);
 
     let compression_layer = CompressionLayer::new()
+        .br(true)
+        .deflate(true)
+        .gzip(true)
+        .zstd(true);
+    let decompression_layer = RequestDecompressionLayer::new()
         .br(true)
         .deflate(true)
         .gzip(true)
@@ -237,6 +244,7 @@ fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
         .layer(rate_limiter)
         .layer(cors_layer)
         .layer(compression_layer)
+        .layer(decompression_layer)
 }
 
 fn initialize_logging(config: &Configuration) -> Logging {
