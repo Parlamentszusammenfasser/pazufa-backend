@@ -58,7 +58,7 @@ pub struct TouchedByInner {
     pub key: Option<String>,
 }
 
-/// Ein Gremium in dem Entscheidungen getroffen werden können. z.B: Ausschüsse, Plenum, Kabinett, Volk, ...
+/// A body in which decisions can be made: committees, plenary halls, cabinett, peoples, ...
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
 pub struct Gremium {
@@ -71,7 +71,7 @@ pub struct Gremium {
     #[serde(deserialize_with = "de_optlink", default)]
     pub link: Option<String>,
 
-    /// Name des betreffenden Gremiums. 'plenum', 'regierung', 'volk' sind reservierte namen
+    /// Name of the body. 'plenum', 'regierung', 'volk' are reserved
     #[serde(deserialize_with = "de_string")]
     pub name: String,
 }
@@ -120,7 +120,11 @@ impl std::fmt::Display for Gremium {
     }
 }
 
-/// Eine Person oder Organisation, die eine bestimmte Funktion übernommen hat. Z.B: Autor einer Stellungnahme, Experte bei einer Anhörung, Initiator eines Vorgangs.
+/// Person or organisation in some function. e.g.:
+/// - authors of a statement,
+/// - expert at a hearing,
+/// - initiator of a Vorgang
+/// - authoring organisations of documents
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
 pub struct Autor {

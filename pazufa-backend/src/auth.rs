@@ -2,8 +2,11 @@ use crate::LTZFServer;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
-use pazufa_backend_lib::api::auth::{self as libauth, APIScope, Claims, CreateApiKey};
+use pazufa_backend_lib::api::auth::{
+    self as libauth, APIScope, ApiKeyStatus, Claims, CreateApiKey, KeytagListing,
+};
 use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
+use pazufa_backend_lib::models::params::AuthDeleteHeaderParams;
 use pazufa_backend_lib::models::{KeyTag, params};
 use std::sync::Arc;
 use tracing::warn;
@@ -12,14 +15,17 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 #[derive(OpenApi)]
-#[openapi(paths(
-    auth_post,
-    auth_delete,
-    auth_status,
-    auth_rotate,
-    auth_listing,
-    auth_listing_keytag
-))]
+#[openapi(
+    paths(
+        auth_post,
+        auth_delete,
+        auth_status,
+        auth_rotate,
+        auth_listing,
+        auth_listing_keytag
+    ),
+    components(schemas(ApiKeyStatus, KeytagListing, AuthDeleteHeaderParams))
+)]
 pub(super) struct AuthApi;
 
 pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
@@ -112,13 +118,10 @@ async fn auth_rotate(
 ) -> libauth::AuthRotateResponse {
     libauth::auth_rotate(Arc::clone(&api_impl).as_ref(), &claims)
         .await
-        .map_or_else(
-            |why| {
-                warn!("Error rotating: {why}");
-                libauth::AuthRotateResponse::Error(why.to_string())
-            },
-            libauth::AuthRotateResponse::Created,
-        )
+        .unwrap_or_else(|why| {
+            warn!("Error rotating: {why}");
+            libauth::AuthRotateResponse::Error(why.to_string())
+        })
 }
 
 #[tracing::instrument(skip_all)]

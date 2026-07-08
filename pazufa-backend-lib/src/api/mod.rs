@@ -1,5 +1,6 @@
 #[cfg(feature = "track-validation")]
 use crate::db::validate::Tracks;
+use crate::models::{Dokument, FTMDokumentPages};
 use crate::utils::notify;
 use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
@@ -12,7 +13,8 @@ use std::collections::BTreeMap;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use utoipa::openapi::{
-    self, ContentBuilder, HeaderBuilder, ResponseBuilder, ResponsesBuilder, Schema,
+    self, ArrayBuilder, ContentBuilder, HeaderBuilder, OneOfBuilder, ResponseBuilder,
+    ResponsesBuilder, Schema,
 };
 use utoipa::{IntoResponses, PartialSchema, ToSchema};
 
@@ -21,6 +23,131 @@ pub mod misc;
 pub mod misc_auth;
 pub mod sitzung;
 pub mod vorgang;
+
+#[derive(Debug, PartialEq)]
+pub enum PazufaOrFtmListingResponse {
+    Pazufa {
+        body: Vec<models::Dokument>,
+        prp: PaginationResponsePart,
+        path_prefix: &'static str,
+    },
+    Ftm {
+        body: Vec<models::FTMDokumentPages>,
+        prp: PaginationResponsePart,
+        path_prefix: &'static str,
+    },
+    NotMod,
+    NotImpl,
+    NoContent,
+    BadRequest,
+    Error(String),
+}
+impl axum::response::IntoResponse for PazufaOrFtmListingResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::Error(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            Self::NoContent => StatusCode::NO_CONTENT.into_response(),
+            Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
+            Self::NotImpl => StatusCode::NOT_IMPLEMENTED.into_response(),
+            Self::BadRequest => StatusCode::BAD_REQUEST.into_response(),
+            Self::Ftm {
+                body,
+                prp,
+                path_prefix,
+            } => {
+                let mut hm = HeaderMap::new();
+                let Ok(link) = HeaderValue::from_str(&prp.generate_link_header(path_prefix)) else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                hm.insert("link", link);
+                hm.insert("x-per-page", prp.x_per_page.into());
+                hm.insert("x-page", prp.x_page.into());
+                hm.insert("x-total-pages", prp.x_total_pages.into());
+                hm.insert("x-total-count", prp.x_total_count.into());
+
+                (StatusCode::OK, hm, Json(body)).into_response()
+            }
+            Self::Pazufa {
+                body,
+                prp,
+                path_prefix,
+            } => {
+                let mut hm = HeaderMap::new();
+                let Ok(link) = HeaderValue::from_str(&prp.generate_link_header(path_prefix)) else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
+                hm.insert("link", link);
+                hm.insert("x-per-page", prp.x_per_page.into());
+                hm.insert("x-page", prp.x_page.into());
+                hm.insert("x-total-pages", prp.x_total_pages.into());
+                hm.insert("x-total-count", prp.x_total_count.into());
+
+                (StatusCode::OK, hm, Json(body)).into_response()
+            }
+        }
+    }
+}
+impl IntoResponses for PazufaOrFtmListingResponse {
+    fn responses() -> BTreeMap<String, openapi::RefOr<openapi::response::Response>> {
+        ResponsesBuilder::new()
+            .response(
+                "200",
+                ResponseBuilder::new()
+                    .header(
+                        "link",
+                        HeaderBuilder::new()
+                            .schema(models::headers::Link::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-page",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XPage::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-per-page",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XPerPage::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-total-pages",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XTotalPages::schema())
+                            .build(),
+                    )
+                    .header(
+                        "x-total-count",
+                        HeaderBuilder::new()
+                            .schema(models::headers::XTotalPages::schema())
+                            .build(),
+                    )
+                    .description("Ok")
+                    .content(
+                        "application/json",
+                        ContentBuilder::new()
+                            .schema(Some(
+                                OneOfBuilder::new()
+                                    .item(ArrayBuilder::new().items(Dokument::schema()))
+                                    .item(ArrayBuilder::new().items(FTMDokumentPages::schema())),
+                            ))
+                            .build(),
+                    ),
+            )
+            .response(
+                "500",
+                ResponseBuilder::new()
+                    .content("text/plain", ContentBuilder::new().schema(Some("")).build())
+                    .description("Error"),
+            )
+            .response("204", ResponseBuilder::new().description("No Content"))
+            .response("304", ResponseBuilder::new().description("Not Modified"))
+            .response("400", ResponseBuilder::new().description("Bad Request"))
+            .build()
+            .into()
+    }
+}
 
 #[derive(PartialEq, Debug)]
 pub enum AuthListingGetResponse<T: ToSchema + Sized + Sync + Send + Serialize + Debug + PartialEq> {
@@ -291,6 +418,8 @@ pub enum GetSingleResponse<T: ToSchema + Sized + Sync + Send + Serialize + Parti
     NotMod,
     #[response(status = 400)]
     BadReq,
+    #[response(status = 501)]
+    NotImpl,
 }
 impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResponse
     for GetSingleResponse<T>
@@ -301,6 +430,7 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResp
             Self::BadReq => StatusCode::BAD_REQUEST.into_response(),
             Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
             Self::NotFound => StatusCode::NOT_FOUND.into_response(),
+            Self::NotImpl => StatusCode::NOT_IMPLEMENTED.into_response(),
             Self::Success(body) => (StatusCode::OK, Json(*body)).into_response(),
         }
     }

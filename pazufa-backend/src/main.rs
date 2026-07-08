@@ -57,9 +57,21 @@ mod openapi {
     #[openapi(
     info(
         title= "LTZF API",
-        version = "0.2.3",
-        description = "Beschreibung der API des LTZF Projekts. Alle Listen, die vom Server kommen sind sortiert in\n  1. datum der letzten modifikation, absteigend\n  2. lexikographisch des titels falls nicht vorhanden"
-        ),
+        version = "0.2.4-pre1",
+        contact(email="info@pazufa.de"),
+        license(name = "GPLv3", url = "https://www.gnu.org/licenses/gpl-3.0.en.html"),
+        description = "Description of the PaZuFa API. All listings that are returned by the ser
+ver are sorted by:\n  1. last modification date, descending\n  2. if available: alphabeti
+cally by an identifier (e.g. a title)",
+    ),
+    external_docs(
+        description = "Pazufa Wiki",
+        url= "https://wiki.pazufa.de/"
+    ),
+    servers(
+        (url="https://staging.api.pazufa.de/"),
+        (url="https://api.pazufa.de/")
+    ),
     nest(
         (path = "/api/v2/auth",             api = auth::AuthApi),
         (path = "/api/v2/autoren",          api = autoren::AutorenApi),
@@ -272,6 +284,14 @@ fn early_exits(config: &Configuration) {
     }
     if config.generate_key {
         println!("{}", util_auth::generate_api_key());
+        exit(0);
+    }
+    if config.dump_spec {
+        println!(
+            "{}",
+            serde_json::to_string(&openapi::PazufAPI::openapi())
+                .expect("Expected to parse a static struct")
+        );
         exit(0);
     }
 }

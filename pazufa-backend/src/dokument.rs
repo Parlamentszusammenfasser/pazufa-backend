@@ -1,10 +1,11 @@
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use pazufa_backend_lib::LTZFServer;
 use pazufa_backend_lib::api::auth::{APIScope, Claims};
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, PutResponse, misc as libmisc, misc_auth as libmisca,
 };
 use pazufa_backend_lib::models;
+use pazufa_backend_lib::models::enumerations::{DokumentFormat, Mime};
 use pazufa_backend_lib::models::params;
 use std::sync::Arc;
 use tracing::{error, warn};
@@ -13,7 +14,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 #[derive(OpenApi)]
-#[openapi(paths(dokument_delete_id, dokument_put_id, dokument_get_by_id,))]
+#[openapi(
+    paths(dokument_delete_id, dokument_put_id, dokument_get_by_id),
+    components(schemas(DokumentFormat, Mime))
+)]
 pub(super) struct DokumentApi;
 
 pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
@@ -22,6 +26,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
         dokument_put_id,
         dokument_get_by_id
     ))
+    //        .routes(routes!(dokumente_get))
 }
 
 #[tracing::instrument(skip_all)]
@@ -59,7 +64,7 @@ async fn dokument_delete_id(
     description = "Administrative endpoint to upload or update documents for future reference. Creates a new document with the specified ID or replaces an existing one.",
     tags = ["Miscellaneous", "Data-Administration"],
     params(params::ApiIdPathParam),
-    security(("apiKey" = [  "admin", "keyadder"])),
+    security(("apiKey" = ["admin", "keyadder"])),
     request_body = models::Dokument,
     responses(PutResponse)
 )]
@@ -84,19 +89,47 @@ async fn dokument_put_id(
         })
 }
 
+//#[utoipa::path(
+//    get,
+//    path = "/dokumente",
+//    description = "Retrieves a Paginated list of documents from the Backend. Ordered by zp_modifiziert",
+//    tags = ["Miscellaneous", "Unauthorisiert"],
+//    params(
+//        params::IfModSince,
+//        params::ListingQueryParams,
+//        ("format" = models::enumerations::DokumentFormat, Query, description = "Format of return of the documents. Defaults to pazufa")
+//        ),
+//    responses(
+//        PazufaOrFtmListingResponse
+//    )
+//)]
+//async fn dokumente_get(
+//    Query(q_params): Query<models::enumerations::DokumentFormat>,
+//    State(api_impl): State<Arc<LTZFServer>>,
+//) -> PazufaOrFtmListingResponse {
+//    PazufaOrFtmListingResponse::NotImpl
+//}
+
 #[utoipa::path(
     get,
     path = "/{api_id}",
     description =  "Retrieves a specific document by its unique identifier. Returns complete document data including title, full text, metadata, and author information. If called by admin or higher, this returns a list of last scrapers/collectors touching the object",
     tags = ["Miscellaneous", "Unauthorisiert"],
-    params(params::ApiIdPathParam),
+    params(
+        params::ApiIdPathParam,
+        ("format" = models::enumerations::DokumentFormat, Query, description = "Format of return of the documents. Defaults to pazufa")
+        ),
     responses(GetSingleResponse<models::Dokument>)
 )]
 #[tracing::instrument(skip_all)]
 async fn dokument_get_by_id(
     Path(path_params): Path<params::ApiIdPathParam>,
+    Query(q_params): Query<models::enumerations::DokumentFormat>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> GetSingleResponse<models::Dokument> {
+    if q_params == DokumentFormat::FTM {
+        return GetSingleResponse::NotImpl;
+    }
     libmisc::dokument_get_by_id(api_impl.as_ref(), &path_params)
         .await
         .unwrap_or_else(|e| {

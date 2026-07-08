@@ -214,7 +214,13 @@ impl IntoResponse for AuthStatusResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, IntoResponses, PartialEq)]
 pub enum AuthRotateResponse {
     #[response(status = 201, content_type = "application/json")]
-    Created(RotationResponse),
+    Created {
+        /// The newly created API key (shown only once)
+        new_api_key: String,
+
+        /// Confirmed date when the old key will be invalidated
+        rotation_complete_date: chrono::DateTime<chrono::Utc>,
+    },
 
     #[response(status = 401)]
     Unauth,
@@ -224,9 +230,17 @@ pub enum AuthRotateResponse {
 impl IntoResponse for AuthRotateResponse {
     fn into_response(self) -> Response {
         match self {
-            Self::Created(rresp) => {
-                (StatusCode::CREATED, axum::response::Json(rresp)).into_response()
-            }
+            Self::Created {
+                new_api_key,
+                rotation_complete_date,
+            } => (
+                StatusCode::CREATED,
+                axum::response::Json(Self::Created {
+                    new_api_key,
+                    rotation_complete_date,
+                }),
+            )
+                .into_response(),
             Self::Unauth => StatusCode::UNAUTHORIZED.into_response(),
             Self::Error(s) => (StatusCode::INTERNAL_SERVER_ERROR, s).into_response(),
         }
@@ -251,7 +265,7 @@ impl IntoResponse for AuthListingKeytagResponse {
         }
     }
 }
-/// Fragt einen neuen API-Key an. Dieser wird gehasht in der Datenbank gespeichert und wird nur einmalig in Klartext ausgegeben
+/// Requests a new API key. The key will be saved as hash in the database and only produced once in clear text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct CreateApiKey {
     /// Note: inline enums are not fully supported by openapi-generator
@@ -344,25 +358,12 @@ pub async fn auth_status(server: &LTZFServer, claims: &Claims) -> Result<ApiKeyS
     })
 }
 
-///TODO: rename to ``RotationResponseBody``
-/// Response from a successful key rotation request
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct RotationResponse {
-    /// The newly created API key (shown only once)
-    #[serde(rename = "new_api_key")]
-    pub new_api_key: String,
-
-    /// Confirmed date when the old key will be invalidated
-    #[serde(rename = "rotation_complete_date")]
-    pub rotation_complete_date: chrono::DateTime<chrono::Utc>,
-}
-
 /// Function that rotates a key for a fresh one, keeping track so that only ever two keys are active
 /// at any one time.
 /// # Errors
 /// Can fail if the database operations fail
 #[instrument(skip_all, fields(claim=%claims.0))]
-pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<RotationResponse> {
+pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRotateResponse> {
     let mut tx = server.sqlx_db.begin().await?;
     let old_key_entry = sqlx::query!(
         "SELECT scope,value as named_scope, expires_at, created_at, rotated_for, keytag
@@ -435,7 +436,7 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<Rotatio
         "Rotated API Key {} with Scope: {:?}",
         old_key_entry.keytag, old_key_entry.named_scope
     );
-    Ok(RotationResponse {
+    Ok(AuthRotateResponse::Created {
         new_api_key: new_key,
         rotation_complete_date: rot_expiration_date,
     })
@@ -620,6 +621,7 @@ mod auth_test {
         auth_delete, auth_listing, auth_listing_keytag, auth_post, auth_rotate, auth_status,
     };
     use crate::LTZFServer;
+    use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
     use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
     use crate::utils::auth::{KEY_LENGTH, check_crc, keytag_of};
@@ -712,9 +714,12 @@ mod auth_test {
 
         let fresh_key = auth_rotate(server, &Claims(APIScope::KeyAdder, original_key_idx))
             .await
-            .expect("Failed to rotate key.")
-            .new_api_key;
-        let fresh_key_index = fetch_key_index(server, keytag_of(&fresh_key)).await;
+            .expect("Failed to rotate key.");
+        let AuthRotateResponse::Created { new_api_key, .. } = fresh_key else {
+            panic!()
+        };
+
+        let fresh_key_index = fetch_key_index(server, keytag_of(&new_api_key)).await;
         let fresh_key_status = fetch_key_status(server, fresh_key_index).await;
         assert!(!fresh_key_status.is_being_rotated && fresh_key_status.scope == "keyadder");
 
@@ -993,8 +998,11 @@ mod auth_test {
         assert_eq!(original_key_status.scope, "keyadder");
         let key1 = auth_rotate(server, &Claims(APIScope::KeyAdder, 2))
             .await
-            .expect("Failed to rotate key.")
-            .new_api_key;
+            .expect("Failed to rotate key.");
+        let AuthRotateResponse::Created { new_api_key, .. } = key1 else {
+            panic!();
+        };
+        let key1 = new_api_key;
         // state of the db:
         // 1. superadmin key
         // 2. key in rotation (1d)
@@ -1027,8 +1035,11 @@ mod auth_test {
         // rotate the new key and expect the key in rotation to be invalidated
         let key2 = auth_rotate(server, &Claims(APIScope::KeyAdder, 3))
             .await
-            .expect("Failed to rotate key.")
-            .new_api_key;
+            .expect("Failed to rotate key.");
+        let AuthRotateResponse::Created { new_api_key, .. } = key2 else {
+            panic!()
+        };
+        let key2 = new_api_key;
         // state of the db:
         // 1. superadmin key
         // key0: ~~key in rotation (1d)~~ -> invalidated key
@@ -1046,8 +1057,11 @@ mod auth_test {
         // the old key's lifetime does not change from the first rotation (otherwise it could be extended -> secu risk)
         let key3 = auth_rotate(server, &Claims(APIScope::KeyAdder, 3))
             .await
-            .expect("Failed to rotate key.")
-            .new_api_key;
+            .expect("Failed to rotate key.");
+        let AuthRotateResponse::Created { new_api_key, .. } = key3 else {
+            panic!()
+        };
+        let key3 = new_api_key;
         // state of the db:
         // 1. superadmin key
         // key0: ~~key in rotation (1d)~~ -> invalidated

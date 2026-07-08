@@ -8,6 +8,7 @@ labels:
 variables:
   - &trackpath "https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+0.0.5/docs/specs/tracks.toml"
   - &dburl "postgres://pazufa-user:pazufa-pass@database:5432/pazufadb"
+  - &rust_image pazufa/rust-woodpecker:1.1.0
 
 services:
   - name: database
@@ -19,24 +20,24 @@ services:
 
 steps:
   - name: formatting
-    image: pazufa/rust-woodpecker:1.0.0 
+    image: *rust_image
     commands:
       - nice cargo fmt --check
     environment:
       SQLX_OFFLINE: true
 
   - name: machete
-    image: pazufa/rust-woodpecker:1.0.0 
+    image: *rust_image
     commands:
       - nice cargo machete --with-metadata
 
   - name: audit
-    image: pazufa/rust-woodpecker:1.0.0
+    image: *rust_image
     commands:
       - nice cargo audit 
 
   - name: lint-check-lockfile
-    image: pazufa/rust-woodpecker:1.0.0
+    image: *rust_image
     commands:
       - nice cargo check --locked || ( echo "This probably indicates that cargo.lock is not up to date" && exit 1 )
       - nice cargo clippy --all-targets
@@ -44,7 +45,7 @@ steps:
       SQLX_OFFLINE: true
 
   - name: database-setup 
-    image: pazufa/rust-woodpecker:1.0.0 
+    image: *rust_image 
     commands:
       # setup database
       - sqlx database reset -yf
@@ -54,7 +55,7 @@ steps:
 
   - name: testing
     depends_on: [database-setup, lint-check-lockfile, machete, formatting]
-    image: pazufa/rust-woodpecker:1.0.0 
+    image: *rust_image 
     commands:
       # run the backend once
       - nice cargo build
@@ -63,6 +64,7 @@ steps:
               sleep 5; 
               kill \$!" > run.sh
       - bash run.sh
+      - cargo run --bin pazufa-backend -- --dump-spec > openapi.json && /oapigen/openapi-generator-cli validate -i openapi.json
       - cp tracks.toml pazufa-backend-lib
       - cp tracks.toml pazufa-backend
       - nice cargo test
@@ -71,6 +73,7 @@ steps:
       PAZUFA_PORT: 20200
       PAZUFA_KEYADDER_KEY: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9
       PAZUFA_TRACKFILE: tracks.toml
+      OPENAPI_GENERATOR_VERSION: 7.20.0
       DATABASE_URL: *dburl
       SQLX_OFFLINE: false
       RUST_BACKTRACE: 1

@@ -2,7 +2,6 @@ use crate::LTZFServer;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use pazufa_backend_lib::models::headers::{XRateLimitLimit, XRateLimitRemaining, XRateLimitReset};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -54,10 +53,12 @@ impl IntoResponse for PingResponse {
 #[tracing::instrument(skip_all, fields(t=?query_params.t))]
 #[utoipa::path(
     get,
-    path="/ping",
+    path="/api/v2/ping",
     tag="Unauthorisiert",
     description = "Just does a round trip with minimal response",
-    params(("t" = PingQueryParams, Query, description="Time of ping as milliseconds since epoch", exclusive_minimum=0)),
+    params((
+            "t" = Option<f64>, 
+            Query, description="Time of ping as milliseconds since epoch", exclusive_minimum=0)),
     responses(PingResponse)
 )]
 async fn ping(
@@ -86,23 +87,15 @@ async fn ping(
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     get,
-    path="/status",
+    path="/api/v2/status",
     tag="Unauthorisiert",
     description = "Retrieves the current status of the API",
     responses(
         (status = 200,
             description = "API is running",
-            body = String, content_type = "application/json",
-            headers(("x-ratelimit-limit" = XRateLimitLimit),
-                       ("x-ratelimit-remaining" = XRateLimitRemaining),
-                       ("x-ratelimit-reset" = XRateLimitReset))
+            body = serde_json::Value, content_type = "application/json",
         ),
-        (status = 500,
-            description = "API is not running",
-            headers(("x-ratelimit-limit" = XRateLimitLimit),
-                    ("x-ratelimit-remaining" = XRateLimitRemaining),
-                    ("x-ratelimit-reset" = XRateLimitReset))
-        )
+        (status = 500, description = "API is not running")
     )
 )]
 async fn status(State(api_impl): State<Arc<LTZFServer>>) -> Response {

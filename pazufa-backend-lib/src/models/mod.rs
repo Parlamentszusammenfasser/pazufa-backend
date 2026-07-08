@@ -6,7 +6,7 @@ pub mod params;
 pub mod sitzung;
 pub mod vorgang;
 
-pub use dokument::{Dokument, DokumentOrApiId};
+pub use dokument::{Dokument, DokumentOrApiId, FTMDokumentPages};
 pub use enumerations::{Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdentTyp, Vorgangstyp};
 pub use misc::{Autor, Gremium, KeyTag, TouchedByInner};
 use serde::{Deserialize, Deserializer, Serialize, de};
@@ -77,6 +77,17 @@ fn is_valid_link<E: serde::de::Error>(s: &str) -> Result<(), E> {
         ));
     }
     Ok(())
+}
+fn de_hexstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
+    let s = String::deserialize(deserializer)?;
+    is_valid_string(&s)?;
+    if s.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(s)
+    } else {
+        Err(de::Error::custom(
+            "String contains non-hexadecimal digit characters",
+        ))
+    }
 }
 fn de_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
     let s = String::deserialize(deserializer)?;

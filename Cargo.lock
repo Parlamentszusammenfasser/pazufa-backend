@@ -1664,6 +1664,7 @@ dependencies = [
  "dotenvy",
  "pazufa-backend-lib",
  "serde",
+ "serde_json",
  "sha256",
  "sqlx",
  "tokio",

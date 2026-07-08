@@ -36,6 +36,7 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "reqwest"] }
 uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
 
 pazufa-backend-lib = {path = "../pazufa-backend-lib/"}
+serde_json = "1.0.150"
 
 [lints]
 workspace = true

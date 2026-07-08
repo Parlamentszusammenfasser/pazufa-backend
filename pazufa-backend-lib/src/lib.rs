@@ -96,6 +96,12 @@ pub struct Configuration {
 
     #[arg(
         long,
+        help = "Prints the Openapi.json this server is configured to serve"
+    )]
+    pub dump_spec: bool,
+
+    #[arg(
+        long,
         help = "Generates a Key that conforms to pazufa's format, then exits with success"
     )]
     pub generate_key: bool,

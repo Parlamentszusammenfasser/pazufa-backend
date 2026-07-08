@@ -1,86 +1,81 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Typ eines Dokuments. Beschreibt explizit nicht den Kontext, sondern nur den Typ des Inhalts. (z.B. 'tops' kann sowohl für Plenarsitzungen als auch für Ausschusssitzungen relevant sein)
-/// Enumeration of values.
+macro_rules! string_enum_convenience {
+    ($name:ident) => {
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let s = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
+                write!(f, "{}", &s[1..s.len().saturating_sub(1)])
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = String;
+
+            fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+                serde_json::from_str(&format!("\"{s}\"")).map_err(|x| x.to_string())
+            }
+        }
+    };
+}
+
+/// Type of a Document
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Doktyp {
+    /// Pre-lawtext drafts. Mostly Eckpunktepapiere
+    #[serde(rename = "eckpunktepapier")]
+    Eckpunktepapier,
+    /// Preparliamentary draft legislation, to be used for Referentenentwürfe and similar documents
     #[serde(rename = "preparl-entwurf")]
     PreparlEntwurf,
+    /// A law draft within the parliament.
+    /// Used for all kinds of drafts within the parliamentary process
     #[serde(rename = "entwurf")]
     Entwurf,
+    /// Antrag
     #[serde(rename = "antrag")]
     Antrag,
+    /// Questioning
     #[serde(rename = "anfrage")]
     Anfrage,
+    /// Answer to a Questioning
     #[serde(rename = "antwort")]
     Antwort,
+    /// Some memo in the parliament
     #[serde(rename = "mitteilung")]
     Mitteilung,
+    /// Recommendation of a committee
     #[serde(rename = "beschlussempf")]
     Beschlussempf,
+    /// Statement of a person or organisation
     #[serde(rename = "stellungnahme")]
     Stellungnahme,
+    /// Evaluation
     #[serde(rename = "gutachten")]
     Gutachten,
+    /// Protocol of the talking points
     #[serde(rename = "redeprotokoll")]
     Redeprotokoll,
+    /// Agenda Items
     #[serde(rename = "tops")]
     Tops,
+    /// Changing of Agenda Items
     #[serde(rename = "tops-aend")]
     TopsAend,
+    /// Amendments to Agenda Items
     #[serde(rename = "tops-ergz")]
     TopsErgz,
+    /// Finalized and released Law text
+    #[serde(rename = "gesetz")]
+    Gesetz,
+    /// Other. Catch-all
     #[serde(rename = "sonstig")]
     Sonstig,
 }
+string_enum_convenience!(Doktyp);
 
-impl std::fmt::Display for Doktyp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Doktyp::PreparlEntwurf => write!(f, "preparl-entwurf"),
-            Doktyp::Entwurf => write!(f, "entwurf"),
-            Doktyp::Antrag => write!(f, "antrag"),
-            Doktyp::Anfrage => write!(f, "anfrage"),
-            Doktyp::Antwort => write!(f, "antwort"),
-            Doktyp::Mitteilung => write!(f, "mitteilung"),
-            Doktyp::Beschlussempf => write!(f, "beschlussempf"),
-            Doktyp::Stellungnahme => write!(f, "stellungnahme"),
-            Doktyp::Gutachten => write!(f, "gutachten"),
-            Doktyp::Redeprotokoll => write!(f, "redeprotokoll"),
-            Doktyp::Tops => write!(f, "tops"),
-            Doktyp::TopsAend => write!(f, "tops-aend"),
-            Doktyp::TopsErgz => write!(f, "tops-ergz"),
-            Doktyp::Sonstig => write!(f, "sonstig"),
-        }
-    }
-}
-
-impl std::str::FromStr for Doktyp {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "preparl-entwurf" => std::result::Result::Ok(Doktyp::PreparlEntwurf),
-            "entwurf" => std::result::Result::Ok(Doktyp::Entwurf),
-            "antrag" => std::result::Result::Ok(Doktyp::Antrag),
-            "anfrage" => std::result::Result::Ok(Doktyp::Anfrage),
-            "antwort" => std::result::Result::Ok(Doktyp::Antwort),
-            "mitteilung" => std::result::Result::Ok(Doktyp::Mitteilung),
-            "beschlussempf" => std::result::Result::Ok(Doktyp::Beschlussempf),
-            "stellungnahme" => std::result::Result::Ok(Doktyp::Stellungnahme),
-            "gutachten" => std::result::Result::Ok(Doktyp::Gutachten),
-            "redeprotokoll" => std::result::Result::Ok(Doktyp::Redeprotokoll),
-            "tops" => std::result::Result::Ok(Doktyp::Tops),
-            "tops-aend" => std::result::Result::Ok(Doktyp::TopsAend),
-            "tops-ergz" => std::result::Result::Ok(Doktyp::TopsErgz),
-            "sonstig" => std::result::Result::Ok(Doktyp::Sonstig),
-            _ => std::result::Result::Err(format!("Value not valid: {s}")),
-        }
-    }
-}
-
-/// Enumeration der Parlamentsähnlichen Entscheidungscorpi in Deutschland
+/// Enumeration of parliaments or similar bodies in germany
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Parlament {
     #[serde(rename = "BT")]
@@ -125,64 +120,9 @@ pub enum Parlament {
     St,
 }
 
-impl std::fmt::Display for Parlament {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Parlament::Bt => write!(f, "BT"),
-            Parlament::Br => write!(f, "BR"),
-            Parlament::Bv => write!(f, "BV"),
-            Parlament::Ek => write!(f, "EK"),
-            Parlament::Bb => write!(f, "BB"),
-            Parlament::By => write!(f, "BY"),
-            Parlament::Be => write!(f, "BE"),
-            Parlament::Hb => write!(f, "HB"),
-            Parlament::Hh => write!(f, "HH"),
-            Parlament::He => write!(f, "HE"),
-            Parlament::Mv => write!(f, "MV"),
-            Parlament::Ni => write!(f, "NI"),
-            Parlament::Nw => write!(f, "NW"),
-            Parlament::Rp => write!(f, "RP"),
-            Parlament::Sl => write!(f, "SL"),
-            Parlament::Sn => write!(f, "SN"),
-            Parlament::Th => write!(f, "TH"),
-            Parlament::Sh => write!(f, "SH"),
-            Parlament::Bw => write!(f, "BW"),
-            Parlament::St => write!(f, "ST"),
-        }
-    }
-}
+string_enum_convenience!(Parlament);
 
-impl std::str::FromStr for Parlament {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "BT" => std::result::Result::Ok(Parlament::Bt),
-            "BR" => std::result::Result::Ok(Parlament::Br),
-            "BV" => std::result::Result::Ok(Parlament::Bv),
-            "EK" => std::result::Result::Ok(Parlament::Ek),
-            "BB" => std::result::Result::Ok(Parlament::Bb),
-            "BY" => std::result::Result::Ok(Parlament::By),
-            "BE" => std::result::Result::Ok(Parlament::Be),
-            "HB" => std::result::Result::Ok(Parlament::Hb),
-            "HH" => std::result::Result::Ok(Parlament::Hh),
-            "HE" => std::result::Result::Ok(Parlament::He),
-            "MV" => std::result::Result::Ok(Parlament::Mv),
-            "NI" => std::result::Result::Ok(Parlament::Ni),
-            "NW" => std::result::Result::Ok(Parlament::Nw),
-            "RP" => std::result::Result::Ok(Parlament::Rp),
-            "SL" => std::result::Result::Ok(Parlament::Sl),
-            "SN" => std::result::Result::Ok(Parlament::Sn),
-            "TH" => std::result::Result::Ok(Parlament::Th),
-            "SH" => std::result::Result::Ok(Parlament::Sh),
-            "BW" => std::result::Result::Ok(Parlament::Bw),
-            "ST" => std::result::Result::Ok(Parlament::St),
-            _ => std::result::Result::Err(format!("Value not valid: {s}")),
-        }
-    }
-}
-/// Der Gesetzgebungstrack auf dem wir uns befinden. Zum Beispiel: gesetzgebung - Einspruchsgesetz. Legt fest, welche Stationen im Vorgang möglich sind zusammen mit den Parlamenten in den Stationen
-/// Enumeration of values.
+/// The legislative Track we are on. Together with a parliament, this tells us about the possible stations that can occurr within
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Vorgangstyp {
     #[serde(rename = "gg-einspruch")]
@@ -199,39 +139,10 @@ pub enum Vorgangstyp {
     Sonstig,
 }
 
-impl std::fmt::Display for Vorgangstyp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Vorgangstyp::GgEinspruch => write!(f, "gg-einspruch"),
-            Vorgangstyp::GgZustimmung => write!(f, "gg-zustimmung"),
-            Vorgangstyp::GgLandParl => write!(f, "gg-land-parl"),
-            Vorgangstyp::GgLandVolk => write!(f, "gg-land-volk"),
-            Vorgangstyp::BwEinsatz => write!(f, "bw-einsatz"),
-            Vorgangstyp::Sonstig => write!(f, "sonstig"),
-        }
-    }
-}
+string_enum_convenience!(Vorgangstyp);
 
-impl std::str::FromStr for Vorgangstyp {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "gg-einspruch" => std::result::Result::Ok(Vorgangstyp::GgEinspruch),
-            "gg-zustimmung" => std::result::Result::Ok(Vorgangstyp::GgZustimmung),
-            "gg-land-parl" => std::result::Result::Ok(Vorgangstyp::GgLandParl),
-            "gg-land-volk" => std::result::Result::Ok(Vorgangstyp::GgLandVolk),
-            "bw-einsatz" => std::result::Result::Ok(Vorgangstyp::BwEinsatz),
-            "sonstig" => std::result::Result::Ok(Vorgangstyp::Sonstig),
-            _ => std::result::Result::Err(format!("Value not valid: {s}")),
-        }
-    }
-}
-
-/// Stationen, die ein Gesetz o.Ä. Vorgang in verschiedenen Ausformungen durchlaufen kann. Im Prinzip ist die Festlegung auf Prä / Postparlamentarisch arbiträr.
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
+/// Substantive legislative steps, that a Vorgang can pass on its way to a law or rejection or similar endings.
+/// The categorisation pre/postparl is to a degree arbitrary, these are just identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Stationstyp {
     #[serde(rename = "preparl-regent")]
@@ -242,8 +153,12 @@ pub enum Stationstyp {
     PreparlRegbsl,
     #[serde(rename = "preparl-vbegde")]
     PreparlVbegde,
+    #[serde(rename = "preparl-formvs")]
+    PreparlFormvs,
     #[serde(rename = "parl-initiativ")]
     ParlInitiativ,
+    #[serde(rename = "parl-antragsst")]
+    ParlAntragsst,
     #[serde(rename = "parl-ausschber")]
     ParlAusschber,
     #[serde(rename = "parl-vollvlsgn")]
@@ -256,6 +171,10 @@ pub enum Stationstyp {
     ParlZurueckgz,
     #[serde(rename = "parl-ggentwurf")]
     ParlGgentwurf,
+    #[serde(rename = "parl-vermittas")]
+    ParlVermittas,
+    #[serde(rename = "parl-verfgstop")]
+    ParlVerfgstop,
     #[serde(rename = "postparl-vesja")]
     PostparlVesja,
     #[serde(rename = "postparl-vesne")]
@@ -267,57 +186,12 @@ pub enum Stationstyp {
     #[serde(rename = "sonstig")]
     Sonstig,
 }
+string_enum_convenience!(Stationstyp);
 
-impl std::fmt::Display for Stationstyp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Stationstyp::PreparlRegent => write!(f, "preparl-regent"),
-            Stationstyp::PreparlEckpup => write!(f, "preparl-eckpup"),
-            Stationstyp::PreparlRegbsl => write!(f, "preparl-regbsl"),
-            Stationstyp::PreparlVbegde => write!(f, "preparl-vbegde"),
-            Stationstyp::ParlInitiativ => write!(f, "parl-initiativ"),
-            Stationstyp::ParlAusschber => write!(f, "parl-ausschber"),
-            Stationstyp::ParlVollvlsgn => write!(f, "parl-vollvlsgn"),
-            Stationstyp::ParlAkzeptanz => write!(f, "parl-akzeptanz"),
-            Stationstyp::ParlAblehnung => write!(f, "parl-ablehnung"),
-            Stationstyp::ParlZurueckgz => write!(f, "parl-zurueckgz"),
-            Stationstyp::ParlGgentwurf => write!(f, "parl-ggentwurf"),
-            Stationstyp::PostparlVesja => write!(f, "postparl-vesja"),
-            Stationstyp::PostparlVesne => write!(f, "postparl-vesne"),
-            Stationstyp::PostparlGsblt => write!(f, "postparl-gsblt"),
-            Stationstyp::PostparlKraft => write!(f, "postparl-kraft"),
-            Stationstyp::Sonstig => write!(f, "sonstig"),
-        }
-    }
-}
-
-impl std::str::FromStr for Stationstyp {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "preparl-regent" => std::result::Result::Ok(Stationstyp::PreparlRegent),
-            "preparl-eckpup" => std::result::Result::Ok(Stationstyp::PreparlEckpup),
-            "preparl-regbsl" => std::result::Result::Ok(Stationstyp::PreparlRegbsl),
-            "preparl-vbegde" => std::result::Result::Ok(Stationstyp::PreparlVbegde),
-            "parl-initiativ" => std::result::Result::Ok(Stationstyp::ParlInitiativ),
-            "parl-ausschber" => std::result::Result::Ok(Stationstyp::ParlAusschber),
-            "parl-vollvlsgn" => std::result::Result::Ok(Stationstyp::ParlVollvlsgn),
-            "parl-akzeptanz" => std::result::Result::Ok(Stationstyp::ParlAkzeptanz),
-            "parl-ablehnung" => std::result::Result::Ok(Stationstyp::ParlAblehnung),
-            "parl-zurueckgz" => std::result::Result::Ok(Stationstyp::ParlZurueckgz),
-            "parl-ggentwurf" => std::result::Result::Ok(Stationstyp::ParlGgentwurf),
-            "postparl-vesja" => std::result::Result::Ok(Stationstyp::PostparlVesja),
-            "postparl-vesne" => std::result::Result::Ok(Stationstyp::PostparlVesne),
-            "postparl-gsblt" => std::result::Result::Ok(Stationstyp::PostparlGsblt),
-            "postparl-kraft" => std::result::Result::Ok(Stationstyp::PostparlKraft),
-            "sonstig" => std::result::Result::Ok(Stationstyp::Sonstig),
-            _ => std::result::Result::Err(format!("Value not valid: {s}")),
-        }
-    }
-}
-/// Typ von Identifikatoren für einen gesamten Vorgang. Offen für was auch immer ein Parlament benutzt um einen Vorgang zu identifizieren. Aktuell in der Datenbank: initdrucks, vorgnr, api-id, sonstig bitte keine neue Abkürzung für denselben Typ erfinden
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+/// Type of an identifier of a Vorgang. Can contain whatever a parliament uses to identify any complete process.
+/// Currently in existence: vorgnr, api-id, initdrucks, sonstig.
+/// If possible, please do not invent any type like `inids`, and use the ones in existence
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, ToSchema)]
 pub struct VgIdentTyp(pub String);
 impl std::convert::From<String> for VgIdentTyp {
     fn from(x: String) -> Self {
@@ -357,9 +231,7 @@ impl std::ops::DerefMut for VgIdentTyp {
     }
 }
 
-/// Enumeration of values.
-/// Since this enum's variants do not hold data, we can easily define them as `#[repr(C)]`
-/// which helps with FFI.
+/// Enumeration of values
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum EnumerationNames {
     #[serde(rename = "schlagworte")]
@@ -375,31 +247,315 @@ pub enum EnumerationNames {
     #[serde(rename = "dokumententypen")]
     Dokumententypen,
 }
-impl std::fmt::Display for EnumerationNames {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            EnumerationNames::Schlagworte => write!(f, "schlagworte"),
-            EnumerationNames::Stationstypen => write!(f, "stationstypen"),
-            EnumerationNames::Vorgangstypen => write!(f, "vorgangstypen"),
-            EnumerationNames::Parlamente => write!(f, "parlamente"),
-            EnumerationNames::Vgidtypen => write!(f, "vgidtypen"),
-            EnumerationNames::Dokumententypen => write!(f, "dokumententypen"),
-        }
-    }
+
+string_enum_convenience!(EnumerationNames);
+
+/// Ressort, which the Vorgang is associated with. Usually the name of a ministry
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+pub enum Ressort {
+    #[serde(rename = "Arbeit")]
+    Arbeit,
+    #[serde(rename = "Bildung")]
+    Bildung,
+    #[serde(rename = "Digitalisierung")]
+    Digitalisierung,
+    #[serde(rename = "Energie")]
+    Energie,
+    #[serde(rename = "Ernährung")]
+    Ernährung,
+    #[serde(rename = "Europa")]
+    Europa,
+    #[serde(rename = "Familie/Senioren")]
+    FamilieSenioren,
+    #[serde(rename = "Finanzen")]
+    Finanzen,
+    #[serde(rename = "Forschung")]
+    Forschung,
+    #[serde(rename = "Forsten")]
+    Forsten,
+    #[serde(rename = "Frauen/Gleichstellung")]
+    FrauenGleichstellung,
+    #[serde(rename = "Gesundheit/Pflege/Prävention")]
+    GesundheitPflegePrävention,
+    #[serde(rename = "Heimat")]
+    Heimat,
+    #[serde(rename = "Inneres")]
+    Inneres,
+    #[serde(rename = "Integration/Migration")]
+    IntegrationMigration,
+    #[serde(rename = "Jugend")]
+    Jugend,
+    #[serde(rename = "Justiz")]
+    Justiz,
+    #[serde(rename = "Kinder")]
+    Kinder,
+    #[serde(rename = "Klimaschutz")]
+    Klimaschutz,
+    #[serde(rename = "Kommunales")]
+    Kommunales,
+    #[serde(rename = "Kunst/Kultur")]
+    KunstKultur,
+    #[serde(rename = "Landes-/Stadtentwicklung")]
+    LandesStadtentwicklung,
+    #[serde(rename = "Ländlicher Raum")]
+    LändlicherRaum,
+    #[serde(rename = "Landwirtschaft")]
+    Landwirtschaft,
+    #[serde(rename = "Soziales")]
+    Soziales,
+    #[serde(rename = "Sport")]
+    Sport,
+    #[serde(rename = "Tourismus")]
+    Tourismus,
+    #[serde(rename = "Umwelt")]
+    Umwelt,
+    #[serde(rename = "Verbraucherschutz")]
+    Verbraucherschutz,
+    #[serde(rename = "Verkehr/Infrastruktur")]
+    VerkehrInfrastruktur,
+    #[serde(rename = "Wirtschaft")]
+    Wirtschaft,
+    #[serde(rename = "Wissenschaft")]
+    Wissenschaft,
+    #[serde(rename = "Wohnen/Bau")]
+    WohnenBau,
+}
+string_enum_convenience!(Ressort);
+
+/// Sachgebiet / Themenbereich inspired by the  Parlamentsspiegel.
+/// Within the Parlamentsspiegel search this corresponds to the parameter `fqVSys`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[repr(u16)]
+pub enum Sachgebiet {
+    StaatundPolitik = 1000,
+    Staatsaufbau = 1010,
+    Menschenrechte = 1030,
+    Nation = 1050,
+    Ideologien = 1060,
+    PolitischeKräfte = 1070,
+    Wahlen = 1080,
+    Parlament = 1100,
+    Abgeordnete = 1110,
+    ÖffentlicheVerwaltung = 1200,
+    Bundesregierung = 1210,
+    Landesregierung = 1220,
+    KommunaleAngelegenheiten = 1230,
+    ÖffentlicherDienst = 1240,
+    InnereSicherheit = 1300,
+    Polizei = 1310,
+    VerfassungsschutzSpionage = 1320,
+    Ordnungsrecht = 1330,
+    KatastrophenundZivilschutz = 1340,
+    Rettungswesen = 1350,
+    Verteidigung = 1400,
+    Wehrdienst = 1410,
+    Rüstung = 1420,
+    AbrüstungKonversion = 1430,
+    Außenpolitik = 1500,
+    InternationaleBeziehungen = 1510,
+    InternationaleOrganisationen = 1520,
+    Entwicklungszusammenarbeit = 1530,
+    Europapolitik = 1540,
+    EuropäischeUnion = 1600,
+    OrganederEU = 1610,
+    ProgrammederEU = 1620,
+    Wirtschaft = 2000,
+    GewerblicheWirtschaftIndustrie = 2010,
+    Handel = 2020,
+    Dienstleistungen = 2030,
+    Versicherungen = 2040,
+    MittelständischeWirtschaft = 2050,
+    Außenwirtschaft = 2060,
+    Verbraucher = 2070,
+    PreisundKartellrecht = 2080,
+    Gewerbeaufsicht = 2090,
+    Energie = 2100,
+    FossileEnergien = 2110,
+    Kernenergie = 2120,
+    ErneuerbareEnergien = 2130,
+    BergbauBodenschätze = 2200,
+    Technologie = 2300,
+    ArbeitundBeschäftigung = 2400,
+    Arbeitsmarkt = 2410,
+    Berufsausbildung = 2420,
+    Arbeitsentgelt = 2430,
+    Mitbestimmung = 2440,
+    Arbeitsbedingungen = 2450,
+    Standardisierung = 2500,
+    Normung = 2510,
+    EichundMesswesen = 2520,
+    VermessungsundKatasterwesen = 2530,
+    Verkehr = 2600,
+    ÖffentlicherPersonenverkehr = 2610,
+    Güterverkehr = 2620,
+    Straßenverkehr = 2630,
+    Schienenverkehr = 2640,
+    Luftverkehr = 2650,
+    Schifffahrt = 2660,
+    Raumfahrt = 2700,
+    Bauwesen = 2800,
+    Verkehrswegebau = 2810,
+    Städtebau = 2820,
+    Wohnungswesen = 2830,
+    Wasserbau = 2840,
+    Recht = 3100,
+    Strafrecht = 3110,
+    Zivilrecht = 3120,
+    ÖffentlichesRecht = 3130,
+    Urheberschutz = 3140,
+    Verfassungsgerichtsbarkeit = 3200,
+    Justiz = 3300,
+    GerichteundStaatsanwaltschaften = 3310,
+    Justizverwaltung = 3320,
+    Justizvollzug = 3330,
+    JuristischeBerufe = 3400,
+    Bildung = 4100,
+    Schulen = 4200,
+    Lehrer = 4210,
+    AllgemeinbildendeSchulen = 4220,
+    BerufsbildendeSchulen = 4230,
+    Sonderpädagogik = 4240,
+    Privatschulen = 4250,
+    FrühkindlicheBildung = 4260,
+    Hochschulwesen = 4300,
+    Universitäten = 4310,
+    KunstundMusikhochschulen = 4320,
+    HochschulenfürangewandteWissenschaften = 4330,
+    WissenschaftForschung = 4400,
+    Erwachsenenbildung = 4500,
+    GesellschaftBevölkerung = 5000,
+    Lebensgemeinschaften = 5010,
+    SexuelleIdentität = 5020,
+    KinderJugendliche = 5030,
+    FrauenMänner = 5040,
+    MenschenmitBehinderungen = 5050,
+    AlteMenschen = 5060,
+    AusländerMigranten = 5070,
+    SonstigegesellschaftlicheGruppen = 5080,
+    Soziales = 5100,
+    Sozialversicherung = 5110,
+    Sozialleistungen = 5120,
+    SozialeEinrichtungen = 5130,
+    Versorgung = 5140,
+    Pflege = 5150,
+    Gesundheit = 5200,
+    Gesundheitsschutz = 5210,
+    Gesundheitseinrichtungen = 5220,
+    MedizinischeBerufe = 5230,
+    Arzneimittel = 5240,
+    Rauschmittel = 5250,
+    Psychiatrie = 5260,
+    Tod = 5270,
+    Umwelt = 6100,
+    Natur = 6110,
+    TierTierschutzTierhaltung = 6120,
+    Boden = 6130,
+    Wasser = 6140,
+    Klima = 6150,
+    SchadstoffeImmissionenundEmissionen = 6160,
+    Abfall = 6200,
+    Abwasser = 6300,
+    Raumordnung = 6400,
+    LändlicherRaum = 6410,
+    Landwirtschaft = 6500,
+    LandwirtschaftlicheBetriebe = 6510,
+    Agrarmarkt = 6520,
+    LandwirtschaftlicheBerufe = 6530,
+    WaldForsten = 6600,
+    JagdFischerei = 6700,
+    Ernährung = 6800,
+    Tierkrankheiten = 6900,
+    KunstKultur = 7100,
+    DenkmalschutzDenkmalpflege = 7200,
+    Religionsgemeinschaften = 7300,
+    Freizeit = 7400,
+    MessenAusstellungen = 7500,
+    Sport = 7600,
+    InformationsgesellschaftMedien = 7700,
+    Printmedien = 7710,
+    RundfunkFernsehen = 7720,
+    FilmVideo = 7730,
+    InformationsundKommunikationstechnologien = 7740,
+    Datenschutz = 7750,
+    Statistik = 7800,
+    Abgaben = 8100,
+    Finanzverwaltung = 8200,
+    ÖffentlicherHaushalt = 8300,
+    ÖffentlicheSchulden = 8310,
+    ÖffentlichesVermögen = 8320,
+    Haushaltskontrolle = 8330,
+    Finanzausgleich = 8340,
+    ÖffentlicheVergabe = 8350,
+    Finanzmarkt = 8400,
+    Vermögen = 8600,
+    Glücksspiel = 8700,
+    Stiftung = 8800,
+    Unbekannt = 9900,
+    OhneSystematik = 9999,
 }
 
-impl std::str::FromStr for EnumerationNames {
-    type Err = String;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+pub enum Mime {
+    #[serde(rename = "application/json")]
+    ApplicationJson,
+    #[serde(rename = "application/pdf")]
+    ApplicationPdf,
+    #[serde(rename = "application/octet-stream")]
+    ApplicationOctetStream,
+    #[serde(rename = "text/plain")]
+    TextPlain,
+    #[serde(rename = "text/html")]
+    TextHtml,
+}
+string_enum_convenience!(Mime);
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "schlagworte" => std::result::Result::Ok(EnumerationNames::Schlagworte),
-            "stationstypen" => std::result::Result::Ok(EnumerationNames::Stationstypen),
-            "vorgangstypen" => std::result::Result::Ok(EnumerationNames::Vorgangstypen),
-            "parlamente" => std::result::Result::Ok(EnumerationNames::Parlamente),
-            "vgidtypen" => std::result::Result::Ok(EnumerationNames::Vgidtypen),
-            "dokumententypen" => std::result::Result::Ok(EnumerationNames::Dokumententypen),
-            _ => std::result::Result::Err(format!("Value not valid: {s}")),
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema, Default,
+)]
+pub enum HashStrategy {
+    #[default]
+    #[serde(rename = "sha256+bytes")]
+    Sha256Bytes,
+    #[serde(rename = "sha256+text")]
+    Sha256Text,
+    #[serde(rename = "sha1+bytes")]
+    Sha1Bytes,
+}
+string_enum_convenience!(HashStrategy);
+
+/// Format of return of the documents. Defaults to pazufa
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, Default)]
+pub enum DokumentFormat {
+    #[serde(rename = "ftm")]
+    FTM,
+    #[serde(rename = "pazufa")]
+    #[default]
+    Pazufa,
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+    use std::string::ToString;
+
+    #[test]
+    fn string_enum_convenience_tostring() {
+        use super::Stationstyp::*;
+        let thing = [PreparlEckpup, ParlAntragsst];
+        let answr = ["preparl-eckpup", "parl-antragsst"];
+
+        for (t, a) in thing.iter().zip(answr) {
+            assert_eq!(t.to_string(), a);
+        }
+    }
+    #[test]
+    fn string_enum_convenience_from_str() {
+        use super::Stationstyp::*;
+        let thing = [PreparlEckpup, ParlAntragsst];
+        let answr = ["preparl-eckpup", "parl-antragsst"];
+
+        for (t, a) in thing.iter().zip(answr) {
+            assert_eq!(t, &super::Stationstyp::from_str(a).expect(""));
         }
     }
 }

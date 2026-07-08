@@ -4,8 +4,8 @@ use pazufa_backend_lib::api::auth::{APIScope, Claims};
 use pazufa_backend_lib::api::{
     DeleteResponse, ListingGetResponse, PutResponse, misc as libmisc, misc_auth as libmisca,
 };
-use pazufa_backend_lib::models;
 use pazufa_backend_lib::models::params;
+use pazufa_backend_lib::models::{self, EnumerationNames};
 use std::sync::Arc;
 use tracing::{error, warn};
 use utoipa::OpenApi;
@@ -13,7 +13,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 #[derive(OpenApi)]
-#[openapi(paths(enum_delete, enum_put, enum_get,))]
+#[openapi(
+    paths(enum_delete, enum_put, enum_get,),
+    components(schemas(EnumerationNames))
+)]
 pub(super) struct EnumApi;
 
 pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
@@ -89,7 +92,10 @@ async fn enum_put(
     path = "/{name}",
     description = "Retrieves values from a specified enumeration type. Returns a list of valid values that can be used in other API operations, optionally filtered by a substring.",
     tags = ["Miscellaneous", "Unauthorisiert"],
-    params(params::EnumGetQueryParams),
+    params(
+        params::EnumGetQueryParams,
+        params::EnumPathParams
+        ),
     responses(ListingGetResponse<String>)
 )]
 async fn enum_get(
