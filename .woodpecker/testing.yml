@@ -6,7 +6,7 @@ labels:
   performance: high
 
 variables:
-  - &trackpath "https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+v0.0.7/docs/specs/tracks.toml"
+  - &trackpath "https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.4+v0.0.7/tracks.toml"
   - &dburl "postgres://pazufa-user:pazufa-pass@database:5432/pazufadb"
   - &rust_image pazufa/rust-woodpecker:1.1.0
 

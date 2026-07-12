@@ -378,3 +378,10 @@ pub struct VorgangGetQueryParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u32>,
 }
+
+/// Format of return of the documents. Defaults to pazufa
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
+#[into_params(parameter_in = Query)]
+pub struct DocumentFormatParams {
+    pub format: models::enumerations::DokumentFormat,
+}

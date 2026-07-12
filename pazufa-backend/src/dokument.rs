@@ -97,7 +97,7 @@ async fn dokument_put_id(
 //    params(
 //        params::IfModSince,
 //        params::ListingQueryParams,
-//        ("format" = models::enumerations::DokumentFormat, Query, description = "Format of return of the documents. Defaults to pazufa")
+//        params::DocumentFormatParams,
 //        ),
 //    responses(
 //        PazufaOrFtmListingResponse
@@ -117,17 +117,17 @@ async fn dokument_put_id(
     tags = ["Miscellaneous", "Unauthorisiert"],
     params(
         params::ApiIdPathParam,
-        ("format" = models::enumerations::DokumentFormat, Query, description = "Format of return of the documents. Defaults to pazufa")
+        params::DocumentFormatParams,
         ),
     responses(GetSingleResponse<models::Dokument>)
 )]
 #[tracing::instrument(skip_all)]
 async fn dokument_get_by_id(
     Path(path_params): Path<params::ApiIdPathParam>,
-    Query(q_params): Query<models::enumerations::DokumentFormat>,
+    Query(q_params): Query<params::DocumentFormatParams>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> GetSingleResponse<models::Dokument> {
-    if q_params == DokumentFormat::FTM {
+    if q_params.format == DokumentFormat::FTM {
         return GetSingleResponse::NotImpl;
     }
     libmisc::dokument_get_by_id(api_impl.as_ref(), &path_params)
@@ -141,9 +141,45 @@ async fn dokument_get_by_id(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
+    use axum::extract::Query;
+    use axum::http::Uri;
     use pazufa_backend_lib::api::auth::APIScope;
+    use pazufa_backend_lib::models::enumerations::DokumentFormat;
     use pazufa_backend_lib::models::{self, params};
     use std::sync::Arc;
+
+    #[test]
+    fn test_dokument_format_params_query_deserialization() {
+        let uri: Uri = "http://example.com/dokument/id?format=ftm"
+            .parse()
+            .expect("static string");
+        let result =
+            Query::<params::DocumentFormatParams>::try_from_uri(&uri).expect("static string");
+        assert_eq!(result.0.format, DokumentFormat::FTM);
+
+        let uri: Uri = "http://example.com/dokument/id?format=pazufa"
+            .parse()
+            .expect("static string");
+        let result =
+            Query::<params::DocumentFormatParams>::try_from_uri(&uri).expect("static string");
+        assert_eq!(result.0.format, DokumentFormat::Pazufa);
+
+        let uri: Uri = "http://example.com/dokument/id"
+            .parse()
+            .expect("static string");
+        assert!(
+            Query::<params::DocumentFormatParams>::try_from_uri(&uri).is_err(),
+            "missing `format` query param should fail to deserialize"
+        );
+
+        let uri: Uri = "http://example.com/dokument/id?format=invalid"
+            .parse()
+            .expect("static string");
+        assert!(
+            Query::<params::DocumentFormatParams>::try_from_uri(&uri).is_err(),
+            "unknown `format` value should fail to deserialize"
+        );
+    }
 
     #[tokio::test]
     async fn test_dokument_put() {

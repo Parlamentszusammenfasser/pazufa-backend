@@ -290,12 +290,16 @@ fn early_exits(config: &Configuration) {
         println!(
             "{}",
             serde_json::to_string(&openapi::PazufAPI::openapi())
-                .expect("Expected to parse a static struct")
+                .expect("Expected to be able to parse a static struct")
         );
         exit(0);
     }
 }
 
+#[allow(
+    clippy::disallowed_macros,
+    reason = "Better exit error messages directly from main"
+)]
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
@@ -308,9 +312,10 @@ async fn main() -> Result<()> {
     tracing::debug!("Configuration: {:?}", &config);
 
     let Some(ka_key) = &config.keyadder_key else {
-        return Err(anyhow!(
+        eprintln!(
             "Unable to start service without a master key. Please provide one via `--keyadder-key` or via PAZUFA_KEYADDER_KEY"
-        ));
+        );
+        exit(1);
     };
 
     tracing::info!("Starting the Initialisation...");

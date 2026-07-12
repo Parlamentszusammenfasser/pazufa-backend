@@ -3,7 +3,7 @@ FROM rust:1.95-slim-bookworm AS builder
 ARG RUSTFLAGS
 
 
-ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+v0.0.7/docs/specs/tracks.toml"
+ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.4+v0.0.7/tracks.toml"
 
 WORKDIR /app
 
@@ -42,7 +42,7 @@ FROM busybox:latest AS runner
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
-LABEL version="0.2.13"
+LABEL version="0.2.14"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1
