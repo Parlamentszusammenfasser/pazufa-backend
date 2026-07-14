@@ -44,7 +44,7 @@ pub async fn vorgang_id_put(
         .await?;
     if let Some(db_id) = db_id {
         debug!("Match found: {db_id}");
-        let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
+        let db_cmpvg = retrieve::vorgang_by_id(db_id, false, &mut tx).await?;
 
         if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
             return Ok(PutResponse::NotMod);
@@ -123,6 +123,7 @@ pub async fn vorgang_get_by_id(
     server: &LTZFServer,
     header_params: &params::IfModSince,
     path_params: &params::ApiIdPathParam,
+    expand: bool,
 ) -> Result<GetSingleResponse<models::Vorgang>> {
     // TODO: find a better way to handle admin-only info for every object
     // in the past this was done by optional authentication, but that
@@ -151,7 +152,7 @@ pub async fn vorgang_get_by_id(
 
     let res = match (header_params.if_modified_since, dbid) {
         (_, Some(dbid)) => {
-            let mut result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
+            let mut result = retrieve::vorgang_by_id(dbid, expand, &mut tx).await?;
             if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
                 result.touched_by = sqlx::query!(
                     "SELECT * FROM scraper_touched_vorgang sts
@@ -194,6 +195,7 @@ pub async fn vorgang_get(
     server: &LTZFServer,
     header_params: &params::IfModSince,
     query_params: &params::VorgangGetQueryParams,
+    expand: bool,
 ) -> Result<ListingGetResponse<models::Vorgang>> {
     let mut tx = server.sqlx_db.begin().await?;
     if let Some(range) = find_applicable_date_range(
@@ -218,6 +220,7 @@ pub async fn vorgang_get(
             parameters,
             query_params.page,
             query_params.per_page,
+            expand,
             &mut tx,
         )
         .await?;
@@ -290,6 +293,7 @@ mod test_endpoints {
                 &params::ApiIdPathParam {
                     api_id: test_vorgang.api_id,
                 },
+                false,
             )
             .await
             .expect(
@@ -321,6 +325,7 @@ mod test_endpoints {
                 &params::ApiIdPathParam {
                     api_id: non_existent_id,
                 },
+                false,
             )
             .await
             .expect(
@@ -339,6 +344,7 @@ mod test_endpoints {
                     &params::ApiIdPathParam {
                         api_id: invalid_id,
                     },
+                false,
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get Vorgang by an invalid ID (nil).");
@@ -352,13 +358,43 @@ mod test_endpoints {
                 &params::ApiIdPathParam {
                     api_id: test_vorgang.api_id,
                 },
+                false,
             )
             .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang by ID with update time limitations.");
         assert!(matches!(response, GetSingleResponse::NotMod));
         scenario.teardown().await;
     }
-
+    #[tokio::test]
+    async fn vorgang_get_nocontent_on_page_overflow() {
+        let scenario = TestSetup::new("vorgang_get_nocontent_page_overflow").await;
+        let vorgang = generate::default_vorgang();
+        super::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+        let response = super::vorgang_get(
+                &scenario.server,
+                    &params::IfModSince {
+                        if_modified_since: None,
+                    },
+                    &params::VorgangGetQueryParams {
+                        page: Some(500),
+                        ..Default::default()
+                    },
+                false,
+                )
+                .await
+                .expect("Failed to get valid server respone when trying to get existing Vorgang with invalid date range.");
+        assert_eq!(response, ListingGetResponse::NoContent);
+        scenario.teardown().await;
+    }
     #[tokio::test]
     pub async fn test_vorgang_get_filtered_endpoints_empty() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_empty").await;
@@ -383,17 +419,11 @@ mod test_endpoints {
                         if_modified_since: None,
                     },
                     &params::VorgangGetQueryParams {
-                        page: None,
-                        per_page: None,
-                        p: None,
                         since: Some(Utc::now()),
                         until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
-                        vgtyp: None,
-                        wp: None,
-                        fach: None,
-                        org: None,
-                        person: None,
+                       ..Default::default()
                     },
+                false,
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang with invalid date range.");
@@ -404,17 +434,11 @@ mod test_endpoints {
                         if_modified_since: None,
                     },
                     &params::VorgangGetQueryParams {
-                        page: None,
-                        per_page: None,
-                        p: None,
                         since: Some(Utc::now() + chrono::Duration::days(365)),
                         until: Some(Utc::now() + chrono::Duration::days(366)),
-                        vgtyp: None,
-                        wp: None,
-                        fach: None,
-                        org: None,
-                        person: None,
+                       ..Default::default()
                     },
+                    false,
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang with date range in the future.");
@@ -460,14 +484,11 @@ mod test_endpoints {
                         page: Some(0),
                         per_page: Some(32),
                         p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
                         vgtyp: Some(test_vorgang.typ),
                         wp: Some(test_vorgang.wahlperiode),
-                        fach: None,
-                        org: None,
-                        person: None,
+                       ..Default::default()
                     },
+                    false,
                 )
                 .await
                 .expect("Failed to get valid server respone when trying to get existing Vorgang with valid filters.");
@@ -744,6 +765,7 @@ pub(crate) mod test_failed_irl_scenarios {
                     if_modified_since: None,
                 },
                 &models::params::ApiIdPathParam { api_id: uuid },
+                false,
             )
             .await;
         }

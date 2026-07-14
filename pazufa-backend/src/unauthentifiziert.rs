@@ -93,11 +93,16 @@ async fn ping(
     responses(
         (status = 200,
             description = "API is running",
-            body = serde_json::Value, content_type = "application/json",
+            body = serde_json::Value,
+            content_type = "application/json",
         ),
         (status = 500, description = "API is not running")
     )
 )]
 async fn status(State(api_impl): State<Arc<LTZFServer>>) -> Response {
-    (StatusCode::OK, api_impl.statistics.output().await).into_response()
+    (
+        StatusCode::OK,
+        axum::Json(api_impl.statistics.output().await),
+    )
+        .into_response()
 }

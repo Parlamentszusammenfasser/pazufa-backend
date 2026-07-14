@@ -105,7 +105,7 @@ impl From<Uuid> for DokumentOrApiId {
 /// A document. Could be a protocol, a Drucksache, a statement, ...
 /// For different objects, only certain properties are optional, which is a known design flaw.
 /// A Stellungnahme must contain `meinung`, a Gesetzentwurf contains `Vorwort`.
-/// Since documents can become quite large, they are returned by the server as just their api_id in lists
+/// Since documents can become quite large, they are returned by the server as just their `api_id` in lists
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
 pub struct Dokument {

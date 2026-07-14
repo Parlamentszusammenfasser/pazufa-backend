@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id FROM rel_station_dokument rsd\n        INNER JOIN dokument d ON d.id = rsd.dok_id\n        WHERE rsd.stat_id = $1\n        ORDER BY d.link ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "291eb12d2bde94a134c8ec3b3d5594e583b0987a66f42c21b752986868f9ccb4"
+}

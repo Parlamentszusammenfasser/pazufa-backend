@@ -39,11 +39,7 @@ replace(
     'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
     f'version = "{version}"\n',
 )
-replace(
-    "pazufa-backend-lib/Cargo.toml",
-    'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
-    f'version = "{version}"\n',
-)
+
 replace(
     ".woodpecker/deploy.yml",
     r"  - &version \"\d+\.\d+\.\d+\"",

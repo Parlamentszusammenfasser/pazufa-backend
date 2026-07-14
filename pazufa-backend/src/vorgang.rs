@@ -71,7 +71,8 @@ async fn vorgang_put(
     description = "Retrieves a filterable list of legislative processes. Returns up to 64 processes per request, which can be filtered by various criteria including time range, parliament, and electoral period.",
     params(
         params::VorgangGetQueryParams,
-        params::IfModSince
+        params::IfModSince,
+        params::ExpandQueryParam
         ),
     responses(ListingGetResponse<models::Vorgang>)
 )]
@@ -79,6 +80,7 @@ async fn vorgang_put(
 async fn vorgang_get(
     headers: HeaderMap,
     Query(query_params): Query<params::VorgangGetQueryParams>,
+    Query(expand): Query<params::ExpandQueryParam>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> ListingGetResponse<models::Vorgang> {
     // Header parameters
@@ -91,12 +93,17 @@ async fn vorgang_get(
         }
     };
 
-    libvg::vorgang_get(api_impl.as_ref(), &ims, &query_params)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("{e}");
-            ListingGetResponse::Error(e.to_string())
-        })
+    libvg::vorgang_get(
+        api_impl.as_ref(),
+        &ims,
+        &query_params,
+        expand.expand.unwrap_or(false),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("{e}");
+        ListingGetResponse::Error(e.to_string())
+    })
 }
 
 #[utoipa::path(
@@ -106,7 +113,8 @@ async fn vorgang_get(
     description = "Retrieves a specific legislative process by its unique identifier. Returns comprehensive details about the process including all its stations, associated documents, and metadata. If called by admin or higher, this returns a list of last scrapers/collectors touching the object",
     params(
         params::ApiIdPathParam,
-        params::IfModSince
+        params::IfModSince,
+        params::ExpandQueryParam,
         ),
     responses(GetSingleResponse<models::Vorgang>)
 )]
@@ -114,6 +122,7 @@ async fn vorgang_get(
 async fn vorgang_get_by_id(
     headers: HeaderMap,
     Path(path_params): Path<params::ApiIdPathParam>,
+    Query(expand): Query<params::ExpandQueryParam>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> GetSingleResponse<models::Vorgang> {
     // Header parameters
@@ -126,12 +135,17 @@ async fn vorgang_get_by_id(
         }
     };
 
-    libvg::vorgang_get_by_id(api_impl.as_ref(), &ims, &path_params)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("{e}");
-            GetSingleResponse::Error(e.to_string())
-        })
+    libvg::vorgang_get_by_id(
+        api_impl.as_ref(),
+        &ims,
+        &path_params,
+        expand.expand.unwrap_or(false),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("{e}");
+        GetSingleResponse::Error(e.to_string())
+    })
 }
 
 #[utoipa::path(

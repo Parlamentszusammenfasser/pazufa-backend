@@ -37,6 +37,14 @@ pub async fn autoren_get(
         query_params.page,
         query_params.per_page,
     );
+    if let Some(p) = query_params.page
+        && p > prp.x_page
+    {
+        return Ok(ListingGetResponse::NoContent);
+    }
+    if result.is_empty() {
+        return Ok(ListingGetResponse::NoContent);
+    }
     let result = &result[prp.start()..prp.end()];
     let output = sqlx::query!(
         "SELECT * FROM autor WHERE id = ANY($1::int4[])",
@@ -98,6 +106,14 @@ pub async fn gremien_get(
         query_params.page,
         query_params.per_page,
     );
+    if let Some(p) = query_params.page
+        && p > prp.x_page
+    {
+        return Ok(ListingGetResponse::NoContent);
+    }
+    if result.is_empty() {
+        return Ok(ListingGetResponse::NoContent);
+    }
     let selected_ids: Vec<i32> = result.drain(prp.start()..prp.end()).collect();
     let result = sqlx::query!(
         "SELECT g.link, g.name, g.wp, p.value as parl FROM gremium g
@@ -175,11 +191,6 @@ pub async fn enum_get(
     .fetch_all(&mut *tx)
     .await?;
 
-    if filtered_ids.is_empty() {
-        info!("No matching Enumeration entry found");
-        return Ok(ListingGetResponse::NoContent);
-    }
-
     let prp = PaginationResponsePart::new(
         u32::try_from(filtered_ids.len()).map_err(|e| LTZFError::Other {
             message: format!("Failed to convert result length: {e}"),
@@ -187,6 +198,15 @@ pub async fn enum_get(
         query_params.page,
         query_params.per_page,
     );
+    if let Some(p) = query_params.page
+        && p > prp.x_page
+    {
+        return Ok(ListingGetResponse::NoContent);
+    }
+    if filtered_ids.is_empty() {
+        info!("No matching Enumeration entry found");
+        return Ok(ListingGetResponse::NoContent);
+    }
     let select_few: Vec<i32> = filtered_ids.drain(prp.start()..prp.end()).collect();
     #[allow(
         clippy::disallowed_methods,
@@ -253,6 +273,35 @@ mod test_unauthorisiert {
     use crate::utils::testing::{TestSetup, generate};
 
     #[tokio::test]
+    async fn autoren_get_nocontent_on_page_overflow() {
+        let scenario = TestSetup::new("autoren_get_nocontent_page_overflow").await;
+        let vorgang = generate::default_vorgang();
+        libvg::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+        let result = super::autoren_get(
+            &scenario.server,
+            &params::AutorenGetQueryParams {
+                page: Some(500),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to get Data");
+        assert!(
+            matches!(result, ListingGetResponse::NoContent),
+            "Expected to find no entries"
+        );
+        scenario.teardown().await;
+    }
+    #[tokio::test]
     async fn test_autor_get_nocontent() {
         let scenario = TestSetup::new("autor_get_nocontent").await;
         let r = super::autoren_get(
@@ -303,6 +352,36 @@ mod test_unauthorisiert {
             matches!( &r,
                 ListingGetResponse::Success { body, .. } if !body.is_empty()),
             "Body is empty, expected some object"
+        );
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn gremien_get_nocontent_on_page_overflow() {
+        let scenario = TestSetup::new("gremien_get_nocontent_page_overflow").await;
+        let vorgang = generate::default_vorgang();
+        libvg::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+        let result = super::gremien_get(
+            &scenario.server,
+            &params::GremienGetQueryParams {
+                page: Some(500),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to get Data");
+        assert!(
+            matches!(result, ListingGetResponse::NoContent),
+            "Expected to find no entries"
         );
         scenario.teardown().await;
     }
@@ -426,6 +505,38 @@ mod test_unauthorisiert {
         .await;
         assert!(
             matches!(&result, Ok(ListingGetResponse::NoContent)),
+            "Expected to find no entries"
+        );
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn enums_get_nocontent_on_page_overflow() {
+        let scenario = TestSetup::new("enums_get_nocontent_page_overflow").await;
+        let vorgang = generate::default_vorgang();
+        libvg::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+        let result = super::enum_get(
+            &scenario.server,
+            &params::EnumPathParams {
+                name: models::EnumerationNames::Parlamente,
+            },
+            &params::EnumGetQueryParams {
+                page: Some(500),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to get Data");
+        assert!(
+            matches!(result, ListingGetResponse::NoContent),
             "Expected to find no entries"
         );
         scenario.teardown().await;

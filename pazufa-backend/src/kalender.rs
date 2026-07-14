@@ -69,7 +69,8 @@ async fn kal_date_put(
     tags = ["Sitzung", "Unauthorisiert"],
     params(
         params::KalDateGetPathParams,
-        params::IfModSince
+        params::IfModSince,
+        params::ExpandQueryParam,
     ),
     responses(SitzungListingResponse)
 )]
@@ -77,6 +78,7 @@ async fn kal_date_get(
     headers: HeaderMap,
     Path(path_params): Path<params::KalDateGetPathParams>,
     Query(query_params): Query<params::KalDateGetQueryParams>,
+    Query(expand): Query<params::ExpandQueryParam>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> SitzungListingResponse {
     // Header parameters
@@ -87,12 +89,18 @@ async fn kal_date_get(
         return SitzungListingResponse::BadReq;
     };
 
-    libsitz::kal_date_get(api_impl.as_ref(), &ims, &path_params, &query_params)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("Error: {e}");
-            SitzungListingResponse::Error(e.to_string())
-        })
+    libsitz::kal_date_get(
+        api_impl.as_ref(),
+        &ims,
+        &path_params,
+        &query_params,
+        expand.expand.unwrap_or(false),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("Error: {e}");
+        SitzungListingResponse::Error(e.to_string())
+    })
 }
 
 #[tracing::instrument(skip_all)]
@@ -104,12 +112,14 @@ async fn kal_date_get(
     params(
         params::KalGetQueryParams,
         params::IfModSince,
+        params::ExpandQueryParam,
     ),
     responses(SitzungListingResponse)
 )]
 async fn kal_get(
     headers: HeaderMap,
     Query(query_params): Query<params::KalGetQueryParams>,
+    Query(expand): Query<params::ExpandQueryParam>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> SitzungListingResponse {
     // Header parameters
@@ -120,12 +130,17 @@ async fn kal_get(
         return SitzungListingResponse::BadReq;
     };
 
-    libsitz::kal_get(api_impl.as_ref(), &ims, &query_params)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("Error: {e}");
-            SitzungListingResponse::Error(e.to_string())
-        })
+    libsitz::kal_get(
+        api_impl.as_ref(),
+        &ims,
+        &query_params,
+        expand.expand.unwrap_or(false),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("Error: {e}");
+        SitzungListingResponse::Error(e.to_string())
+    })
 }
 
 #[cfg(test)]

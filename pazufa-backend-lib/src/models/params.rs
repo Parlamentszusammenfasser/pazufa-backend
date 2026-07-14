@@ -346,6 +346,14 @@ pub struct SGetQueryParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
 #[into_params(parameter_in = Query)]
+pub struct ExpandQueryParam {
+    /// if `true`, deliver documents as full, expanded objects instead of just their api id
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expand: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
+#[into_params(parameter_in = Query)]
 pub struct VorgangGetQueryParams {
     /// Filter results to include only items updated on or after this timestamp (inclusive lower bound)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -383,5 +391,5 @@ pub struct VorgangGetQueryParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
 #[into_params(parameter_in = Query)]
 pub struct DocumentFormatParams {
-    pub format: models::enumerations::DokumentFormat,
+    pub format: Option<models::enumerations::DokumentFormat>,
 }

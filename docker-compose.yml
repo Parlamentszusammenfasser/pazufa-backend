@@ -13,7 +13,7 @@ services:
       POSTGRES_DB: pazufa
 
   pazufa-backend:
-    image: pazufa/backend:0.2.14
+    image: pazufa/backend:0.2.15
     restart: unless-stopped
 # use `docker compose up --build` to not use the repository image but build yourself instead
     build:

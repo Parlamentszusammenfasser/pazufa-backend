@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id\n    FROM tops_doks td \n    INNER JOIN dokument d ON td.dok_id = d.id\n    WHERE td.top_id = $1\n    ORDER BY d.link ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "43c0681d6e45fae2e0fb5ecadead7922f1d40e921807690962387f4d15fa1a8e"
+}

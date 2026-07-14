@@ -63,7 +63,7 @@ pub async fn validate_vorgang(vg: &models::Vorgang, srv: &LTZFServer) -> Result<
 
     let num_classes: i64 = sqlx::query_scalar!(
         r#"SELECT COUNT(DISTINCT(c_id)) as "cnt!"
-        FROM track_class tc, parlament p
+        FROM parl_class pc, parlament p
         WHERE 
         p_id = p.id AND
         EXISTS (SELECT 1 FROM UNNEST($1::text[]) as in_parls(ip) WHERE ip = p.value)"#,

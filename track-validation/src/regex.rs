@@ -473,7 +473,7 @@ mod regression_test {
                 Regex::Empty.into(),
                 Regex::from_parts(suffix).into(),
             ));
-        };
+        }
         let expected = Regex::from_parts(prefix);
 
         assert_eq!(
@@ -810,7 +810,7 @@ mod test {
                 Regex::Empty.into(),
                 Regex::from_parts(suffix).into(),
             ));
-        };
+        }
         let expected = Regex::from_parts(prefix);
 
         assert_eq!(
@@ -844,7 +844,7 @@ mod test {
                 Regex::Empty.into(),
                 Regex::from_parts(suffix).into(),
             ));
-        };
+        }
         let expected = Regex::from_parts(prefix);
 
         assert_eq!(

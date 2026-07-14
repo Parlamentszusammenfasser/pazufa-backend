@@ -415,7 +415,7 @@ pub(crate) async fn execute_merge_vorgang(
 
     #[cfg(feature = "track-validation")]
     {
-        let merged_state = crate::db::retrieve::vorgang_by_id(candidate, &mut *tx).await?;
+        let merged_state = crate::db::retrieve::vorgang_by_id(candidate, false, &mut *tx).await?;
         validate::validate_vorgang(&merged_state, srv).await?;
     }
 
@@ -601,6 +601,7 @@ mod scenariotest {
                 paramock,
                 None,
                 Some(PaginationResponsePart::MAX_PER_PAGE),
+                false,
                 &mut tx,
             )
             .await

@@ -93,12 +93,14 @@ async fn sid_put(
     params(
         params::SGetQueryParams,
         params::IfModSince,
+        params::ExpandQueryParam,
     ),
     responses(SitzungListingResponse)
 )]
 async fn s_get(
     headers: HeaderMap,
     Query(query_params): Query<params::SGetQueryParams>,
+    Query(expand): Query<params::ExpandQueryParam>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> SitzungListingResponse {
     // Header parameters
@@ -112,12 +114,17 @@ async fn s_get(
         }
     };
 
-    libsitz::s_get(api_impl.as_ref(), &ims, &query_params)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("{e}");
-            SitzungListingResponse::Error(e.to_string())
-        })
+    libsitz::s_get(
+        api_impl.as_ref(),
+        &ims,
+        &query_params,
+        expand.expand.unwrap_or(false),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("{e}");
+        SitzungListingResponse::Error(e.to_string())
+    })
 }
 
 #[tracing::instrument(skip_all)]
@@ -129,11 +136,13 @@ async fn s_get(
     params(
         params::ApiIdPathParam,
         params::IfModSince,
+        params::ExpandQueryParam,
     ),
     responses(GetSingleResponse<models::Sitzung>)
 )]
 async fn s_get_by_id(
     headers: HeaderMap,
+    Query(expand): Query<params::ExpandQueryParam>,
     Path(path_params): Path<params::ApiIdPathParam>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> GetSingleResponse<models::Sitzung> {
@@ -147,12 +156,17 @@ async fn s_get_by_id(
         }
     };
 
-    libsitz::s_get_by_id(api_impl.as_ref(), &ims, &path_params)
-        .await
-        .unwrap_or_else(|e| {
-            warn!("{e}");
-            GetSingleResponse::Error(e.to_string())
-        })
+    libsitz::s_get_by_id(
+        api_impl.as_ref(),
+        &ims,
+        &path_params,
+        expand.expand.unwrap_or(false),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!("{e}");
+        GetSingleResponse::Error(e.to_string())
+    })
 }
 
 #[cfg(test)]

@@ -51,20 +51,28 @@ pub(crate) async fn vorgang_merge_candidates(
 				AND (dt.value='entwurf' OR dt.value = 'preparl-entwurf')
 		),
         vorgang_class AS (
-            SELECT s.vg_id as vid, tc.c_id as cid from gremium g, station s, track_class tc
-            WHERE s.gr_id = g.id AND g.parl = tc.p_id
+            SELECT s.vg_id as vid, pc.c_id as cid 
+                FROM gremium g, station s, parl_class pc
+                WHERE s.gr_id = g.id AND g.parl = pc.p_id
             GROUP BY vid, cid
         )
-    SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei denen
-	INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
+
+
+    SELECT DISTINCT(vorgang.id), vorgang.api_id 
+        FROM vorgang -- gib vorgänge, bei denen
+    INNER JOIN vgtyp_class vtc  ON vtc.t_id = vorgang.typ
 	WHERE
-    (vorgang.wahlperiode = $4 AND -- wahlperiode und 
-	    vt.value = $5
+    (vorgang.wahlperiode = $4 AND   -- wahlperiode und 
+        vtc.c_id = (                -- vgtyp-class übereinstimmen
+            SELECT c_id FROM vgtyp_class 
+                INNER JOIN vorgangstyp vt ON vt.id = vgtyp_class.t_id
+            WHERE vt.value = $5
+            ) 
     ) AND
     (
-        vorgang.api_id = $1    -- entweder die API ID genau übereinstimmt (trivialer Fall) ODER
+        vorgang.api_id = $1         -- entweder die API ID genau übereinstimmt (trivialer Fall) ODER
     OR                     
-	( -- eine übereinstimmende ID existiert
+	(                               -- eine übereinstimmende ID existiert
 		(EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) as eingabe(ident, typ), db_id_table WHERE 
 			db_id_table.vg_id = vorgang.id AND
 			eingabe.ident = db_id_table.ident AND
@@ -73,11 +81,11 @@ pub(crate) async fn vorgang_merge_candidates(
         AND -- ein übereinstimmendes Bundesland existiert, 
             -- <=> eine station existiert, die dasselbe Bundesland wie eine Station der Eingabe hat 
         (EXISTS (
-                SELECT 1 FROM UNNEST($6::text[]) as in_parls(ip), vorgang_class vc, parlament p, track_class tc
+                SELECT 1 FROM UNNEST($6::text[]) as in_parls(ip), vorgang_class vc, parlament p, parl_class pc
             WHERE
                 ip = p.value AND
-                tc.p_id = p.id AND
-                tc.c_id = vc.cid AND
+                pc.p_id = p.id AND
+                pc.c_id = vc.cid AND
                 vorgang.id = vid
             )
             -- oder eine der beiden keine stationen hat, an denen man das bundesland feststellen könnte
@@ -359,6 +367,40 @@ mod candid_test {
 
         let candidates = super::vorgang_merge_candidates(&double_vg, &mut *tx, srv).await;
         assert!(matches!(candidates, Ok(MatchState::Ambiguous(_))));
+        setup.teardown().await;
+    }
+    #[tokio::test]
+    async fn vorgang_gg_equivalence_test() {
+        let setup = TestSetup::new("vorgang_gg_equivalence_test").await;
+        let srv = &setup.server;
+        let vg_a = generate::random::vorgang_with_stations(
+            470,
+            models::Vorgangstyp::GgEinspruch,
+            "IL",
+            &srv.tracks.station_mapping,
+        );
+        let vg_b = models::Vorgang {
+            typ: models::Vorgangstyp::GgZustimmung,
+            ..vg_a.clone()
+        };
+        let _ = vorgang_id_put(
+            srv,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vg_a.api_id,
+            },
+            &vg_a,
+        )
+        .await
+        .expect("Vorgang loading failed");
+
+        let mut tx = srv
+            .sqlx_db
+            .begin()
+            .await
+            .expect("Starting a Transaction failed");
+        let candidates = super::vorgang_merge_candidates(&vg_b, &mut *tx, srv).await;
+        assert!(matches!(candidates, Ok(MatchState::ExactlyOne(_))));
         setup.teardown().await;
     }
 

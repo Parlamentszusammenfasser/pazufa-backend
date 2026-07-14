@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 pub(crate) async fn vorgang_by_id(
     id: i32,
+    expand: bool,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Vorgang> {
     let pre_vg = sqlx::query!(
@@ -64,7 +65,7 @@ pub(crate) async fn vorgang_by_id(
 
     let mut stationen = vec![];
     for sid in station_ids {
-        stationen.push(station_by_id(sid, executor).await?);
+        stationen.push(station_by_id(sid, expand, executor).await?);
     }
     stationen.sort_by_key(|a| a.zp_start);
 
@@ -136,28 +137,69 @@ pub(crate) async fn vorgang_by_id(
 
 pub(crate) async fn station_by_id(
     id: i32,
+    expand: bool,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Station> {
-    let doks = sqlx::query!(
-        "SELECT d.api_id FROM rel_station_dokument rsd
+    let doks = if expand {
+        let doks = sqlx::query!(
+            "SELECT d.id FROM rel_station_dokument rsd
         INNER JOIN dokument d ON d.id = rsd.dok_id
         WHERE rsd.stat_id = $1
         ORDER BY d.link ASC",
-        id
-    )
-    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
-    .fetch_all(&mut **executor)
-    .await?;
-    let stellungnahmen = sqlx::query!(
-        "SELECT api_id FROM rel_station_stln rss 
+            id
+        )
+        .map(|r| r.id)
+        .fetch_all(&mut **executor)
+        .await?;
+        let mut final_doks = vec![];
+        for d in doks {
+            final_doks.push(models::DokumentOrApiId::Dokument(Box::new(
+                dokument_by_id(d, &mut *executor).await?,
+            )));
+        }
+        final_doks
+    } else {
+        sqlx::query!(
+            "SELECT d.api_id FROM rel_station_dokument rsd
+        INNER JOIN dokument d ON d.id = rsd.dok_id
+        WHERE rsd.stat_id = $1
+        ORDER BY d.link ASC",
+            id
+        )
+        .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
+        .fetch_all(&mut **executor)
+        .await?
+    };
+    let stellungnahmen = if expand {
+        let doks = sqlx::query!(
+            "SELECT id FROM rel_station_stln rss 
         INNER JOIN dokument d ON d.id = rss.dok_id 
         WHERE rss.stat_id = $1
         ORDER BY d.link ASC",
-        id
-    )
-    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
-    .fetch_all(&mut **executor)
-    .await?;
+            id
+        )
+        .map(|r| r.id)
+        .fetch_all(&mut **executor)
+        .await?;
+        let mut final_doks = vec![];
+        for d in doks {
+            final_doks.push(models::DokumentOrApiId::Dokument(Box::new(
+                dokument_by_id(d, &mut *executor).await?,
+            )));
+        }
+        final_doks
+    } else {
+        sqlx::query!(
+            "SELECT api_id FROM rel_station_stln rss 
+        INNER JOIN dokument d ON d.id = rss.dok_id 
+        WHERE rss.stat_id = $1
+        ORDER BY d.link ASC",
+            id
+        )
+        .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
+        .fetch_all(&mut **executor)
+        .await?
+    };
     let schlagworte = sqlx::query!(
         "SELECT DISTINCT(value) FROM rel_station_schlagwort r
         LEFT JOIN schlagwort sw ON sw.id = r.sw_id
@@ -306,23 +348,49 @@ pub(crate) async fn dokument_by_id(
 
 /// the crucial part is how to find out which vg are connected to a DRCKS
 /// if there exists a station which contains a document mentioned in the top, its vorgang is connected
-pub(crate) async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<models::Top> {
+pub(crate) async fn top_by_id(
+    id: i32,
+    expand: bool,
+    tx: &mut sqlx::PgTransaction<'_>,
+) -> Result<models::Top> {
     let scaffold = sqlx::query!("SELECT titel, nummer FROM top WHERE id = $1", id)
         .fetch_one(&mut **tx)
         .await?;
     // ds
-    let dokumente = sqlx::query!(
-        "
+    let dokumente = if expand {
+        let doks = sqlx::query!(
+            "SELECT d.id
+    FROM tops_doks td 
+    INNER JOIN dokument d ON td.dok_id = d.id
+    WHERE td.top_id = $1
+    ORDER BY d.link ASC",
+            id
+        )
+        .map(|r| r.id)
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut final_doks = vec![];
+        for d in doks {
+            final_doks.push(models::DokumentOrApiId::Dokument(Box::new(
+                dokument_by_id(d, &mut *tx).await?,
+            )));
+        }
+        final_doks
+    } else {
+        sqlx::query!(
+            "
     SELECT d.api_id
     FROM tops_doks td 
     INNER JOIN dokument d ON td.dok_id = d.id
     WHERE td.top_id = $1
     ORDER BY d.link ASC",
-        id
-    )
-    .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
-    .fetch_all(&mut **tx)
-    .await?;
+            id
+        )
+        .map(|r| models::DokumentOrApiId::ApiId(r.api_id))
+        .fetch_all(&mut **tx)
+        .await?
+    };
+
     // vgs
     let vorgang_id = sqlx::query!(
         "
@@ -357,6 +425,7 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
 
 pub(crate) async fn sitzung_by_id(
     id: i32,
+    expand: bool,
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Sitzung> {
     let scaffold = sqlx::query!(
@@ -379,7 +448,7 @@ pub(crate) async fn sitzung_by_id(
     .await?;
     let mut tops = vec![];
     for top in &topids {
-        tops.push(top_by_id(*top, tx).await?);
+        tops.push(top_by_id(*top, expand, tx).await?);
     }
     // experten
     let experten = sqlx::query!(
@@ -449,6 +518,7 @@ pub(crate) async fn sitzung_by_param(
     params: &SitzungFilterParameters,
     page: Option<u32>,
     per_page: Option<u32>,
+    expand: bool,
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Sitzung>)> {
     let mut as_list = sqlx::query!(
@@ -502,6 +572,11 @@ ORDER BY pre_table.lastmod ASC",
         page,
         per_page,
     );
+    if let Some(p) = page
+        && p > prp.x_page
+    {
+        return Ok((prp, vec![]));
+    }
     if as_list.is_empty() {
         return Ok((prp, vec![]));
     }
@@ -509,7 +584,7 @@ ORDER BY pre_table.lastmod ASC",
     let as_list = as_list.drain(prp.start()..prp.end());
     let mut vector = Vec::with_capacity(as_list.len());
     for id in as_list {
-        vector.push(super::retrieve::sitzung_by_id(id, tx).await?);
+        vector.push(super::retrieve::sitzung_by_id(id, expand, tx).await?);
     }
     Ok((prp, vector))
 }
@@ -530,6 +605,7 @@ pub(crate) async fn vorgang_by_parameter(
     params: VGGetParameters,
     page: Option<u32>,
     per_page: Option<u32>,
+    expand: bool,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
     let mut vg_list = sqlx::query!(
@@ -568,13 +644,68 @@ params.lower_date, params.upper_date)
         page,
         per_page,
     );
+
+    // if the list is empty, or prp clamped the page
+    // to the existing data, just send an empty vector back
+    if let Some(p) = page
+        && p > prp.x_page
+    {
+        return Ok((prp, vec![]));
+    }
     if vg_list.is_empty() {
         return Ok((prp, vec![]));
     }
 
     let mut vector = Vec::with_capacity(vg_list.len());
     for id in vg_list.drain(prp.start()..prp.end()) {
-        vector.push(super::retrieve::vorgang_by_id(id, executor).await?);
+        vector.push(super::retrieve::vorgang_by_id(id, expand, executor).await?);
     }
     Ok((prp, vector))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        api::vorgang::vorgang_put,
+        models::{DokumentOrApiId, params},
+        utils::testing::{TestSetup, generate},
+    };
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn station_doks_expanded() {
+        let scenario = TestSetup::new("station_doks_expanded").await;
+        let test_vorgang = generate::default_vorgang();
+        let _ = vorgang_put(
+            &scenario.server,
+            1,
+            &params::XScraperId(Uuid::now_v7()),
+            &test_vorgang,
+        )
+        .await
+        .expect("Failed to get valid server respone when trying to push new Vorgang.");
+        let mut tx = scenario
+            .server
+            .sqlx_db
+            .begin()
+            .await
+            .expect("a db connection");
+        let vg = super::vorgang_by_id(1, false, &mut tx)
+            .await
+            .expect("Expected Success");
+        let i1 = vg.stationen[0].dokumente.iter();
+        let i2 = vg.stationen[0].stellungnahmen.iter();
+        for d in i1.chain(i2) {
+            assert!(matches!(d, DokumentOrApiId::ApiId(_)));
+        }
+        let vg = super::vorgang_by_id(1, true, &mut tx)
+            .await
+            .expect("Expected Success");
+        let i1 = vg.stationen[0].dokumente.iter();
+        let i2 = vg.stationen[0].stellungnahmen.iter();
+        for d in i1.chain(i2) {
+            assert!(matches!(d, DokumentOrApiId::Dokument(_)));
+        }
+        scenario.teardown().await;
+    }
 }

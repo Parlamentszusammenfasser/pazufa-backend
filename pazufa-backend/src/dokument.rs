@@ -127,7 +127,9 @@ async fn dokument_get_by_id(
     Query(q_params): Query<params::DocumentFormatParams>,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> GetSingleResponse<models::Dokument> {
-    if q_params.format == DokumentFormat::FTM {
+    if let Some(fmt) = q_params.format
+        && fmt == DokumentFormat::FTM
+    {
         return GetSingleResponse::NotImpl;
     }
     libmisc::dokument_get_by_id(api_impl.as_ref(), &path_params)
@@ -155,22 +157,21 @@ mod test {
             .expect("static string");
         let result =
             Query::<params::DocumentFormatParams>::try_from_uri(&uri).expect("static string");
-        assert_eq!(result.0.format, DokumentFormat::FTM);
+        assert_eq!(result.0.format, Some(DokumentFormat::FTM));
 
         let uri: Uri = "http://example.com/dokument/id?format=pazufa"
             .parse()
             .expect("static string");
         let result =
             Query::<params::DocumentFormatParams>::try_from_uri(&uri).expect("static string");
-        assert_eq!(result.0.format, DokumentFormat::Pazufa);
+        assert_eq!(result.0.format, Some(DokumentFormat::Pazufa));
 
         let uri: Uri = "http://example.com/dokument/id"
             .parse()
             .expect("static string");
-        assert!(
-            Query::<params::DocumentFormatParams>::try_from_uri(&uri).is_err(),
-            "missing `format` query param should fail to deserialize"
-        );
+        let result =
+            Query::<params::DocumentFormatParams>::try_from_uri(&uri).expect("static string");
+        assert_eq!(result.0.format, None);
 
         let uri: Uri = "http://example.com/dokument/id?format=invalid"
             .parse()

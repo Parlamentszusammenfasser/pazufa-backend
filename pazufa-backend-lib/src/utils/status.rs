@@ -10,11 +10,13 @@ use tracing::{instrument, warn};
 // the maxmium number of user agents / pathcount entries.
 // this is to prevent clogging memory at runtime
 const MAX_COUNT: usize = 1024;
+const COMMIT_HASH: &str = env!("GIT_HASH");
+const CRATE_VERSION: &str = crate_version!();
 
 #[derive(Serialize)]
-struct StatOutput {
-    version: String,
-    commit: String,
+pub struct StatOutput {
+    version: &'static str,
+    commit: &'static str,
     #[cfg(feature = "track-validation")]
     track_version: String,
 
@@ -86,8 +88,8 @@ impl Statistics {
     /// # Panics
     /// Can panic if serialization fails, but since the struct is well controlled, that is not
     /// happening
-    pub async fn output(&self) -> String {
-        let out = StatOutput {
+    pub async fn output(&self) -> StatOutput {
+        StatOutput {
             unique_uas: u32::try_from(self.useragents.read().await.len()).unwrap_or(0),
             objects_created: *self.objects_created.read().await,
             up_since: self.up_since,
@@ -100,12 +102,10 @@ impl Statistics {
                 .unwrap_or((&"None recorded".to_owned(), &0))
                 .0
                 .clone(),
-            commit: env!("GIT_HASH").to_owned(),
-            version: crate_version!().to_owned(),
+            commit: COMMIT_HASH,
+            version: CRATE_VERSION,
             #[cfg(feature = "track-validation")]
             track_version: self.track_version.clone(),
-        };
-        serde_json::to_string(&out)
-            .unwrap_or("Status Unavailable. Please consult a doctor.".to_owned())
+        }
     }
 }
