@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use utoipa::ToSchema;
 
 macro_rules! string_enum_convenience {
@@ -324,7 +325,9 @@ string_enum_convenience!(Ressort);
 
 /// Sachgebiet / Themenbereich inspired by the  Parlamentsspiegel.
 /// Within the Parlamentsspiegel search this corresponds to the parameter `fqVSys`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize_repr, Deserialize_repr, ToSchema,
+)]
 #[repr(u16)]
 pub enum Sachgebiet {
     StaatundPolitik = 1000,
@@ -493,6 +496,27 @@ pub enum Sachgebiet {
     Unbekannt = 9900,
     OhneSystematik = 9999,
 }
+impl From<i32> for Sachgebiet {
+    fn from(value: i32) -> Self {
+        serde_json::from_value(serde_json::Value::Number(
+            serde_json::Number::from_i128(i128::from(value)).expect("number"),
+        ))
+        .expect("Expected a value that actually deserializes to Sachgebiet")
+    }
+}
+impl From<Sachgebiet> for i32 {
+    fn from(value: Sachgebiet) -> Self {
+        match serde_json::to_value(value).expect("Expected the value to fit into number") {
+            serde_json::Value::Number(n) => {
+                i32::try_from(n.as_i64().expect("this number is small enough"))
+                    .expect("Number is small enough")
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Mime {
@@ -500,8 +524,6 @@ pub enum Mime {
     ApplicationJson,
     #[serde(rename = "application/pdf")]
     ApplicationPdf,
-    #[serde(rename = "application/octet-stream")]
-    ApplicationOctetStream,
     #[serde(rename = "text/plain")]
     TextPlain,
     #[serde(rename = "text/html")]

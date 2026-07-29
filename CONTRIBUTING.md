@@ -40,32 +40,36 @@ construct the Server and the track validation successfully.
 
 NOTE: you need the file twice, currently: once in 
 `./pazufa-backend` and once in `./pazufa-backend-lib`
+
+
 If errors occur that are most likely narrowed down to that file, please
 fetch the version specified in `./variables.toml`
-Convenience command to fetch one and put it in all the right spots: 
+Convenience command to fetch one and put it in all the right spots:  
 `curl -o pazufa-backend/tracks.toml https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.3+0.0.5/docs/specs/tracks.toml && cp pazufa-backend/tracks.toml pazufa-backend-lib`
 
 ## Version Control
 We work with three long-running branches:
 - main: our main release branch. Ideally only stable features land here.
-- staging: Our pre-release branch. This is meant to catch any bad bugs,
-  as well as give one last chance at wrangling git history to be pretty
-  for main
 - develop: our dirty branch to develop stuff on. Should be rebased to
-  reflect a sane development history for staging
+  reflect a sane development history for main
+
+NOTE that we check the .woodpecker/staging.yml workflow on each PR to
+main. This mostly tries to build the docker image once, and checks with
+docker hub whether the tag (=version) already exists.
+
+- PRs from develop onto main should be FF Only
+- PRs from feature branches onto develop should be squash only
 
 ### Normal development
 When working on an issue, please do it in a new branch either here or in
 a fork, which after full implementation of all required features is 
 PR'd into **develop** with a **squash commit**, closing the issue.
 
-Occasionally one of the maintainers will PR the develop branch into
-staging, if enough certainty has been had about feature completeness. 
-For that, git history will be rebased and squashed to reflect a solid 
-development history pattern.
+Occasionally one of the maintainers might rebase and squash the develop 
+git historyto reflect a solid development history pattern.
 
-After a milestone has been reached, all commits on staging are 
-fast-forwarded to main(`git merge --ff-only`), a release tag and message 
+After a milestone has been reached, all commits on develop are 
+fast-forwarded to main, a release tag and message 
 is written and the docker images are built and pushed to the hub.
 
 ### Version Bumping

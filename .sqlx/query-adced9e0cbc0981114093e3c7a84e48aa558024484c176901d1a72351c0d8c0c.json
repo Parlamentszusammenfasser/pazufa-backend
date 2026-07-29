@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    SELECT zf.value as inhalt, zft.value as typ \n    FROM\n        zusammenf_typ zft,\n        dok_zusammenfassungen zf\n    WHERE\n        zft.id = zf.zf_typ AND\n        zf.dok_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inhalt",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dok_zusammenfassungen",
+            "name": "value"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "typ",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "zusammenf_typ",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "adced9e0cbc0981114093e3c7a84e48aa558024484c176901d1a72351c0d8c0c"
+}

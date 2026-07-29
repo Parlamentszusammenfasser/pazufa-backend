@@ -62,7 +62,7 @@ impl Logging {
             .unwrap_or_else(|_| {
                 panic!(
                     "Expected to be able to open this file: {}",
-                    &self.error_log.display()
+                    self.error_log.display()
                 )
             });
 

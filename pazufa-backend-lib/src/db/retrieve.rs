@@ -1,8 +1,11 @@
-use std::str::FromStr;
-
 use crate::api::PaginationResponsePart;
 use crate::error::{DataValidationError, LTZFError, Result};
 use crate::models;
+use crate::models::dokument::{
+    DokumentHash, HashWrapper, ZusammenfassungWrapper, Zusammenfassungstupel,
+};
+use crate::models::enumerations::{HashStrategy, Mime, Ressort, Sachgebiet};
+use std::str::FromStr;
 use uuid::Uuid;
 
 pub(crate) async fn vorgang_by_id(
@@ -17,6 +20,29 @@ pub(crate) async fn vorgang_by_id(
         id
     )
     .fetch_one(&mut **executor)
+    .await?;
+
+    let ressort = sqlx::query!("SELECT value from ressort WHERE id = $1", pre_vg.ressort)
+        .map(|r| Ressort::from_str(&r.value))
+        .fetch_optional(&mut **executor)
+        .await?;
+    let ressort = if let Some(ressort) = ressort {
+        Some(ressort.map_err(|e| LTZFError::Other {
+            message: format!("unknown ressort value from the database: {e}"),
+        })?)
+    } else {
+        None
+    };
+    let sachgebiete = sqlx::query!(
+        "SELECT s.value 
+        FROM vg_sachgebiete vs, sachgebiet s
+        WHERE
+            s.id = vs.sg_id AND vs.vg_id = $1
+        ",
+        id
+    )
+    .map(|rec| Sachgebiet::from(rec.value))
+    .fetch_all(&mut **executor)
     .await?;
 
     let links = sqlx::query!(
@@ -132,6 +158,8 @@ pub(crate) async fn vorgang_by_id(
         ids,
         links,
         stationen,
+        ressort,
+        sachgebiete,
     })
 }
 
@@ -275,7 +303,98 @@ pub(crate) async fn station_by_id(
     })
 }
 
-pub(crate) async fn dokument_by_id(
+/// Retrieves Hashes as Legacy/Future from the database
+///
+/// # Errors
+/// Can fail due to IO Errors or failed database constraints
+/// does NOT fail if an empty list of hashes was retrieved. This indicates a corrupted database
+/// state, but is not critical for the integrity of the system itself. That is why this fails on
+/// with a warning.
+pub async fn hashes_of_dok(id: i32, executor: &mut sqlx::PgTransaction<'_>) -> Result<HashWrapper> {
+    let recs: Vec<_> = sqlx::query!(
+        "
+    SELECT dh.value as hash, hs.value as strat, m.value as mime
+    FROM
+        dok_hashes dh,
+        hash_strategy hs,
+        mime m
+    WHERE
+        hs.id = dh.hash_strat_id AND
+        dh.dok_id = $1 AND
+        dh.mime_id = m.id
+        ",
+        id
+    )
+    .fetch_all(&mut **executor)
+    .await?;
+    if recs.is_empty() {
+        tracing::warn!(
+            "Found Corrupted Database State: Document without hash was supplied at some point"
+        );
+        return Ok(HashWrapper::Future(vec![]));
+    } else if recs.len() == 1
+        && recs[0].strat == "sha256+bytes"
+        && recs[0].mime == "application/pdf"
+    {
+        return Ok(HashWrapper::Legacy(recs[0].hash.clone()));
+    }
+    let mut tuples = vec![];
+    for r in recs {
+        let strat = HashStrategy::from_str(&r.strat)
+            .map_err(|e| crate::error::DataValidationError::InvalidEnumValue { msg: e.clone() })?;
+        let mime = Mime::from_str(&r.mime).map_err(|e| LTZFError::Other {
+            message: format!(
+                "Error querying mime from the database: 
+                Unable to convert {} into Mime Enumeration: {e}",
+                r.mime
+            ),
+        })?;
+        tuples.push(DokumentHash {
+            strategy: strat,
+            value: r.hash,
+            mime,
+        });
+    }
+    Ok(HashWrapper::Future(tuples))
+}
+/// Retrieves Zusammenfassungen as Legacy/Future from the database
+///
+/// # Errors
+/// Can fail due to IO Errors or failed database constraints
+pub async fn zusammenfassungen_of_dok(
+    id: i32,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<ZusammenfassungWrapper>> {
+    let recs: Vec<_> = sqlx::query!(
+        "
+    SELECT zf.value as inhalt, zft.value as typ 
+    FROM
+        zusammenf_typ zft,
+        dok_zusammenfassungen zf
+    WHERE
+        zft.id = zf.zf_typ AND
+        zf.dok_id = $1
+        ",
+        id
+    )
+    .fetch_all(&mut **executor)
+    .await?;
+    if recs.is_empty() {
+        return Ok(None);
+    } else if recs.len() == 1 && recs[0].typ == "full" {
+        return Ok(Some(ZusammenfassungWrapper::Legacy(recs[0].inhalt.clone())));
+    }
+    let mut tuples = vec![];
+    for r in recs {
+        tuples.push(Zusammenfassungstupel {
+            inhalt: r.inhalt,
+            typ: r.typ,
+        });
+    }
+    Ok(Some(ZusammenfassungWrapper::Future(tuples)))
+}
+
+pub async fn dokument_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Dokument> {
@@ -314,6 +433,13 @@ pub(crate) async fn dokument_by_id(
     })
     .fetch_all(&mut **executor)
     .await?;
+    let subdoc_id = if let Some(i) = rec.subdoc_id {
+        Some(u16::try_from(i).map_err(|e| LTZFError::Other {
+            message: format!("failed converting into u16 out of the database: {e}"),
+        })?)
+    } else {
+        None
+    };
 
     Ok(models::Dokument {
         api_id: Some(rec.api_id),
@@ -322,13 +448,14 @@ pub(crate) async fn dokument_by_id(
         kurztitel: rec.kurztitel,
         vorwort: rec.vorwort,
         volltext: rec.volltext,
+        subdoc_id,
 
         zp_erstellt: rec.zp_created,
         zp_modifiziert: rec.zp_lastmod,
         zp_referenz: rec.zp_referenz,
 
         link: rec.link,
-        hash: rec.hash,
+        hash: hashes_of_dok(id, executor).await?,
         meinung: rec
             .meinung
             .map(|x| {
@@ -337,7 +464,7 @@ pub(crate) async fn dokument_by_id(
                 })
             })
             .transpose()?,
-        zusammenfassung: rec.zusammenfassung,
+        zusammenfassung: zusammenfassungen_of_dok(id, executor).await?,
         schlagworte,
         autoren,
         typ: models::Doktyp::from_str(rec.typ_value.as_str())

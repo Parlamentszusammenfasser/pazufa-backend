@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dok_zusammenfassungen(dok_id, zf_typ, value) \n        SELECT $1, zft.id, inpt.value FROM\n            zusammenf_typ zft, UNNEST($2::text[], $3::text[]) as inpt(strat, value)\n            WHERE zft.value = inpt.strat\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "99f5c931e206b396de208ef905a7614539c0ce229c30e5df83423bed54c96300"
+}

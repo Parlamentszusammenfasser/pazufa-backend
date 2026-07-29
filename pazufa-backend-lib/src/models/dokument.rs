@@ -2,6 +2,7 @@ use super::{de_full_text_string, de_hexstring, de_link, de_optstring, de_string,
 use crate::models::{
     self,
     enumerations::{HashStrategy, Mime},
+    is_valid_string,
 };
 use serde::{Deserialize, Serialize, de, ser};
 use utoipa::ToSchema;
@@ -52,9 +53,20 @@ pub struct FTMDokumentPages {
     pub emailMentioned: Vec<String>,
 }
 
+/// A typed partial summary of a document.
+/// NOTE: Documents can only contain one summary of any type.
+/// If on merge a different text is supplied for an existing type of summary, it replaces the old
+/// one
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct Zusammenfassungstupel {
     /// Type of summary, if the summary is made up of parts
+    /// NOTE: there are some reserved type names:
+    /// - `full`        means summary of the full document without origin info
+    /// - `full-llm`    means summary of the full document, made by llm
+    /// - `full-extern` means summary of the full document, taken from an external source
+    ///
+    /// You are free to add to these if required, just please stick to the ones available if
+    /// possible
     #[schema(example = "Basisinformationen")]
     #[serde(deserialize_with = "de_string", default)]
     pub typ: String,
@@ -69,20 +81,36 @@ pub struct Zusammenfassungstupel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct DokumentHash {
     /// Hash value as string of hexadecimal octets
-    #[serde(deserialize_with = "de_hexstring", default)]
+    #[serde(deserialize_with = "de_hexstring")]
     pub value: String,
 
     /// The strategy used to compute the hash.
     /// sha256+text denotes that not the raw file, but the _exact_ volltext field
     /// of the document was hashed.
     /// All text must be utf-8, remain stable under subsequent extraction,
-    /// and mime must be set to text/plain.
+    /// and mime must be set to text/plain or text/html.
     pub strategy: HashStrategy,
 
     /// The mime of the hashed content.
-    /// If sha256/1+bytes was used, must be application/octet-stream;
+    /// If sha256/1+bytes was used, must be application/pdf;
     /// If sha256+text was used, must be text/plain
     pub mime: Mime,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+#[serde(remote = "Self")]
+pub enum HashWrapper {
+    Legacy(String),
+    Future(Vec<DokumentHash>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+#[serde(remote = "Self")]
+pub enum ZusammenfassungWrapper {
+    Legacy(String),
+    Future(Vec<Zusammenfassungstupel>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -143,9 +171,7 @@ pub struct Dokument {
     pub volltext: String,
 
     /// Summary of the document's contents
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
-    pub zusammenfassung: Option<String>,
+    pub zusammenfassung: Option<ZusammenfassungWrapper>,
 
     /// Protocol of the session on 7.3., created on 8.3. *modified on 9.3*.
     pub zp_modifiziert: chrono::DateTime<chrono::Utc>,
@@ -162,8 +188,7 @@ pub struct Dokument {
     pub link: String,
 
     /// corresponds to sha256+bytes, here for backwards compatibility
-    #[serde(deserialize_with = "de_string")]
-    pub hash: String,
+    pub hash: HashWrapper,
 
     /// General opinion of the gremium about the Document
     /// Stellungnahme:       1=very bad, 5=very good
@@ -179,14 +204,19 @@ pub struct Dokument {
 
     /// List of authors of the document. Could be a person, organisation or a parliamentary body
     pub autoren: Vec<models::Autor>,
+
+    /// If a document contains more than one semantically closed document (x opinions in a collected file for example)
+    /// this denotes the index of the sub-file in question. They can potentially share a hash.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subdoc_id: Option<u16>,
 }
 impl std::default::Default for Dokument {
     fn default() -> Self {
         Self {
             api_id: None,
-            typ: models::Doktyp::Tops,
+            typ: models::Doktyp::Entwurf,
             link: String::new(),
-            hash: String::new(),
+            hash: HashWrapper::Legacy(String::new()),
             titel: String::new(),
             vorwort: None,
             meinung: None,
@@ -200,6 +230,7 @@ impl std::default::Default for Dokument {
             schlagworte: vec![],
             zp_modifiziert: chrono::Utc::now(),
             zusammenfassung: None,
+            subdoc_id: None,
         }
     }
 }
@@ -248,9 +279,9 @@ impl std::fmt::Display for Dokument {
                 .map(|vorwort| ["vorwort", vorwort].join(",")),
             Some("volltext".to_string()),
             Some(self.volltext.clone()),
-            self.zusammenfassung
-                .as_ref()
-                .map(|zusammenfassung| ["zusammenfassung", zusammenfassung].join(",")),
+            self.zusammenfassung.as_ref().map(|zusammenfassung| {
+                ["zusammenfassung", &format!("{zusammenfassung:?}")].join(",")
+            }),
             // Skipping zp_modifiziert in query parameter serialization
 
             // Skipping zp_referenz in query parameter serialization
@@ -259,7 +290,7 @@ impl std::fmt::Display for Dokument {
             Some("link".to_string()),
             Some(self.link.clone()),
             Some("hash".to_string()),
-            Some(self.hash.clone()),
+            Some(format!("{:?}", self.hash)),
             self.meinung
                 .as_ref()
                 .map(|meinung| ["meinung".to_string(), meinung.to_string()].join(",")),
@@ -301,6 +332,126 @@ impl Serialize for DokumentOrApiId {
     }
 }
 
+impl<'de> Deserialize<'de> for HashWrapper {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        #[allow(
+            unused,
+            reason = "I just want to keep these around to hold the parsing errors"
+        )]
+        let mut hl_parsing_err = None;
+        #[allow(
+            unused,
+            reason = "I just want to keep these around to hold the parsing errors"
+        )]
+        let mut str_parsing_err = None;
+
+        match <Vec<DokumentHash>>::deserialize(value.clone()) {
+            Ok(hashlist) => {
+                if hashlist.is_empty() {
+                    return Err(serde::de::Error::custom(
+                        "Hashes cannot be an empty list; At least one Hash is required for a complete Document",
+                    ));
+                }
+                if hashlist.iter().all(|x| {
+                    (40usize..=64).contains(&x.value.len())
+                        && is_valid_string::<D::Error>(&x.value).is_ok()
+                        && x.value.chars().all(|c| c.is_ascii_hexdigit())
+                        && (x.strategy != HashStrategy::Sha256Text
+                            || matches!(x.mime, Mime::TextHtml | Mime::TextPlain))
+                }) {
+                    return Ok(Self::Future(hashlist));
+                }
+                return Err(serde::de::Error::custom(
+                    "Some Hash Value is not: 
+                - in the applicable length of hexadecimal chars: [40, 64]
+                - a valid string
+                - a string of hexadecimal characters
+                - or it failed the mime/hash sanity check",
+                ));
+            }
+            Err(e) => hl_parsing_err = Some(e.to_string()),
+        }
+        match String::deserialize(value.clone()) {
+            Ok(hash) => {
+                if !(40usize..=64).contains(&hash.len()) {
+                    return Err(serde::de::Error::custom(format!(
+                        "Legacy Hash of length {} is not in length range [40; 64]",
+                        hash.len()
+                    )));
+                }
+                if is_valid_string::<D::Error>(&hash).is_err() {
+                    return Err(serde::de::Error::custom(
+                        "Legacy Hash is not a valid string in our sense",
+                    ));
+                }
+                if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(serde::de::Error::custom(
+                        "Legacy Hash must be a string of hexadecimal characters",
+                    ));
+                }
+                return Ok(Self::Legacy(hash));
+            }
+            Err(e) => str_parsing_err = Some(e.to_string()),
+        }
+        if let Some(hl) = hl_parsing_err
+            && let Some(st) = str_parsing_err
+        {
+            Err(serde::de::Error::custom(format!(
+                "Unable to parse value either as String or HashList.
+                Hashlist Parsing Error: {hl}
+                String Parsing Error:   {st}"
+            )))
+        } else {
+            unreachable!(
+                "If Hash list and String deserialization failed, both error thingies should contain errors"
+            )
+        }
+    }
+}
+
+impl Serialize for HashWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Self::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ZusammenfassungWrapper {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Ok(summ) = String::deserialize(value.clone()) {
+            return Ok(Self::Legacy(summ));
+        }
+
+        match <Vec<Zusammenfassungstupel>>::deserialize(value.clone()) {
+            Ok(tupellist) => Ok(Self::Future(tupellist)),
+            Err(e) => Err(serde::de::Error::custom(format!(
+                "Unable to parse value either as String or Vec<Zusammenfassungstupel>.
+                Zusammenfassungstupel: Parsing Error:\n{e}"
+            ))),
+        }
+    }
+}
+
+impl Serialize for ZusammenfassungWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Self::serialize(self, serializer)
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -334,7 +485,7 @@ mod dokument_deserialize {
         let dokument = r#"
         {"titel": "kackstift", "typ": "entwurf", "volltext": "Peter Maffay <peter-maffay@roflkopter.lol> lorem ipsum dolor set amet",
         "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
-        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
+        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65fd8af09d7f56a976d5f9a7d659fad65f", 
         "autoren": []}"#;
         let _deser: super::Dokument = serde_json::from_str(dokument).expect("Success");
     }
@@ -343,7 +494,7 @@ mod dokument_deserialize {
         let dokument = r#"
         {"titel": "</kackstift>", "typ": "entwurf", "volltext": "Peter Maffay <peter-maffay@roflkopter.lol> lorem ipsum dolor set amet",
         "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
-        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
+        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65fd8af09d7f56a976d5f9a7d659fad65f", 
         "autoren": []}"#;
         let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
         deser.expect_err("Success");
@@ -353,7 +504,7 @@ mod dokument_deserialize {
         let dokument = r#"{"titel": "kackstift", "typ": "entwurf", 
         "volltext": "Peter Maffay <peter-maffay@roflkopter.lol> lorem ipsum \u0000 dolor set amet", 
         "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
-        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
+        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65fd8af09d7f56a976d5f9a7d659fad65f", 
         "autoren": []}"#;
         let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
         deser.expect_err("Success");
@@ -361,7 +512,7 @@ mod dokument_deserialize {
         let dokument = r#"{"titel": "kackstift\u0000 karla", "typ": "entwurf", 
         "volltext": "Petr Maffay <peter-maffay@roflkopter.lol> lorem ipsum dolor set amet", 
         "zp_referenz": "2026-01-01T10:10:10Z", "zp_modifiziert": "2026-01-01T10:10:10Z",
-        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65f", 
+        "link": "https://example.com", "hash": "d8af09d7f56a976d5f9a7d659fad65fd8af09d7f56a976d5f9a7d659fad65f", 
         "autoren": []}"#;
         let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
         deser.expect_err("Success");

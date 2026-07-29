@@ -643,10 +643,14 @@ mod test_endpoints {
 
 #[cfg(test)]
 pub(crate) mod test_failed_irl_scenarios {
-    use crate::{models, utils::testing::TestSetup};
+    use crate::models;
+    use crate::models::enumerations::{Ressort, Sachgebiet};
+    use crate::models::params;
+    use crate::utils::testing::{TestSetup, generate};
     use std::path::{Path, PathBuf};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
+    use uuid::uuid;
     use uuid::{Timestamp, Uuid};
 
     pub async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
@@ -732,7 +736,7 @@ pub(crate) mod test_failed_irl_scenarios {
       "volltext": "Vorher "#;
         let post = r#" Nachher",
       "link": "https://example.com",
-      "hash": "afdu9a8sjdf8j193rj98j",
+      "hash": "ed9ceab0cb76eabc0ecba0ecba0e8c7ba0e8r7c6ba0e876cb",
       "zp_referenz": "2024-01-01T00:00:00+00:00",
       "zp_modifiziert": "2024-01-01T00:00:00+00:00",
       "autoren": []
@@ -771,5 +775,45 @@ pub(crate) mod test_failed_irl_scenarios {
         }
         eprintln!("{errors:#?}");
         test_setup.teardown().await;
+    }
+    #[tokio::test]
+    async fn vorgang_get_success_new_members() {
+        let scenario = TestSetup::new("test_vorgang_get_success_new_members").await;
+
+        let api_id = uuid!("06836a6d-30e6-4200-b968-ca362af92d2e");
+        let vorgang = models::Vorgang {
+            api_id,
+            ressort: Some(Ressort::Justiz),
+            sachgebiete: vec![Sachgebiet::Normung, Sachgebiet::JagdFischerei],
+            ..generate::default_vorgang()
+        };
+        let _insert = super::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+
+        let vorgang = super::vorgang_get_by_id(
+            &scenario.server,
+            &params::IfModSince {
+                if_modified_since: None,
+            },
+            &params::ApiIdPathParam { api_id },
+            false,
+        )
+        .await;
+
+        assert!(matches!(vorgang,
+        Ok(crate::api::GetSingleResponse::Success(v))
+            if v.ressort == Some(Ressort::Justiz) &&
+            v.sachgebiete.contains(&Sachgebiet::Normung) &&
+            v.sachgebiete.contains(&Sachgebiet::JagdFischerei)
+        ));
+        scenario.teardown().await;
     }
 }

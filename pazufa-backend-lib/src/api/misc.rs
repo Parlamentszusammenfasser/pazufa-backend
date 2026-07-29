@@ -1,12 +1,97 @@
 use super::PaginationResponsePart;
-use crate::api::{GetSingleResponse, ListingGetResponse};
-use crate::models::params;
+use crate::api::{GetSingleResponse, ListingGetResponse, find_applicable_date_range};
+use crate::db::retrieve;
+use crate::models::enumerations::DokumentFormat;
+use crate::models::params::{self, ListingQueryParams};
 use crate::{LTZFError, LTZFServer, Result, models};
 use sqlx::Row;
 use sqlx::SqlSafeStr;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
+
+/// GETs all Dokument Objects given the filtering parameters
+/// # Errors
+/// Can fail due to database errors or Pagination errors
+pub async fn dokumente_get_by_params(
+    server: &LTZFServer,
+    _format: DokumentFormat,
+    lp: ListingQueryParams,
+    ims: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<ListingGetResponse<models::Dokument>> {
+    let mut tx = server.sqlx_db.begin().await?;
+    let Some(time_span) = find_applicable_date_range(None, None, None, lp.since, lp.until, ims)
+    else {
+        tx.rollback().await?;
+        warn!(
+            "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
+            lp, ims
+        );
+        return Ok(ListingGetResponse::BadReq);
+    };
+    let result: i64 = sqlx::query_scalar!(
+        "WITH dates(id, t) AS (
+            SELECT id, zp_referenz as t FROM dokument d
+            UNION
+            SELECT id, zp_lastmod  as t FROM dokument d 
+            UNION
+            SELECT id, zp_created  as t FROM dokument d
+        ),
+        dates_min(id, t) AS (SELECT id, MIN(t) FROM dates GROUP BY id)
+
+        SELECT COUNT(1) as \"cnt!\" FROM dokument d, dates_min dm
+        WHERE
+            dm.id = d.id AND 
+            dm.t BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz)
+        ",
+        time_span.since,
+        time_span.until
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let prp = PaginationResponsePart::new(
+        u32::try_from(result).map_err(|e| LTZFError::Other {
+            message: format!("Failed to convert result length: {e}"),
+        })?,
+        lp.page,
+        lp.per_page,
+    );
+    if result == 0 {
+        return Ok(ListingGetResponse::NoContent);
+    }
+    if let Some(p) = lp.page
+        && p > prp.x_page
+    {
+        return Ok(ListingGetResponse::NoContent);
+    }
+    let dids: Vec<i32> = sqlx::query_scalar!(
+        "SELECT id FROM dokument d WHERE
+        zp_referenz BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz) OR
+        zp_lastmod  BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz) OR
+        zp_created  BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz)
+        ORDER BY zp_lastmod
+        LIMIT $3
+        OFFSET $4
+        ",
+        time_span.since,
+        time_span.until,
+        prp.limit(),
+        prp.offset()
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut doks = vec![];
+    // if ftm, query here. not implemented yet
+    for did in dids {
+        doks.push(retrieve::dokument_by_id(did, &mut tx).await?);
+    }
+    Ok(ListingGetResponse::Success {
+        body: doks,
+        prp,
+        path_prefix: "/api/v2/dokumente",
+    })
+}
 
 /// GETs all Authors given the filtering parameters
 /// # Errors
@@ -269,8 +354,15 @@ mod test_unauthorisiert {
     use crate::api::ListingGetResponse;
     use crate::api::vorgang as libvg;
     use crate::models;
+    use crate::models::dokument::DokumentHash;
+    use crate::models::dokument::HashWrapper;
+    use crate::models::dokument::ZusammenfassungWrapper;
+    use crate::models::dokument::Zusammenfassungstupel;
+    use crate::models::enumerations::HashStrategy;
+    use crate::models::enumerations::Mime;
     use crate::models::params;
     use crate::utils::testing::{TestSetup, generate};
+    use uuid::uuid;
 
     #[tokio::test]
     async fn autoren_get_nocontent_on_page_overflow() {
@@ -302,7 +394,7 @@ mod test_unauthorisiert {
         scenario.teardown().await;
     }
     #[tokio::test]
-    async fn test_autor_get_nocontent() {
+    async fn autor_get_nocontent() {
         let scenario = TestSetup::new("autor_get_nocontent").await;
         let r = super::autoren_get(
             &scenario.server,
@@ -321,7 +413,7 @@ mod test_unauthorisiert {
     }
 
     #[tokio::test]
-    async fn test_autor_get_success() {
+    async fn autor_get_success() {
         let scenario = TestSetup::new("autor_get_success").await;
 
         let vorgang = generate::default_vorgang();
@@ -387,7 +479,7 @@ mod test_unauthorisiert {
     }
 
     #[tokio::test]
-    async fn test_gremien_get_nocontent() {
+    async fn gremien_get_nocontent() {
         let scenario = TestSetup::new("test_gremien_get_nocontent").await;
         let result = super::gremien_get(
             &scenario.server,
@@ -408,7 +500,7 @@ mod test_unauthorisiert {
         scenario.teardown().await;
     }
     #[tokio::test]
-    async fn test_gremium_get_success() {
+    async fn gremium_get_success() {
         let scenario = TestSetup::new("test_gremium_get_success").await;
         let vorgang = generate::default_vorgang();
         let dft_gremium = generate::default_gremium();
@@ -542,7 +634,7 @@ mod test_unauthorisiert {
         scenario.teardown().await;
     }
     #[tokio::test]
-    async fn test_enum_get_nocontent() {
+    async fn enum_get_nocontent() {
         let scenario = TestSetup::new("test_enum_get_nocontent").await;
         let test_parameters = vec![
             models::EnumerationNames::Parlamente,
@@ -572,7 +664,7 @@ mod test_unauthorisiert {
     }
 
     #[tokio::test]
-    async fn test_enum_get_success() {
+    async fn enum_get_success() {
         let scenario = TestSetup::new("test_enum_get_success").await;
         let test_cases_one = vec![
             (models::EnumerationNames::Vorgangstypen, "einspruch"),
@@ -610,6 +702,154 @@ mod test_unauthorisiert {
                 "Expected to get success, got {result:?} instead with test case `{name}` / `{mtch}`"
             );
         }
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn dokumente_get_success_new_members() {
+        let scenario = TestSetup::new("test_dokumente_get_success_new_members").await;
+        let api_id = uuid!("06836a6d-30e6-4200-b968-ca362af92d2e");
+        let vorgang = models::Vorgang {
+            stationen: vec![models::Station {
+                dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
+                    models::Dokument {
+                        api_id: Some(api_id),
+                        hash: HashWrapper::Future(vec![
+                            DokumentHash {
+                                mime: Mime::ApplicationPdf,
+                                value: "469527345692734698276459726439587234857284756".to_owned(),
+                                strategy: HashStrategy::Sha1Bytes,
+                            },
+                            DokumentHash {
+                                mime: Mime::TextHtml,
+                                value: "4695273456927346982764597264395872348572847ffe".to_owned(),
+                                strategy: HashStrategy::Sha256Text,
+                            },
+                            DokumentHash {
+                                mime: Mime::ApplicationPdf,
+                                value: "4695273456927346912764597264395872348572847ffe".to_owned(),
+                                strategy: HashStrategy::Sha256Bytes,
+                            },
+                        ]),
+                        zusammenfassung: Some(ZusammenfassungWrapper::Future(vec![
+                            Zusammenfassungstupel {
+                                typ: "full".to_owned(),
+                                inhalt: "something something content creation".to_owned(),
+                            },
+                        ])),
+                        ..generate::default_dokument()
+                    },
+                ))],
+                ..generate::default_station()
+            }],
+            ..generate::default_vorgang()
+        };
+        let _insert = libvg::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+        let dokument =
+            super::dokument_get_by_id(&scenario.server, &params::ApiIdPathParam { api_id }).await;
+
+        let dokument2 =
+            super::dokument_get_by_id(&scenario.server, &params::ApiIdPathParam { api_id }).await;
+        assert!(
+            matches!(dokument,
+            Ok(crate::api::GetSingleResponse::Success(d))
+                if
+                matches!(d.hash, HashWrapper::Future(ref hv)
+                    if hv.len() == 3 && hv.contains(&DokumentHash {
+                            mime: Mime::ApplicationPdf,
+                            value: "469527345692734698276459726439587234857284756".to_owned(),
+                            strategy: HashStrategy::Sha1Bytes,
+                        }) &&
+                    hv.contains(&DokumentHash {
+                                    mime: Mime::TextHtml,
+                                    value: "4695273456927346982764597264395872348572847ffe".to_owned(),
+                                    strategy: HashStrategy::Sha256Text,
+                                }) &&
+                    hv.contains(&DokumentHash {
+                                    mime: Mime::ApplicationPdf,
+                                    value: "4695273456927346912764597264395872348572847ffe".to_owned(),
+                                    strategy: HashStrategy::Sha256Bytes,
+                                })
+                    ) &&
+                matches!(d.zusammenfassung, Some(ZusammenfassungWrapper::Legacy(_)))
+            ),
+            "{dokument2:?}"
+        );
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn dokument_get_success() {
+        let scenario = TestSetup::new("test_dokument_get_success").await;
+        let vorgang = generate::default_vorgang();
+        libvg::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+
+        let result = super::dokumente_get_by_params(
+            &scenario.server,
+            models::enumerations::DokumentFormat::Pazufa,
+            params::ListingQueryParams {
+                since: None,
+                until: None,
+                page: None,
+                per_page: None,
+            },
+            None,
+        )
+        .await;
+
+        assert!(
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if body.len() == 2)
+        );
+        assert!(
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if body.contains(&generate::default_stellungnahme()))
+        );
+        assert!(
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if body.contains(&generate::default_dokument()))
+        );
+        assert!(
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if prp.x_page == 1)
+        );
+        assert!(
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if prp.x_total_count == 2)
+        );
+        assert!(
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if prp.x_total_pages == 1)
+        );
+
+        let result = super::dokumente_get_by_params(
+            &scenario.server,
+            models::enumerations::DokumentFormat::Pazufa,
+            params::ListingQueryParams {
+                since: Some(
+                    chrono::DateTime::parse_from_rfc3339("2200-01-01T01:01:01Z")
+                        .expect("static str")
+                        .to_utc(),
+                ),
+                until: None,
+                page: None,
+                per_page: None,
+            },
+            None,
+        )
+        .await;
+
+        assert!(matches!(&result, Ok(ListingGetResponse::NoContent)));
         scenario.teardown().await;
     }
 }

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id FROM dokument d\n        INNER JOIN dokumententyp dt ON dt.id = d.typ \n        WHERE \n        -- ein übereinstimmender hash existiert\n        ( EXISTS (\n            SELECT 1 FROM \n                dok_hashes dh,\n                hash_strategy hs,\n                UNNEST($1::text[], $2::text[]) as input_values(value, tp)\n            WHERE dh.dok_id = d.id\n            AND hs.id = dh.hash_strat_id\n            AND input_values.value = dh.value\n            AND input_values.tp = hs.value\n            )\n            AND\n        -- und eine übereinstimmende subdoc_id\n           ( d.subdoc_id = $3 OR ( d.subdoc_id IS NULL AND $3 IS NULL ))\n         )\n        OR\n        d.api_id = $4 OR\n        (d.drucksnr = $5 AND dt.value = $6\n            AND ($7 BETWEEN (d.zp_referenz-'12 hours'::interval) \n            AND (d.zp_referenz+'12 hours'::interval)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int4",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "812be1f08334ff900ff978911a320c8c6777f4599a66cb8ac7ccfe2aefe0128a"
+}

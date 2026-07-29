@@ -36,7 +36,13 @@ pub struct Configuration {
     pub host: String,
     #[arg(long, env = "PAZUFA_PORT", default_value = "80")]
     pub port: u16,
-    #[arg(long, short, env = "DATABASE_URL", help = "URL to the database")]
+    #[arg(
+        long,
+        short,
+        env = "DATABASE_URL",
+        help = "URL to the database",
+        default_value = "invalid_url"
+    )]
     pub db_url: String,
 
     #[arg(

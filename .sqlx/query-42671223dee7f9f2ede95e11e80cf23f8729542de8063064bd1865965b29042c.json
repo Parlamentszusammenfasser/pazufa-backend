@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    SELECT dh.value as hash, hs.value as strat, m.value as mime\n    FROM\n        dok_hashes dh,\n        hash_strategy hs,\n        mime m\n    WHERE\n        hs.id = dh.hash_strat_id AND\n        dh.dok_id = $1 AND\n        dh.mime_id = m.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hash",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "dok_hashes",
+            "name": "value"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "strat",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "hash_strategy",
+            "name": "value"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "mime",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "mime",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "42671223dee7f9f2ede95e11e80cf23f8729542de8063064bd1865965b29042c"
+}

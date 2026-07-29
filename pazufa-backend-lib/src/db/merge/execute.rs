@@ -18,6 +18,7 @@ use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_v
 #[cfg(feature = "track-validation")]
 use crate::db::validate;
 use crate::error::{DataValidationError, LTZFError};
+use crate::models::enumerations::{HashStrategy, Mime};
 use crate::utils::notify::notify_ambiguous_match;
 use crate::{LTZFServer, Result, models};
 use tracing::{debug, info, warn};
@@ -37,8 +38,8 @@ pub(crate) async fn execute_merge_dokument(
         "UPDATE dokument SET
         drucksnr = $2, titel =$3,
         kurztitel = COALESCE($4, kurztitel), vorwort=COALESCE($5, vorwort),
-        volltext=COALESCE($6, volltext), zusammenfassung=COALESCE($7, zusammenfassung),
-        zp_lastmod=$8, link=$9, hash=$10, meinung=$11
+        volltext=COALESCE($6, volltext),
+        zp_lastmod=$7, link=$8, meinung=$9
         WHERE dokument.id = $1
         ",
         db_id,
@@ -47,11 +48,78 @@ pub(crate) async fn execute_merge_dokument(
         model.kurztitel,
         model.vorwort,
         model.volltext,
-        model.zusammenfassung,
         model.zp_modifiziert,
         model.link,
-        model.hash,
-        model.meinung.map(|x| i32::from(x))
+        model.meinung.map(i32::from)
+    )
+    .execute(&mut **tx)
+    .await?;
+    // hashes: replace if strategy bin conflicts
+    let mut hash_values: Vec<String> = vec![];
+    let mut hash_types: Vec<String> = vec![];
+    let mut hash_mimes: Vec<String> = vec![];
+    match &model.hash {
+        models::dokument::HashWrapper::Legacy(h) => {
+            hash_values.push(h.clone());
+            hash_types.push(HashStrategy::Sha256Bytes.to_string());
+            hash_mimes.push(Mime::ApplicationPdf.to_string());
+        }
+        models::dokument::HashWrapper::Future(hashes) => {
+            for ht in hashes {
+                hash_values.push(ht.value.clone());
+                hash_types.push(ht.strategy.to_string());
+                hash_mimes.push(ht.mime.to_string());
+            }
+        }
+    }
+    sqlx::query!(
+        "INSERT INTO dok_hashes(dok_id, hash_strat_id, value, mime_id)
+        SELECT $1, hs.id, i.value, m.id
+            FROM 
+                UNNEST($2::text[], $3::text[], $4::text[]) as i(strat, value, mime), 
+                hash_strategy hs,
+                mime m
+            WHERE 
+                hs.value = i.strat AND
+                m.value = i.mime
+        ON CONFLICT (dok_id, hash_strat_id) 
+        DO UPDATE SET 
+            value=EXCLUDED.value,
+            mime_id=EXCLUDED.mime_id
+            ",
+        db_id,
+        &hash_types[..],
+        &hash_values[..],
+        &hash_mimes[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    // zusammenfassung: replace by type
+    let mut zf_values: Vec<String> = vec![];
+    let mut zf_types: Vec<String> = vec![];
+    match &model.zusammenfassung {
+        Some(models::dokument::ZusammenfassungWrapper::Legacy(zf)) => {
+            zf_values.push(zf.clone());
+            zf_types.push("full".to_string());
+        }
+        Some(models::dokument::ZusammenfassungWrapper::Future(zfs)) => {
+            for zf in zfs {
+                zf_values.push(zf.inhalt.clone());
+                zf_types.push(zf.typ.clone());
+            }
+        }
+        None => {}
+    }
+    sqlx::query!(
+        "INSERT INTO dok_zusammenfassungen(dok_id, zf_typ, value)
+        SELECT $1, zft.id, i.value
+            FROM UNNEST($2::text[], $3::text[]) as i(tp, value), zusammenf_typ as zft
+            WHERE zft.value = i.tp
+        ON CONFLICT (dok_id, zf_typ) DO UPDATE SET value=EXCLUDED.value",
+        db_id,
+        &zf_types[..],
+        &zf_values[..]
     )
     .execute(&mut **tx)
     .await?;

@@ -82,6 +82,17 @@
       },
       {
         "ordinal": 7,
+        "name": "ressort",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "vorgang",
+            "name": "ressort"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
         "name": "value",
         "type_info": "Varchar",
         "origin": {
@@ -105,6 +116,7 @@
       false,
       false,
       false,
+      true,
       false
     ]
   },

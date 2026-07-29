@@ -5,6 +5,7 @@ use crate::db::merge::candidates::dokument_merge_candidates;
 use crate::db::validate;
 use crate::error::LTZFError;
 use crate::models;
+use crate::models::enumerations::{HashStrategy, Mime};
 use crate::{
     LTZFServer, Result,
     utils::{self, notify::notify_new_enum_entry},
@@ -65,9 +66,9 @@ pub(crate) async fn insert_vorgang(
     // master insert
     let vg_id = sqlx::query!(
         "
-    INSERT INTO vorgang(api_id, titel, kurztitel, verfaend, wahlperiode, typ)
+    INSERT INTO vorgang(api_id, titel, kurztitel, verfaend, wahlperiode, typ, ressort)
     VALUES
-    ($1, $2, $3, $4, $5, (SELECT id FROM vorgangstyp WHERE value=$6))
+    ($1, $2, $3, $4, $5, (SELECT id FROM vorgangstyp WHERE value=$6), (SELECT id from ressort WHERE value = $7))
     RETURNING vorgang.id;",
         vg.api_id,
         vg.titel,
@@ -76,7 +77,8 @@ pub(crate) async fn insert_vorgang(
         i32::try_from(vg.wahlperiode).map_err(|e| LTZFError::Other {
             message: format!("Failed to convert vorgang wahlperiode as it exceeds i32::MAX: {e}")
         })?,
-        server.guard_ts(&vg.typ, vg.api_id, obj)
+        server.guard_ts(&vg.typ, vg.api_id, obj),
+        vg.ressort.map(|x| x.to_string())
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)
@@ -88,6 +90,19 @@ pub(crate) async fn insert_vorgang(
         scraper_id,
         tx,
     )
+    .await?;
+    // insert sachgebiete
+    let sg_numbers: Vec<_> = vg.sachgebiete.iter().map(|x| i32::from(*x)).collect();
+    sqlx::query!(
+        "INSERT INTO vg_sachgebiete(vg_id, sg_id)
+        SELECT $1, s.id FROM 
+            UNNEST($2::int4[]) as i, sachgebiet s
+        WHERE i = s.value
+        ",
+        vg_id,
+        &sg_numbers[..]
+    )
+    .execute(&mut **tx)
     .await?;
 
     // insert links
@@ -316,10 +331,10 @@ pub(crate) async fn insert_dokument(
     let obj = "Dokument";
     let did = sqlx::query!(
         "INSERT INTO dokument(api_id, drucksnr, typ, titel, kurztitel, vorwort, 
-        volltext, zusammenfassung, zp_lastmod, link, hash, zp_referenz, zp_created, meinung)
+        volltext, zp_lastmod, link, zp_referenz, zp_created, meinung, subdoc_id)
         VALUES(
             $1,$2, (SELECT id FROM dokumententyp WHERE value = $3),
-            $4,$5,$6,$7,$8,$9,$10,$11, $12,$13,$14
+            $4,$5,$6,$7,$8,$9,$10,$11, $12, $13
         )RETURNING id",
         dapi,
         dok.drucksnr,
@@ -328,17 +343,91 @@ pub(crate) async fn insert_dokument(
         dok.kurztitel,
         dok.vorwort,
         dok.volltext,
-        dok.zusammenfassung,
         dok.zp_modifiziert,
         dok.link,
-        dok.hash,
         dok.zp_referenz,
         dok.zp_erstellt,
-        dok.meinung.map(|r| i32::from(r))
+        dok.meinung.map(i32::from),
+        dok.subdoc_id.map(i32::from)
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
+    // hash
+    {
+        let mut v_hashstrats: Vec<String> = vec![];
+        let mut v_hashvalues: Vec<String> = vec![];
+        let mut v_hash_mimes: Vec<String> = vec![];
+        match &dok.hash {
+            models::dokument::HashWrapper::Legacy(h) => {
+                v_hashstrats.push(HashStrategy::Sha256Bytes.to_string());
+                v_hashvalues.push(h.clone());
+                v_hash_mimes.push(Mime::ApplicationPdf.to_string());
+            }
+            models::dokument::HashWrapper::Future(hvec) => {
+                for h in hvec {
+                    v_hashvalues.push(h.value.clone());
+                    v_hashstrats.push(h.strategy.to_string());
+                    v_hash_mimes.push(h.mime.to_string());
+                }
+            }
+        }
+        sqlx::query!(
+            "INSERT INTO dok_hashes(dok_id, hash_strat_id, value, mime_id) 
+        SELECT $1, hs.id, inpt.value, m.id 
+        FROM
+            UNNEST($2::text[], $3::text[], $4::text[]) as inpt(strat, value, mime),
+            hash_strategy hs, 
+            mime as m
+        WHERE 
+            hs.value = inpt.strat AND
+            m.value = inpt.mime
+        ",
+            did,
+            &v_hashstrats[..],
+            &v_hashvalues[..],
+            &v_hash_mimes[..]
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    // zusammenfassung
+    {
+        let mut v_zftypes: Vec<String> = vec![];
+        let mut v_zfvalue: Vec<String> = vec![];
+        match &dok.zusammenfassung {
+            Some(models::dokument::ZusammenfassungWrapper::Legacy(h)) => {
+                v_zftypes.push("full".to_string());
+                v_zfvalue.push(h.clone());
+            }
+            Some(models::dokument::ZusammenfassungWrapper::Future(hvec)) => {
+                for h in hvec {
+                    v_zftypes.push(h.typ.clone());
+                    v_zfvalue.push(h.inhalt.clone());
+                }
+            }
+            None => {}
+        }
+        sqlx::query!(
+            "INSERT INTO zusammenf_typ (value) 
+            SELECT * FROM UNNEST($1::text[]) ON CONFLICT DO NOTHING",
+            &v_zftypes[..]
+        )
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO dok_zusammenfassungen(dok_id, zf_typ, value) 
+        SELECT $1, zft.id, inpt.value FROM
+            zusammenf_typ zft, UNNEST($2::text[], $3::text[]) as inpt(strat, value)
+            WHERE zft.value = inpt.strat
+        ",
+            did,
+            &v_zftypes[..],
+            &v_zfvalue[..]
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
     // Schlagworte
     insert_dok_sw(did, &dok.schlagworte, tx).await?;
 

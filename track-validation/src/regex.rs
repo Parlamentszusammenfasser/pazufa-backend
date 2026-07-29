@@ -317,7 +317,7 @@ impl Regex {
                         break;
                     }
                 } else if left == Regex::Empty {
-                    continue;
+                    // do nothing
                 } else {
                     new_left.push(left);
                 }

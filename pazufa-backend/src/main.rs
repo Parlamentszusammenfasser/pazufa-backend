@@ -57,7 +57,7 @@ mod openapi {
     #[openapi(
     info(
         title= "LTZF API",
-        version = "0.2.4-pre1",
+        version = "0.2.5",
         contact(email="info@pazufa.de"),
         license(name = "GPLv3", url = "https://www.gnu.org/licenses/gpl-3.0.en.html"),
         description = "Description of the PaZuFa API. All listings that are returned by the ser

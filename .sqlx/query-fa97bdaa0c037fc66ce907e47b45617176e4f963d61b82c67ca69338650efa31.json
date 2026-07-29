@@ -93,17 +93,6 @@
       },
       {
         "ordinal": 8,
-        "name": "zusammenfassung",
-        "type_info": "Varchar",
-        "origin": {
-          "Table": {
-            "table": "dokument",
-            "name": "zusammenfassung"
-          }
-        }
-      },
-      {
-        "ordinal": 9,
         "name": "zp_lastmod",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "zp_referenz",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +114,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "zp_created",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +125,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "link",
         "type_info": "Varchar",
         "origin": {
@@ -147,18 +136,7 @@
         }
       },
       {
-        "ordinal": 13,
-        "name": "hash",
-        "type_info": "Varchar",
-        "origin": {
-          "Table": {
-            "table": "dokument",
-            "name": "hash"
-          }
-        }
-      },
-      {
-        "ordinal": 14,
+        "ordinal": 12,
         "name": "meinung",
         "type_info": "Int4",
         "origin": {
@@ -169,7 +147,18 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 13,
+        "name": "subdoc_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "subdoc_id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
         "name": "typ_value",
         "type_info": "Varchar",
         "origin": {
@@ -194,12 +183,11 @@
       true,
       true,
       false,
-      true,
       false,
       false,
       true,
       false,
-      false,
+      true,
       true,
       false
     ]

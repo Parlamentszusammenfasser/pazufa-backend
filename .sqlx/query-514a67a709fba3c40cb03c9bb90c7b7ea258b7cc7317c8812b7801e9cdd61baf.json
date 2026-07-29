@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dok_hashes(dok_id, hash_strat_id, value, mime_id) \n        SELECT $1, hs.id, inpt.value, m.id \n        FROM\n            UNNEST($2::text[], $3::text[], $4::text[]) as inpt(strat, value, mime),\n            hash_strategy hs, \n            mime as m\n        WHERE \n            hs.value = inpt.strat AND\n            m.value = inpt.mime\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "514a67a709fba3c40cb03c9bb90c7b7ea258b7cc7317c8812b7801e9cdd61baf"
+}

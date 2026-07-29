@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.value \n        FROM vg_sachgebiete vs, sachgebiet s\n        WHERE\n            s.id = vs.sg_id AND vs.vg_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "sachgebiet",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7a5bc099be5cf04bc96f9ad8fc2733f8bc824332648b5bb78159e0273eccd052"
+}

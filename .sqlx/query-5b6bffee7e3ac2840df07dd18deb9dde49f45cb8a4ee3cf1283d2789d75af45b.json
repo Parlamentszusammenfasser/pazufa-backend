@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM dokument d WHERE\n        zp_referenz BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz) OR\n        zp_lastmod  BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz) OR\n        zp_created  BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz)\n        ORDER BY zp_lastmod\n        LIMIT $3\n        OFFSET $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5b6bffee7e3ac2840df07dd18deb9dde49f45cb8a4ee3cf1283d2789d75af45b"
+}

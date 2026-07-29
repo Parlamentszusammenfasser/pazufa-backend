@@ -836,10 +836,7 @@ mod sitzung_test {
                         "Expected 204 no content, got 200 OK with empty body"
                     );
                 }
-                _ => panic!(
-                    "Expected to find sessions with valid filters, got: {:?}",
-                    &response
-                ),
+                _ => panic!("Expected to find sessions with valid filters, got: {response:?}"),
             }
         }
 

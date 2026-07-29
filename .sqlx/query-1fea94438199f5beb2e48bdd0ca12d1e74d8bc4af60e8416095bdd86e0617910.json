@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO dokument(api_id, drucksnr, typ, titel, kurztitel, vorwort, \n        volltext, zusammenfassung, zp_lastmod, link, hash, zp_referenz, zp_created, meinung)\n        VALUES(\n            $1,$2, (SELECT id FROM dokumententyp WHERE value = $3),\n            $4,$5,$6,$7,$8,$9,$10,$11, $12,$13,$14\n        )RETURNING id",
+  "query": "INSERT INTO dokument(api_id, drucksnr, typ, titel, kurztitel, vorwort, \n        volltext, zp_lastmod, link, zp_referenz, zp_created, meinung, subdoc_id)\n        VALUES(\n            $1,$2, (SELECT id FROM dokumententyp WHERE value = $3),\n            $4,$5,$6,$7,$8,$9,$10,$11, $12, $13\n        )RETURNING id",
   "describe": {
     "columns": [
       {
@@ -24,12 +24,11 @@
         "Varchar",
         "Varchar",
         "Varchar",
-        "Varchar",
         "Timestamptz",
-        "Varchar",
         "Varchar",
         "Timestamptz",
         "Timestamptz",
+        "Int4",
         "Int4"
       ]
     },
@@ -37,5 +36,5 @@
       false
     ]
   },
-  "hash": "1c97480d868a0468c92ce3dcd7aeca810d45e7437ef8ea750f974ebda89b9988"
+  "hash": "1fea94438199f5beb2e48bdd0ca12d1e74d8bc4af60e8416095bdd86e0617910"
 }

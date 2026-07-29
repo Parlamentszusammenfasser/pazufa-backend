@@ -2,6 +2,11 @@
     clippy::disallowed_macros,
     reason = "this is just a benchmarking binary"
 )]
+#![allow(
+    clippy::arithmetic_side_effects,
+    reason = "this is just a benchmarking binary"
+)]
+#![allow(clippy::expect_used, reason = "this is just a benchmarking binary")]
 use std::{collections::BTreeMap, str::FromStr};
 use track_validation::Regex;
 

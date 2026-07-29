@@ -7,11 +7,11 @@ import re
 
 
 def replace(file: str, pattern: str, replacement: str):
-    file = Path(file)
-    text = file.read_text()
+    fpath = Path(file)
+    text = fpath.read_text()
     new_text = re.sub(pattern, replacement, text)
     if text != new_text:
-        file.write_text(new_text)
+        fpath.write_text(new_text)
         print(f"Updated {file}")
     else:
         print(f"No changes needed in {file}")
@@ -22,6 +22,14 @@ with open("variables.toml", "rb") as f:
 
 version = file["version"]["version"]
 trackfile = file["version"]["trackfile"]
+spec_version = file["version"]["spec_version"]
+
+
+replace(
+    "pazufa-backend/src/main.rs",
+    '\n\\s+version\\s*=\\s*"\\d+\\.\\d+\\.\\d+.*",',
+    f'\n        version = "{spec_version}",',
+)
 
 replace(
     "docker-compose.yml",
@@ -39,6 +47,7 @@ replace(
     'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
     f'version = "{version}"\n',
 )
+
 
 replace(
     ".woodpecker/deploy.yml",

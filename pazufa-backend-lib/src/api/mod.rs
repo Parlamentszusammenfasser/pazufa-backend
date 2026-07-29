@@ -39,7 +39,7 @@ pub enum PazufaOrFtmListingResponse {
     NotMod,
     NotImpl,
     NoContent,
-    BadRequest,
+    BadReq,
     Error(String),
 }
 impl axum::response::IntoResponse for PazufaOrFtmListingResponse {
@@ -49,7 +49,7 @@ impl axum::response::IntoResponse for PazufaOrFtmListingResponse {
             Self::NoContent => StatusCode::NO_CONTENT.into_response(),
             Self::NotMod => StatusCode::NOT_MODIFIED.into_response(),
             Self::NotImpl => StatusCode::NOT_IMPLEMENTED.into_response(),
-            Self::BadRequest => StatusCode::BAD_REQUEST.into_response(),
+            Self::BadReq => StatusCode::BAD_REQUEST.into_response(),
             Self::Ftm {
                 body,
                 prp,
@@ -882,8 +882,8 @@ mod test_applicable_date_range {
         if let Some(result) =
             find_applicable_date_range(Some(y), None, None, Some(since), Some(until), None)
         {
-            assert!(result.since == expected_since);
-            assert!(result.until == expected_until);
+            assert_eq!(result.since, expected_since);
+            assert_eq!(result.until, expected_until);
         } else {
             panic!("Failed to get applicable date range based on combined parameters.")
         }

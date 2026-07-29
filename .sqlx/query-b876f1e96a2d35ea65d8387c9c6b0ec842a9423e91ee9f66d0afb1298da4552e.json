@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dok_hashes(dok_id, hash_strat_id, value, mime_id)\n        SELECT $1, hs.id, i.value, m.id\n            FROM \n                UNNEST($2::text[], $3::text[], $4::text[]) as i(strat, value, mime), \n                hash_strategy hs,\n                mime m\n            WHERE \n                hs.value = i.strat AND\n                m.value = i.mime\n        ON CONFLICT (dok_id, hash_strat_id) \n        DO UPDATE SET \n            value=EXCLUDED.value,\n            mime_id=EXCLUDED.mime_id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b876f1e96a2d35ea65d8387c9c6b0ec842a9423e91ee9f66d0afb1298da4552e"
+}

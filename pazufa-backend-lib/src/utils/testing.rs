@@ -111,7 +111,10 @@ impl TestSetup {
 
 pub(crate) mod generate {
 
-    use crate::models;
+    use crate::models::{
+        self,
+        dokument::{HashWrapper, ZusammenfassungWrapper},
+    };
 
     pub(crate) mod random {
 
@@ -238,6 +241,7 @@ pub(crate) mod generate {
             models::Dokument {
                 api_id: Some(random_uuid(rng)),
                 touched_by: vec![],
+                subdoc_id: None,
                 drucksnr: if has_drucksnr {
                     Some(format!(
                         "{}/{}",
@@ -265,7 +269,12 @@ pub(crate) mod generate {
                 },
                 volltext: random_string(rng, "Volltext des Dokuments: ", 100, 500),
                 zusammenfassung: if has_zusammenfassung {
-                    Some(random_string(rng, "Zusammenfassung: ", 50, 200))
+                    Some(ZusammenfassungWrapper::Legacy(random_string(
+                        rng,
+                        "Zusammenfassung: ",
+                        50,
+                        200,
+                    )))
                 } else {
                     None
                 },
@@ -281,7 +290,7 @@ pub(crate) mod generate {
                     random_string(rng, "", 5, 10),
                     random_string(rng, "", 8, 16)
                 ),
-                hash: random_string(rng, "", 20, 40),
+                hash: HashWrapper::Legacy(random_string(rng, "", 40, 60)),
                 meinung: if is_stln {
                     Some(rng.random_range(1..=5))
                 } else {
@@ -560,6 +569,8 @@ pub(crate) mod generate {
                 typ,
                 ids,
                 links,
+                ressort: None,
+                sachgebiete: vec![],
                 initiatoren,
                 stationen,
                 lobbyregister,
@@ -628,6 +639,8 @@ pub(crate) mod generate {
             let mut rng = StdRng::seed_from_u64(seed);
             random_station(&mut rng)
         }
+        use crate::models::dokument::HashWrapper;
+        use crate::models::dokument::ZusammenfassungWrapper;
         #[cfg(feature = "track-validation")]
         use std::collections::BTreeMap;
         #[cfg(feature = "track-validation")]
@@ -681,7 +694,7 @@ pub(crate) mod generate {
             api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeefeeee")),
             typ: models::Stationstyp::ParlInitiativ,
             link: Some("https://an.example.com/leckmichfett".to_string()),
-            gremium_federf: Some(false),
+            gremium_federf: None,
             titel: Some("rattlesnakes!".to_string()),
             zp_start: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                 .expect("Failed to parse static datetime. Test broken.")
@@ -716,10 +729,11 @@ pub(crate) mod generate {
         models::Dokument{
                 api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef3333")),
                 autoren: vec![default_autor_person()],
-                hash: "f98d9d6f136109780d69f6".to_string(),
+                hash: HashWrapper::Legacy("f98d9d6f136109780d69f6f98d9d6f136109780d69f6".to_string()),
                 drucksnr: Some("20/441".to_string()),
                 kurztitel: Some("Dokumentblubgedöns".to_string()),
                 link: "https://irgendwo.im.nirgendwo.de".to_string(),
+                subdoc_id: None,
                 meinung: None,
                 titel: "Ganz ausführlicher Titel, der die Schuppenfärbungsverordnung von 2027 zu verändern versucht bevor sie Gesetz wird".to_string(),
                 typ: models::Doktyp::Entwurf,
@@ -727,7 +741,7 @@ pub(crate) mod generate {
                 Natürlich mal wieder Klassiker, dass die hier \"Schuppen\" und nicht \"Fischschuppen\", \"Gartenschuppen\" oder \"Drachenschuppen\" geschrieben haben. Danke Merkel! 
                 Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
                 vorwort: Some("Vorwort".to_string()),
-                zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
+                zusammenfassung: Some(ZusammenfassungWrapper::Legacy("Zusammenfassungstext kommt hier rein".to_string())),
                 schlagworte: vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()],
                 zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                     .expect("Failed to parse static datetime. Test broken.")
@@ -745,8 +759,9 @@ pub(crate) mod generate {
         models::Dokument{
                 api_id: Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeef7777")),
                 autoren: vec![default_autor_person()],
-                hash: "f98d9d6f13635463450d69f6".to_string(),
+                hash: HashWrapper::Legacy("f98d9d6f136109780d69f6f98d9d6f13635463450d69f6".to_string()),
                 drucksnr: None,
+                subdoc_id: None,
                 kurztitel: Some("Dokumentblubgedöns".to_string()),
                 link: "https://irgendwo.im.nirgendwo.de".to_string(),
                 meinung: Some(3u8),
@@ -756,7 +771,7 @@ pub(crate) mod generate {
                 Natürlich mal wieder Klassiker, dass die hier \"Schuppen\" und nicht \"Fischschuppen\", \"Gartenschuppen\" oder \"Drachenschuppen\" geschrieben haben. Danke Merkel! 
                 Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
                 vorwort: Some("Stelluingsnahmenvorwort das völlig verschieden von dem Hauptdokument ist".to_string()),
-                zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
+                zusammenfassung: Some(ZusammenfassungWrapper::Legacy("Zusammenfassungstext kommt hier rein".to_string())),
                 schlagworte: vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()],
                 zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
                     .expect("Failed to parse static datetime. Test broken.")
@@ -858,6 +873,8 @@ pub(crate) mod generate {
                 link: "https://example.com/einig/gerecht/frei".to_string(),
                 organisation: default_autor_lobby(),
             }],
+            ressort: None,
+            sachgebiete: vec![],
         }
     }
 }

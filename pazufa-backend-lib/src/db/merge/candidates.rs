@@ -5,6 +5,7 @@ use crate::db::retrieve;
 use crate::error::DataValidationError;
 use crate::error::LTZFError;
 use crate::models;
+use crate::models::enumerations::HashStrategy;
 #[cfg(feature = "track-validation")]
 use std::collections::BTreeSet;
 use std::string::ToString;
@@ -238,23 +239,55 @@ pub(crate) async fn station_merge_candidates(
 
 /// matches IFF:
 /// `api_id_old` == `api_id_new` OR
-/// `hash_old` == `hash_new` OR
+/// EXISTS(`(hash, hs)_old` == `(hash, hs)_new`) AND (`subdoc_id_old` == `subdoc_id_new`)
+/// OR
 /// (typ, drucksNr, `zp_referenz`~12h)_old == (typ, drucksnr, `zp_referenz`~12h)_new
 pub(crate) async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
 ) -> Result<MatchState<i32>> {
+    let mut hash_values: Vec<String> = vec![];
+    let mut hash_types: Vec<String> = vec![];
+    match &model.hash {
+        models::dokument::HashWrapper::Legacy(h) => {
+            hash_values.push(h.clone());
+            hash_types.push(HashStrategy::Sha256Bytes.to_string());
+        }
+        models::dokument::HashWrapper::Future(hashes) => {
+            for ht in hashes {
+                hash_values.push(ht.value.clone());
+                hash_types.push(ht.strategy.to_string());
+            }
+        }
+    }
     let dids = sqlx::query_scalar!(
-        "SELECT d.id FROM dokument d 
+        "SELECT d.id FROM dokument d
         INNER JOIN dokumententyp dt ON dt.id = d.typ 
         WHERE 
-        d.hash = $1 OR
-        d.api_id = $2 OR
-        (d.drucksnr = $3 AND dt.value = $4 
-            AND ($5 BETWEEN (d.zp_referenz-'12 hours'::interval) 
+        -- ein übereinstimmender hash existiert
+        ( EXISTS (
+            SELECT 1 FROM 
+                dok_hashes dh,
+                hash_strategy hs,
+                UNNEST($1::text[], $2::text[]) as input_values(value, tp)
+            WHERE dh.dok_id = d.id
+            AND hs.id = dh.hash_strat_id
+            AND input_values.value = dh.value
+            AND input_values.tp = hs.value
+            )
+            AND
+        -- und eine übereinstimmende subdoc_id
+           ( d.subdoc_id = $3 OR ( d.subdoc_id IS NULL AND $3 IS NULL ))
+         )
+        OR
+        d.api_id = $4 OR
+        (d.drucksnr = $5 AND dt.value = $6
+            AND ($7 BETWEEN (d.zp_referenz-'12 hours'::interval) 
             AND (d.zp_referenz+'12 hours'::interval)))",
-        model.hash,
+        &hash_values[..],
+        &hash_types[..],
+        model.subdoc_id.map(i32::from),
         model.api_id,
         model.drucksnr,
         srv.guard_ts(
@@ -514,7 +547,9 @@ mod candid_test {
         let test_docs = [
             // by api_id
             models::Dokument {
-                hash: "91843918479182471".to_string(),
+                hash: models::dokument::HashWrapper::Legacy(
+                    "918439184791824719184391847918247183919388".to_string(),
+                ),
                 drucksnr: Some("123/1241204".to_string()),
                 zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
                     .expect("Failed to parse datetime. Test broken.")
@@ -535,7 +570,9 @@ mod candid_test {
             // by typ, refts, drucksnr
             models::Dokument {
                 api_id: Some(uuid::Uuid::now_v7()),
-                hash: "91843918479182471".to_string(),
+                hash: models::dokument::HashWrapper::Legacy(
+                    "918439184791824719184391847918247183919388".to_string(),
+                ),
                 ..generate::random::dokument(0)
             },
         ];
@@ -548,7 +585,9 @@ mod candid_test {
         // no matching identifiers
         let fail = models::Dokument {
             api_id: Some(uuid::Uuid::now_v7()),
-            hash: "91843918479182471".to_string(),
+            hash: models::dokument::HashWrapper::Legacy(
+                "918439184791824719184391847918247183919388".to_string(),
+            ),
             drucksnr: Some("123/1241204".to_string()),
             zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
                 .expect("Failed to parse datetime. Test broken.")

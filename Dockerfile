@@ -42,7 +42,7 @@ FROM busybox:latest AS runner
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
-LABEL version="0.2.15"
+LABEL version="0.3.0"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1

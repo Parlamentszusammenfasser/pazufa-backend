@@ -1,8 +1,10 @@
 use axum::extract::{Json, Path, Query, State};
+use axum::http::{HeaderMap, HeaderName};
 use pazufa_backend_lib::LTZFServer;
 use pazufa_backend_lib::api::auth::{APIScope, Claims};
 use pazufa_backend_lib::api::{
-    DeleteResponse, GetSingleResponse, PutResponse, misc as libmisc, misc_auth as libmisca,
+    DeleteResponse, GetSingleResponse, ListingGetResponse, PazufaOrFtmListingResponse, PutResponse,
+    misc as libmisc, misc_auth as libmisca,
 };
 use pazufa_backend_lib::models;
 use pazufa_backend_lib::models::enumerations::{DokumentFormat, Mime};
@@ -21,12 +23,13 @@ use utoipa_axum::routes;
 pub(super) struct DokumentApi;
 
 pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
-    OpenApiRouter::new().routes(routes!(
-        dokument_delete_id,
-        dokument_put_id,
-        dokument_get_by_id
-    ))
-    //        .routes(routes!(dokumente_get))
+    OpenApiRouter::new()
+        .routes(routes!(
+            dokument_delete_id,
+            dokument_put_id,
+            dokument_get_by_id
+        ))
+        .routes(routes!(dokumente_get))
 }
 
 #[tracing::instrument(skip_all)]
@@ -89,27 +92,68 @@ async fn dokument_put_id(
         })
 }
 
-//#[utoipa::path(
-//    get,
-//    path = "/dokumente",
-//    description = "Retrieves a Paginated list of documents from the Backend. Ordered by zp_modifiziert",
-//    tags = ["Miscellaneous", "Unauthorisiert"],
-//    params(
-//        params::IfModSince,
-//        params::ListingQueryParams,
-//        params::DocumentFormatParams,
-//        ),
-//    responses(
-//        PazufaOrFtmListingResponse
-//    )
-//)]
-//async fn dokumente_get(
-//    Query(q_params): Query<models::enumerations::DokumentFormat>,
-//    State(api_impl): State<Arc<LTZFServer>>,
-//) -> PazufaOrFtmListingResponse {
-//    PazufaOrFtmListingResponse::NotImpl
-//}
-
+#[utoipa::path(
+    get,
+    path = "",
+    description = "Retrieves a Paginated list of documents from the Backend. Ordered by zp_modifiziert",
+    tags = ["Miscellaneous", "Unauthorisiert"],
+    params(
+        params::IfModSince,
+        params::ListingQueryParams,
+        params::DocumentFormatParams,
+        ),
+    responses(
+        PazufaOrFtmListingResponse
+    )
+)]
+async fn dokumente_get(
+    headers: HeaderMap,
+    Query(format_param): Query<params::DocumentFormatParams>,
+    Query(listing_params): Query<params::ListingQueryParams>,
+    State(api_impl): State<Arc<LTZFServer>>,
+) -> PazufaOrFtmListingResponse {
+    let fmt = format_param.format.unwrap_or(DokumentFormat::Pazufa);
+    if fmt == DokumentFormat::FTM {
+        return PazufaOrFtmListingResponse::NotImpl;
+    }
+    let ims = match params::IfModSince::try_from(
+        headers.get(HeaderName::from_static("if-modified-since")),
+    ) {
+        Ok(thing) => thing,
+        Err(e) => {
+            warn!("{e}");
+            return PazufaOrFtmListingResponse::BadReq;
+        }
+    };
+    libmisc::dokumente_get_by_params(
+        api_impl.as_ref(),
+        fmt,
+        listing_params,
+        ims.if_modified_since,
+    )
+    .await
+    .map_or_else(
+        |e| {
+            error!(error=?e);
+            PazufaOrFtmListingResponse::Error(e.to_string())
+        },
+        |thing| match thing {
+            ListingGetResponse::NotMod => PazufaOrFtmListingResponse::NotMod,
+            ListingGetResponse::BadReq => PazufaOrFtmListingResponse::BadReq,
+            ListingGetResponse::NoContent => PazufaOrFtmListingResponse::NoContent,
+            ListingGetResponse::Error(e) => PazufaOrFtmListingResponse::Error(e),
+            ListingGetResponse::Success {
+                body,
+                prp,
+                path_prefix,
+            } => PazufaOrFtmListingResponse::Pazufa {
+                body,
+                prp,
+                path_prefix,
+            },
+        },
+    )
+}
 #[utoipa::path(
     get,
     path = "/{api_id}",

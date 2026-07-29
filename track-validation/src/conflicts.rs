@@ -1,3 +1,7 @@
+#![allow(
+    clippy::arithmetic_side_effects,
+    reason = "very confined and well reviewed"
+)]
 use crate::regex::Regex;
 use std::collections::{BTreeMap, VecDeque};
 

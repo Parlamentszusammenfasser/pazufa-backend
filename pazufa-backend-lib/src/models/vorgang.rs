@@ -1,5 +1,11 @@
 use super::{de_link, de_optlink, de_optstring, de_string, de_veclinks, de_vecstring};
-use crate::{api::RoundTimestamp, models};
+use crate::{
+    api::RoundTimestamp,
+    models::{
+        self,
+        enumerations::{Ressort, Sachgebiet},
+    },
+};
 use serde::{Deserialize, Serialize, de, ser};
 use std::str::FromStr;
 use utoipa::ToSchema;
@@ -299,11 +305,21 @@ pub struct Vorgang {
     /// List of persons or organisations, which initiated the Vorgang.
     pub initiatoren: Vec<models::Autor>,
 
+    /// List of stations, the core of what happens in one Proceeding
     pub stationen: Vec<models::Station>,
 
+    /// Lobby register annotations from Bundestag sources
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub lobbyregister: Vec<models::Lobbyregeintrag>,
+
+    /// Sachgebiet information
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    pub sachgebiete: Vec<Sachgebiet>,
+    /// Ressort. Skipped if None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ressort: Option<Ressort>,
 }
+
 impl<'de> Deserialize<'de> for Vorgang {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -363,6 +379,8 @@ impl std::default::Default for Vorgang {
             initiatoren: vec![],
             stationen: vec![],
             lobbyregister: vec![],
+            ressort: None,
+            sachgebiete: vec![],
         }
     }
 }
@@ -400,10 +418,13 @@ impl std::fmt::Display for Vorgang {
 
 #[cfg(test)]
 mod serialization_tests {
-    use crate::utils::testing::generate;
+    use crate::{
+        models::enumerations::{Ressort, Sachgebiet},
+        utils::testing::generate,
+    };
 
     #[test]
-    fn vorgang_fails_apiiddoks() {
+    fn fails_due_to_apiiddoks() {
         let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
             "./../../tests/serialization/vorgang_dokstring.json"
         ));
@@ -412,7 +433,7 @@ mod serialization_tests {
     }
 
     #[test]
-    fn vorgang_fails_station_zpstart() {
+    fn fails_due_to_station_zpstart() {
         let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
             "./../../tests/serialization/equal_zpstarts.json"
         ));
@@ -433,6 +454,58 @@ mod serialization_tests {
         assert!(
             matches!(result, Err(ref thing) if thing.to_string().contains("This vector should only contain links")),
             "{result:?}"
+        );
+    }
+    #[test]
+    fn ressort_deser() {
+        let vorgang = super::Vorgang {
+            ressort: Some(Ressort::FamilieSenioren),
+            ..generate::default_vorgang()
+        };
+        let vgstr = serde_json::to_string(&vorgang).expect("static object");
+        assert!(vgstr.contains("Familie/Senioren"), "{vgstr}");
+        let result: Result<super::Vorgang, _> = serde_json::from_str(&vgstr);
+        assert!(
+            matches!(result, Ok(vg) 
+                if matches!(vg.ressort, Some(Ressort::FamilieSenioren))),
+            "{vgstr}"
+        );
+    }
+    #[test]
+    fn sachgebiete_deser() {
+        let sachgebiete = vec![
+            Sachgebiet::Boden,
+            Sachgebiet::HochschulenfürangewandteWissenschaften,
+            Sachgebiet::GesellschaftBevölkerung,
+            Sachgebiet::ErneuerbareEnergien,
+        ];
+        let vorgang = super::Vorgang {
+            sachgebiete,
+            ..generate::default_vorgang()
+        };
+        let vgstr = serde_json::to_string(&vorgang).expect("static object");
+        assert!(vgstr.contains("2130"), "{vgstr}");
+        assert!(vgstr.contains("6130"), "{vgstr}");
+        let result: Result<super::Vorgang, _> = serde_json::from_str(&vgstr);
+        assert!(
+            match result {
+                Ok(vg) =>
+                    if vg.sachgebiete.contains(&Sachgebiet::Boden)
+                        && vg
+                            .sachgebiete
+                            .contains(&Sachgebiet::HochschulenfürangewandteWissenschaften)
+                        && vg
+                            .sachgebiete
+                            .contains(&Sachgebiet::GesellschaftBevölkerung)
+                        && vg.sachgebiete.contains(&Sachgebiet::ErneuerbareEnergien)
+                    {
+                        true
+                    } else {
+                        panic!("{vg:?}");
+                    },
+                Err(e) => panic!("{e}"),
+            },
+            "{vgstr} / "
         );
     }
 }
