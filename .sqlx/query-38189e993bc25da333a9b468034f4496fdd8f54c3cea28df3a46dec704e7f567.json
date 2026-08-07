@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "GRANT SELECT ON ALL TABLES IN SCHEMA public TO pazufa_ro",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "38189e993bc25da333a9b468034f4496fdd8f54c3cea28df3a46dec704e7f567"
+}

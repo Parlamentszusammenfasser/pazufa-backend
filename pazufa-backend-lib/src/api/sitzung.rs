@@ -2,7 +2,7 @@ use super::RoundTimestamp;
 use super::auth::APIScope;
 use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, PutResponse, auth::Claims};
-use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_param};
+use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_parameter};
 use crate::db::{delete, insert, retrieve};
 use crate::error::LTZFError;
 use crate::models::params;
@@ -271,7 +271,7 @@ pub async fn kal_date_get(
 
     let dt_begin = dr.since;
     let dt_end = dr.until;
-    let result = sitzung_by_param(
+    let result = sitzung_by_parameter(
         &SitzungFilterParameters {
             parlament: Some(path_params.parlament),
             gremium_like: None,
@@ -353,7 +353,7 @@ pub async fn kal_get(
     };
 
     // retrieval
-    let result = retrieve::sitzung_by_param(
+    let result = retrieve::sitzung_by_parameter(
         &params,
         query_params.page,
         query_params.per_page,
@@ -478,7 +478,7 @@ pub async fn s_get(
     };
 
     let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = server.sqlx_db.begin().await?;
-    let result = retrieve::sitzung_by_param(
+    let result = retrieve::sitzung_by_parameter(
         &params,
         query_params.page,
         query_params.per_page,

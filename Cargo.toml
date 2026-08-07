@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["pazufa-backend-lib", "pazufa-backend", "track-validation"]
+members = ["pazufa-backend-lib", "pazufa-backend", "track-validation", "elastic-companion"]
 
 [profile.release]
 codegen-units = 1

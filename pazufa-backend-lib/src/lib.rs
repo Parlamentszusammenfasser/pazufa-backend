@@ -47,6 +47,14 @@ pub struct Configuration {
 
     #[arg(
         long,
+        env = "PAZUFA_RO_DBPASS",
+        default_value = "pazufa-ro-pass",
+        help = "The password for the read-only user 'pazufa_ro'"
+    )]
+    pub read_only_dbpass: String,
+
+    #[arg(
+        long,
         env = "PAZUFA_KEYADDER_KEY",
         help = "The API Key that is used to add new Keys. This is saved in the database. Required to be set somehow if you want to run the backend itself"
     )]

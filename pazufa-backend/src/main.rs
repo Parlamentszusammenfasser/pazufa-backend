@@ -2,7 +2,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, reason = "testing is a free-for-all"))]
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::routing::get;
 use axum::{extract::DefaultBodyLimit, http::Method};
 use clap::Parser;
@@ -11,6 +11,7 @@ use pazufa_backend_lib::api::LTZFServer;
 use pazufa_backend_lib::utils::auth as util_auth;
 use pazufa_backend_lib::utils::{notify::MailBundle, shutdown_signal, tracing::Logging};
 use sqlx::PgTransaction;
+use sqlx::SqlSafeStr;
 use std::process::exit;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -60,9 +61,10 @@ mod openapi {
         version = "0.2.5",
         contact(email="info@pazufa.de"),
         license(name = "GPLv3", url = "https://www.gnu.org/licenses/gpl-3.0.en.html"),
-        description = "Description of the PaZuFa API. All listings that are returned by the ser
-ver are sorted by:\n  1. last modification date, descending\n  2. if available: alphabeti
-cally by an identifier (e.g. a title)",
+        description = "Description of the PaZuFa API. 
+        All listings that are returned by the server are sorted by:\n  
+        1. last modification date, descending\n  
+        2. if available: alphabetically by an identifier (e.g. a title)",
     ),
     external_docs(
         description = "Pazufa Wiki",
@@ -183,6 +185,33 @@ async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<
     Ok(())
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "Needs fiddling with user creation, which does not support binding arguments"
+)]
+async fn initialize_readonly_user(pass: String, tx: &mut PgTransaction<'_>) -> Result<()> {
+    const FORBIDDEN: &str = "[\"',=<>$§()]";
+    if pass.contains(FORBIDDEN) {
+        bail!("Error: password String contains any of a few forbidden characters: {FORBIDDEN}");
+    }
+    // ignored return bc it might fail if the user does not exist
+    let _ = sqlx::query!("DROP OWNED BY pazufa_ro CASCADE")
+        .execute(&mut **tx)
+        .await;
+    sqlx::query!("DROP USER IF EXISTS pazufa_ro")
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        sqlx::AssertSqlSafe(format!("CREATE USER pazufa_ro WITH PASSWORD '{pass}'")).into_sql_str(),
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!("GRANT SELECT ON ALL TABLES IN SCHEMA public TO pazufa_ro")
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
     let (iv, cnt) = (
         u64::from(state.config.req_limit_interval),
@@ -290,7 +319,7 @@ fn early_exits(config: &Configuration) {
         println!(
             "{}",
             serde_json::to_string(&openapi::PazufAPI::openapi())
-                .expect("Expected to be able to parse a static struct")
+                .unwrap_or_else(|_| panic!("Failed to parse  static struct"))
         );
         exit(0);
     }
@@ -330,6 +359,7 @@ async fn main() -> Result<()> {
 
     let mut tx = sqlx_db.begin().await?;
     initialize_master_key(ka_key, &mut tx).await?;
+    initialize_readonly_user(config.read_only_dbpass.clone(), &mut tx).await?;
     tx.commit().await?;
     tracing::debug!("Master Key initialized");
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DROP OWNED BY pazufa_ro CASCADE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "4133369d469fb2d9f0c64e9b93e1e5ee47588d8c91dbca3ee2ae97127a1ea192"
+}

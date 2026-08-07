@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DROP USER IF EXISTS pazufa_ro",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "dc2dcb3e51601e4370e744b9d85ca2c3b397df381e273ecfb3dcacc2f0682e06"
+}

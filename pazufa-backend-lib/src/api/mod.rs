@@ -485,6 +485,7 @@ pub struct PaginationResponsePart {
 impl PaginationResponsePart {
     pub const DEFAULT_PER_PAGE: u32 = 32;
     pub const MAX_PER_PAGE: u32 = 256;
+
     #[must_use]
     pub fn new(x_total_count: u32, x_page: Option<u32>, x_per_page: Option<u32>) -> Self {
         let x_per_page =

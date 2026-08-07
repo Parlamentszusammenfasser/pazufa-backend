@@ -15,4 +15,5 @@ www/
 temp/
 tests/*_dump.json
 *.log
+.last_es_sync
 tracks.toml

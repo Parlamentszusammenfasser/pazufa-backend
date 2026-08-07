@@ -1,4 +1,107 @@
 services:
+  elastic-startup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.4
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+    user: "0"
+    networks:
+      - pazufa-network
+    command: >
+      bash -c '
+        echo $$ELASTIC_PASSWORD
+        echo $$KIBANA_PASSWORD
+        echo $(pwd)
+        if [ ! -f config/certs/ca.zip ]; then
+          echo "Creating CA";
+          bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
+          unzip config/certs/ca.zip -d config/certs;
+        fi;
+        if [ ! -f config/certs/certs.zip ]; then
+          echo "Creating certs";
+          echo -ne \
+          "instances:\n"\
+          "  - name: pazufa-elastic\n"\
+          "    dns:\n"\
+          "      - pazufa-elastic\n"\
+          "      - localhost\n"\
+          > config/certs/instances.yml;
+          bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
+          unzip config/certs/certs.zip -d config/certs;
+        fi;
+        echo "Setting file permissions"
+        chown -R root:root config/certs;
+        find . -type d -exec chmod 750 \{\} \;;
+        find . -type f -exec chmod 640 \{\} \;;
+        echo "Waiting for Elasticsearch availability";
+        until curl -s --cacert config/certs/ca/ca.crt http://pazufa-elastic:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+        echo "Setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$$ELASTIC_PASSWORD" -H "Content-Type: application/json" http://pazufa-elastic:9200/_security/user/kibana_system/_password -d "{\"password\":\"$$KIBANA_PASSWORD\"}" | grep -q "^{}"; do sleep 10; done;
+        echo "All done!";
+      '
+    environment:
+      - ELASTIC_PASSWORD=elastic-testpassword
+      - KIBANA_PASSWORD=supertolles-kibanapasswort
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f config/certs/pazufa-elastic/pazufa-elastic.crt ]"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+
+  pazufa-elastic:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.4
+    depends_on:
+      elastic-startup:
+        condition: service_healthy
+    ports:
+      - 9200:9200
+    restart: unless-stopped
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - pedata:/usr/share/elasticsearch/data
+    networks:
+      - pazufa-network
+    environment:
+      - LICENSE=basic
+      - node.name=pazufa-elastic
+      - cluster.name=pazufa-elastic
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=elastic-testpassword
+      - bootstrap.memory_lock=true
+      - xpack.license.self_generated.type=basic
+      - xpack.ml.use_auto_machine_memory_percent=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --cacert config/certs/ca/ca.crt http://localhost:9200 | grep -q 'missing authentication credentials'"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+  pazufa-kibana:
+    image: docker.elastic.co/kibana/kibana:9.4.4
+    restart: unless-stopped
+    depends_on: 
+      pazufa-elastic:
+        condition: service_healthy
+    volumes:
+      - certs:/usr/share/kibana/config/certs
+      - kibanadata:/usr/share/kibana/data
+    ports:
+      - 5601:5601
+    networks:
+      - pazufa-network
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=http://pazufa-elastic:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=supertolles-kibanapasswort
+      #- ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
   pazufa-database:
     image: postgres:latest
 #    container_name: pazufa-database-dev
@@ -12,17 +115,42 @@ services:
       POSTGRES_PASSWORD: pazufa-pass
       POSTGRES_DB: pazufa
 
+  pazufa-elastic-companion:
+    image: pazufa/elastic-companion:0.1.0
+    restart: unless-stopped
+    depends_on:
+      - pazufa-database
+      - pazufa-backend
+      - pazufa-elastic
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      network: host
+      platforms:
+        - linux/amd64
+      target: elastic-companion-runner
+    networks:
+      - pazufa-network
+    environment:
+      DATABASE_URL: "postgres://pazufa_ro:pazufa-ro-pass@pazufa-database:5432/pazufa" # required
+      ELASTICSEARCH_USER: "elastic"
+      ELASTICSEARCH_PASS: "elastic-testpassword"
+      ELASTICSEARCH_URL: "http://pazufa-elastic:9200"
+      REINDEX_SECONDS: 60
+      RUST_LOG: "warn,elastic_companion=info"                                           # optional
+
   pazufa-backend:
     image: pazufa/backend:0.3.0
     restart: unless-stopped
 # use `docker compose up --build` to not use the repository image but build yourself instead
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
       network: host
 #    container_name: pazufa-backend
       platforms:
         - linux/amd64
+      target: pazufa-backend-runner
     ports:
       - 8080:8080
     depends_on:
@@ -34,5 +162,12 @@ services:
       RUST_LOG: "warn,pazufa_backend=info"                                           # optional
       PAZUFA_PORT: "8080"
       PAZUFA_KEYADDER_KEY: "pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9"             # required
+      PAZUFA_RO_DBPASS: "pazufa-ro-pass"
+
 networks:
   pazufa-network:
+
+volumes:
+  certs:
+  pedata:
+  kibanadata:

@@ -1,24 +1,43 @@
 when:
   - event: tag
     branch: main
+  - event: manual
 
 variables:
   - &version "0.3.0"
+  - &companion_version "0.1.0"
 
 labels:
   pazufa_scope: generic
   performance: high
 
 steps:
-  - name: deploy on docker
+  - name: deploy backend on docker
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
     settings:
       repo: pazufa/backend
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
+      context: .
+      target: pazufa-backend-runner
       platforms: 
         - linux/amd64
         - linux/aarch64
       tag: *version
+      username: pazufa
+      password:
+        from_secret: pazufa-docker-pass
+
+  - name: deploy elastic companion on docker
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    settings:
+      repo: pazufa/elastic-companion
+      dockerfile: docker/Dockerfile
+      context: .
+      target: elastic-companion-runner
+      platforms: 
+        - linux/amd64
+        - linux/aarch64
+      tag: *companion_version
       username: pazufa
       password:
         from_secret: pazufa-docker-pass

@@ -127,7 +127,7 @@ impl Regex {
                     continue;
                 }
                 ('(', Regex::Conc(child)) => {
-                    let subre = Self::find_matching_brace(&re[ci..]);
+                    let subre = Self::find_matching_brace(&re[ci..])?;
                     tracing::trace!("matching brace: {:?}", subre);
                     ci += subre.len() + 1;
                     child.push(Self::parse_regex(subre)?);
@@ -178,7 +178,7 @@ impl Regex {
         clippy::arithmetic_side_effects,
         reason = "brace_ident cannot exceed re.len()"
     )]
-    fn find_matching_brace(re: &[char]) -> &[char] {
+    fn find_matching_brace(re: &[char]) -> Result<&[char], TrackValidationError> {
         let mut brace_indent = 0;
         for ci in 0..re.len() {
             match re[ci] {
@@ -187,10 +187,13 @@ impl Regex {
                 _ => {}
             }
             if brace_indent == 0 {
-                return &re[1..ci];
+                return Ok(&re[1..ci]);
             }
         }
-        &re[1..re.len().checked_sub(1).expect("expression is malformed")]
+        Ok(&re[1..re
+            .len()
+            .checked_sub(1)
+            .ok_or(TrackValidationError::RxParsingError)?])
     }
     fn simplify(self) -> Self {
         match self {
