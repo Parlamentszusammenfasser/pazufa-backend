@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 /// Entry of the Bundestagslobbyregister for a specific Vorgang
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
-pub struct Lobbyregeintrag {
+pub struct Lobbyregistereintrag {
     pub organisation: models::Autor,
 
     /// Internal ID within the register, necessary to build a url for it
@@ -33,7 +33,7 @@ pub struct Lobbyregeintrag {
     /// Is not crossreferenced in the database and just added as dataset
     pub betroffene_drucksachen: Vec<String>,
 }
-impl<'de> Deserialize<'de> for Lobbyregeintrag {
+impl<'de> Deserialize<'de> for Lobbyregistereintrag {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for Lobbyregeintrag {
         }
     }
 }
-impl Serialize for Lobbyregeintrag {
+impl Serialize for Lobbyregistereintrag {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: ser::Serializer,
@@ -56,7 +56,7 @@ impl Serialize for Lobbyregeintrag {
     }
 }
 
-impl std::fmt::Display for Lobbyregeintrag {
+impl std::fmt::Display for Lobbyregistereintrag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<String> = vec![
             // Skipping organisation in query parameter serialization
@@ -310,7 +310,7 @@ pub struct Vorgang {
 
     /// Lobby register annotations from Bundestag sources
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
-    pub lobbyregister: Vec<models::Lobbyregeintrag>,
+    pub lobbyregister: Vec<models::Lobbyregistereintrag>,
 
     /// Sachgebiet information
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]

@@ -1,6 +1,6 @@
 when:
   - event: [pull_request]
-    branch: [main, staging]
+    branch: [main]
 
 labels:
   pazufa_scope: generic
@@ -11,16 +11,21 @@ steps:
     image: alpine
     commands:
       - apk add --no-cache curl
-      - VERSION=$(grep '^version' pazufa-backend/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
-      - echo "Checking if Docker Hub tag $VERSION already exists for pazufa/backend..."
+      - PB_VERSION=$(grep '^version' pazufa-backend/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+      - EC_VERSION=$(grep '^version' elastic-companion/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+      - echo "Checking if Docker Hub tag $PB_VERSION already exists for pazufa/backend..."
+      - PB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/pazufa/backend/tags/$PB_VERSION/")
+      - EC_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/pazufa/elastic-companion/tags/$EC_VERSION/")
       - |
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-          "https://hub.docker.com/v2/repositories/pazufa/backend/tags/$VERSION/")
-        if [ "$STATUS" = "200" ]; then
-          echo "ERROR: Tag $VERSION already exists on Docker Hub. Bump the version before merging." >&2
+        if [ "$$PB_STATUS" = "200" ] && [ "$$EC_STATUS" = "200" ]; then
+          echo "ERROR: All tagged repositories have a pre-existing tag"
+          echo "pazufa/elastic-companion...200"
+          echo "pazufa/backend.............200"
+          echo "To fix this bump at least one version"
           exit 1
         fi
-      - echo "Tag $VERSION does not exist yet — OK."
+        echo "pazufa/elastic-companion...$$EC_STATUS"
+        echo "pazufa/backend.............$$PB_STATUS"
 
   - name: build-amd64-dry-run-pb
     image: docker.io/woodpeckerci/plugin-docker-buildx:6

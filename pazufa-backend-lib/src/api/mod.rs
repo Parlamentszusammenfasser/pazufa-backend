@@ -978,6 +978,7 @@ impl SortArrays for models::Vorgang {
         self.ids
             .sort_by(|a, b| (&a.typ, &a.id).cmp(&(&b.typ, &b.id)));
         self.links.sort();
+        self.sachgebiete.sort();
     }
 }
 

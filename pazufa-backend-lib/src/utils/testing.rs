@@ -537,7 +537,7 @@ pub(crate) mod generate {
                         ));
                     }
 
-                    lobby_list.push(models::Lobbyregeintrag {
+                    lobby_list.push(models::Lobbyregistereintrag {
                         organisation: random_autor(rng),
                         interne_id: random_string(rng, "lobby_", 8, 20),
                         intention: random_string(rng, "Intention: ", 20, 60),
@@ -866,7 +866,7 @@ pub(crate) mod generate {
                 id: "einzigartig".to_string(),
                 typ: "initdrucks".to_owned(),
             }],
-            lobbyregister: vec![models::Lobbyregeintrag {
+            lobbyregister: vec![models::Lobbyregistereintrag {
                 betroffene_drucksachen: vec!["20/2014".to_string()],
                 intention: "Für die Klicks".to_string(),
                 interne_id: "as9d8fja9s8djf".to_string(),

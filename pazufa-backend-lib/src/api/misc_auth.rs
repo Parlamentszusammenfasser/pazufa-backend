@@ -549,21 +549,12 @@ pub async fn gremien_put(
     info!(target: "obj", "Inserted Gremien into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
     Ok(PutResponse::Success)
 }
-/// Inserts new Enumeration Entries into the database.
-/// Optionally does a PUT-REPLACE, replacing some authors by others and keeping all references in
-/// check.
-/// # Errors
-/// Can fail due to
-/// - Database Errors
-/// - Validation Errors of the replacement logic
-#[instrument(skip_all, fields(name=%path_params.name))]
-pub async fn enum_put(
-    server: &LTZFServer,
+async fn enum_put_preliminary_checks(
     path_params: &params::EnumPathParams,
     body: &models::ReplacementPutRequest<String>,
+    enum_tables: &BTreeMap<models::EnumerationNames, &str>,
+    tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<PutResponse> {
-    tracing::info!("{:?}", path_params);
-
     // check if replacing contain an index larger than the object list
     // if so: Bad Request
     for rpl in &body.replacing {
@@ -573,22 +564,10 @@ pub async fn enum_put(
             ));
         }
     }
-    let mut tx = server.sqlx_db.begin().await?;
+
     // check if all gremien are existent in the database
     // check if none of the replacing gremien are in the database or replacing is None
     // if both: NotModified
-    let enum_tables: BTreeMap<models::EnumerationNames, &str> = FromIterator::from_iter(
-        vec![
-            (models::EnumerationNames::Schlagworte, "schlagwort"),
-            (models::EnumerationNames::Stationstypen, "stationstyp"),
-            (models::EnumerationNames::Parlamente, "parlament"),
-            (models::EnumerationNames::Vorgangstypen, "vorgangstyp"),
-            (models::EnumerationNames::Dokumententypen, "dokumententyp"),
-            (models::EnumerationNames::Vgidtypen, "vg_ident_typ"),
-        ]
-        .drain(..),
-    );
-
     #[allow(
         clippy::disallowed_methods,
         reason = "Sqlx does not support dynamic table names for compile time checks."
@@ -602,7 +581,7 @@ pub async fn enum_put(
         .into_sql_str(),
     )
     .bind(&body.objects[..])
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     let present = usize::try_from(present).map_err(|e| LTZFError::Other {
         message: format!("Error converting expected object count: {e}"),
@@ -630,43 +609,34 @@ pub async fn enum_put(
             .into_sql_str(),
         )
         .bind(&flattened[..])
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
 
         if present == 0 {
             return Ok(PutResponse::NotMod);
         }
     }
+    Ok(PutResponse::Success)
+}
+async fn enum_put_conflict_cleanup(
+    new_enum_ids: Vec<i32>,
+    path_params: &params::EnumPathParams,
+    body: &models::ReplacementPutRequest<String>,
+    enum_tables: &BTreeMap<models::EnumerationNames, &str>,
+    tx: &mut sqlx::PgTransaction<'_>,
+) -> Result<PutResponse> {
+    // in that order:
+    // - table to replace in,
+    // - column name to replace,
+    // - conflict resolution query if necessary
+    // if No conflict resolution query is passed alongside, the values in `column` are just
+    // replaced 1:1 with the new ones.
+    // If there is a conflict resolution query to be run, it is run before the replacements
+    //
+    //
+    // Conflict resolution queries are there to swap out values that are part of a database key.
+    type ReplacementTuple = (&'static str, &'static str, Option<&'static str>);
 
-    // insert all enum entries, fetch their IDs
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "Sqlx does not support dynamic table names for compile time checks."
-    )]
-    let new_ids: Vec<i32> = sqlx::query_scalar(
-        sqlx::AssertSqlSafe(format!(
-            "INSERT INTO {} (value)
-            SELECT item FROM UNNEST($1::text[]) as item 
-            ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
-            RETURNING id",
-            enum_tables[&path_params.name]
-        ))
-        .into_sql_str(),
-    )
-    .bind(&body.objects[..])
-    .fetch_all(&mut *tx)
-    .await?;
-
-    if body.replacing.is_empty() {
-        tx.commit().await?;
-        // if there is nothing to replace, we are done here
-        // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
-        warn!(target: "obj", "Inserted Enumeration Entries into the database with no replacements: {:?}", body.objects);
-        warn!(
-            "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
-        );
-        return Ok(PutResponse::Success);
-    }
     // for each replacing:
     // for each table referencing it: Update those tables with the new id
     let mut replacement_tuples = vec![];
@@ -676,7 +646,7 @@ pub async fn enum_put(
 
         // then insert like this:
         let vitems: Vec<String> = entry.values.clone();
-        let repl_with = new_ids[entry.replaced_by as usize];
+        let repl_with = new_enum_ids[entry.replaced_by as usize];
         #[allow(
             clippy::disallowed_methods,
             reason = "Sqlx does not support dynamic table names for compile time checks."
@@ -691,24 +661,13 @@ pub async fn enum_put(
             .into_sql_str(),
         )
         .bind(&vitems[..])
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
         replacement_tuples.extend(value_ids.into_iter().map(|gid| (repl_with, gid)));
     }
     let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
     let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
 
-    /// in that order:
-    /// - table to replace in,
-    /// - column name to replace,
-    /// - conflict resolution query if necessary
-    /// if No conflict resolution query is passed alongside, the values in `column` are just
-    /// replaced 1:1 with the new ones.
-    /// If there is a conflict resolution query to be run, it is run before the replacements
-    ///
-    ///
-    /// Conflict resolution queries are there to swap out values that are part of a database key.
-    type ReplacementTuple = (&'static str, &'static str, Option<&'static str>);
     // referencing tables:
     // parlament: gremium(parl)
     // dokumententyp: dokument(typ)
@@ -765,7 +724,7 @@ pub async fn enum_put(
             table,
             column,
             *conflict_resolution_query,
-            &mut tx,
+            tx,
         )
         .await?;
     }
@@ -781,13 +740,79 @@ pub async fn enum_put(
         .into_sql_str(),
     )
     .bind(&rep_old[..])
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
+    Ok(PutResponse::Success)
+}
+/// Inserts new Enumeration Entries into the database.
+/// Optionally does a PUT-REPLACE, replacing some enumeration entries by others and keeping all references in
+/// check.
+/// # Errors
+/// Can fail due to
+/// - Database Errors
+/// - Validation Errors of the replacement logic
+#[instrument(skip_all, fields(name=%path_params.name))]
+pub async fn enum_put(
+    server: &LTZFServer,
+    path_params: &params::EnumPathParams,
+    body: &models::ReplacementPutRequest<String>,
+) -> Result<PutResponse> {
+    tracing::info!("{:?}", path_params);
+
+    let mut tx = server.sqlx_db.begin().await?;
+
+    let enum_tables: BTreeMap<models::EnumerationNames, &str> = FromIterator::from_iter(
+        vec![
+            (models::EnumerationNames::Schlagworte, "schlagwort"),
+            (models::EnumerationNames::Stationstypen, "stationstyp"),
+            (models::EnumerationNames::Parlamente, "parlament"),
+            (models::EnumerationNames::Vorgangstypen, "vorgangstyp"),
+            (models::EnumerationNames::Dokumententypen, "dokumententyp"),
+            (models::EnumerationNames::Vgidtypen, "vg_ident_typ"),
+        ]
+        .drain(..),
+    );
+    match enum_put_preliminary_checks(path_params, body, &enum_tables, &mut tx).await? {
+        PutResponse::Success => {}
+        x => return Ok(x),
+    }
+
+    // insert all enum entries, fetch their IDs
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "Sqlx does not support dynamic table names for compile time checks."
+    )]
+    let new_ids: Vec<i32> = sqlx::query_scalar(
+        sqlx::AssertSqlSafe(format!(
+            "INSERT INTO {} (value)
+            SELECT item FROM UNNEST($1::text[]) as item 
+            ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
+            RETURNING id",
+            enum_tables[&path_params.name]
+        ))
+        .into_sql_str(),
+    )
+    .bind(&body.objects[..])
+    .fetch_all(&mut *tx)
+    .await?;
+
+    if body.replacing.is_empty() {
+        tx.commit().await?;
+        // if there is nothing to replace, we are done here
+        // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
+        warn!(target: "obj", "Inserted Enumeration Entries into the database with no replacements: {:?}", body.objects);
+        warn!(
+            "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
+        );
+        return Ok(PutResponse::Success);
+    }
+    let thingy =
+        enum_put_conflict_cleanup(new_ids, path_params, body, &enum_tables, &mut tx).await?;
 
     // return 201Created
     tx.commit().await?;
     info!(target: "obj", "Inserted Enum into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
-    Ok(PutResponse::Success)
+    Ok(thingy)
 }
 
 /// Deletes a document by its supplied `api_id`
@@ -1158,49 +1183,25 @@ mod test_authorisierte_sonstige {
     }
 
     #[tokio::test]
-    async fn test_autor_put() {
-        let scenario = TestSetup::new("test_autor_put").await;
+    async fn test_autor_put_replace() {
+        let scenario = TestSetup::new("test_autor_put_replace").await;
         insert_default_vorgang(&scenario.server).await;
-
         let other_autor = models::Autor {
             fachgebiet: Some("Blattzerfetzung".to_string()),
             lobbyregister: Some("https://example.com/einzigartig".to_string()),
             person: Some("Thorbjörn Alman".to_string()),
             organisation: "Schmiedeversammlung Süd".to_string(),
         };
-        // check insert without conflict
+        let _ = super::autoren_put(
+            &scenario.server,
+            &models::ReplacementPutRequest {
+                objects: vec![other_autor.clone()],
+                replacing: vec![],
+            },
+        )
+        .await
+        .expect("Failed to create Autor.");
         let autoren = fetch_all_authors(&scenario.server).await;
-        let response = super::autoren_put(
-            &scenario.server,
-            &models::ReplacementPutRequest {
-                objects: vec![other_autor.clone()],
-                replacing: vec![],
-            },
-        )
-        .await
-        .expect("Failed to create Autor.");
-        assert!(matches!(response, PutResponse::Success));
-        let autoren_new = fetch_all_authors(&scenario.server).await;
-        assert!(autoren.len() < autoren_new.len());
-        assert!(autoren_new.contains(&other_autor));
-        let autoren = autoren_new;
-
-        // check insert with conflict
-        let response = super::autoren_put(
-            &scenario.server,
-            &models::ReplacementPutRequest {
-                objects: vec![other_autor.clone()],
-                replacing: vec![],
-            },
-        )
-        .await
-        .expect("Failed to create Autor.");
-        assert!(matches!(response, PutResponse::NotMod));
-
-        let autoren_new = fetch_all_authors(&scenario.server).await;
-        assert_eq!(autoren.len(), autoren_new.len());
-        let autoren = autoren_new;
-
         // check replace
         let repl_aut = models::Autor {
             fachgebiet: Some("Blattzusammensetzung".to_string()),
@@ -1226,7 +1227,7 @@ mod test_authorisierte_sonstige {
         assert!(autoren_new.contains(&repl_aut));
         assert!(!autoren_new.contains(&other_autor));
 
-        // malformed request
+        // malformed request in replace
         let response = super::autoren_put(
             &scenario.server,
             &models::ReplacementPutRequest {
@@ -1291,8 +1292,51 @@ mod test_authorisierte_sonstige {
         .await
         .expect("Failed to create Autor.");
         assert!(matches!(&response, PutResponse::Success), "{response:?}");
-        let all_authors_new = fetch_all_authors(&scenario.server).await;
-        assert!(all_authors_new.len() < all_authors.len());
+        assert!(fetch_all_authors(&scenario.server).await.len() < all_authors.len());
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn test_autor_put_insert() {
+        let scenario = TestSetup::new("test_autor_put_insert").await;
+        insert_default_vorgang(&scenario.server).await;
+
+        let other_autor = models::Autor {
+            fachgebiet: Some("Blattzerfetzung".to_string()),
+            lobbyregister: Some("https://example.com/einzigartig".to_string()),
+            person: Some("Thorbjörn Alman".to_string()),
+            organisation: "Schmiedeversammlung Süd".to_string(),
+        };
+        // check insert without conflict
+        let autoren = fetch_all_authors(&scenario.server).await;
+        let response = super::autoren_put(
+            &scenario.server,
+            &models::ReplacementPutRequest {
+                objects: vec![other_autor.clone()],
+                replacing: vec![],
+            },
+        )
+        .await
+        .expect("Failed to create Autor.");
+        assert!(matches!(response, PutResponse::Success));
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert!(autoren.len() < autoren_new.len());
+        assert!(autoren_new.contains(&other_autor));
+        let autoren = autoren_new;
+
+        // check insert with conflict
+        let response = super::autoren_put(
+            &scenario.server,
+            &models::ReplacementPutRequest {
+                objects: vec![other_autor.clone()],
+                replacing: vec![],
+            },
+        )
+        .await
+        .expect("Failed to create Autor.");
+        assert!(matches!(response, PutResponse::NotMod));
+
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), autoren_new.len());
 
         scenario.teardown().await;
     }
@@ -1309,37 +1353,26 @@ mod test_authorisierte_sonstige {
     async fn test_enum_put() {
         let scenario = TestSetup::new("test_enum_put").await;
         insert_default_vorgang(&scenario.server).await;
+        #[rustfmt::skip]
         let testcases = [
-            (
-                models::EnumerationNames::Parlamente,
+            (models::EnumerationNames::Parlamente,
                 "EP".to_string(),
-                "ER".to_string(),
-            ),
-            (
-                models::EnumerationNames::Dokumententypen,
+                "ER".to_string()),
+            (models::EnumerationNames::Dokumententypen,
                 "traktat".to_string(),
-                "encyclika".to_string(),
-            ),
-            (
-                models::EnumerationNames::Vorgangstypen,
+                "encyclika".to_string()),
+            (models::EnumerationNames::Vorgangstypen,
                 "Verdauung".to_string(),
-                "Rohrreinigung".to_string(),
-            ),
-            (
-                models::EnumerationNames::Schlagworte,
+                "Rohrreinigung".to_string()),
+            (models::EnumerationNames::Schlagworte,
                 "flüssiggasterminal".to_string(),
-                "rühreihöchstmenge".to_string(),
-            ),
-            (
-                models::EnumerationNames::Vgidtypen,
+                "rühreihöchstmenge".to_string()),
+            (models::EnumerationNames::Vgidtypen,
                 "anschrift".to_string(),
-                "hausnummer".to_string(),
-            ),
-            (
-                models::EnumerationNames::Stationstypen,
+                "hausnummer".to_string()),
+            (models::EnumerationNames::Stationstypen,
                 "hauptbahnhof".to_string(),
-                "haltestelle".to_string(),
-            ),
+                "haltestelle".to_string()),
         ];
         for (tp, new_entry, other_new_entry) in &testcases {
             let entries = fetch_all_enumvars(&scenario.server, *tp).await;

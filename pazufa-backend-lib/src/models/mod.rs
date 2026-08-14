@@ -6,14 +6,17 @@ pub mod params;
 pub mod sitzung;
 pub mod vorgang;
 
-pub use dokument::{Dokument, DokumentOrApiId, FTMDokumentPages};
+pub use dokument::{
+    Dokument, DokumentHash, DokumentOrApiId, FTMDokumentPages, HashWrapper, ZusammenfassungWrapper,
+    Zusammenfassungstupel,
+};
 pub use enumerations::{Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdentTyp, Vorgangstyp};
 pub use misc::{Autor, Gremium, KeyTag, TouchedByInner};
 use serde::{Deserialize, Deserializer, Serialize, de};
 pub use sitzung::{Sitzung, Top};
 use std::str::FromStr;
 use utoipa::ToSchema;
-pub use vorgang::{Lobbyregeintrag, Station, VgIdent, Vorgang};
+pub use vorgang::{Lobbyregistereintrag, Station, VgIdent, Vorgang};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ReplacementPutRequest<T: ToSchema> {

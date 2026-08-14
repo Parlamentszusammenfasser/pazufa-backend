@@ -160,6 +160,7 @@ async fn dokumente_get(
     description =  "Retrieves a specific document by its unique identifier. Returns complete document data including title, full text, metadata, and author information. If called by admin or higher, this returns a list of last scrapers/collectors touching the object",
     tags = ["Miscellaneous", "Unauthorisiert"],
     params(
+        params::IfModSince,
         params::ApiIdPathParam,
         params::DocumentFormatParams,
         ),
@@ -167,6 +168,7 @@ async fn dokumente_get(
 )]
 #[tracing::instrument(skip_all)]
 async fn dokument_get_by_id(
+    headers: HeaderMap,
     Path(path_params): Path<params::ApiIdPathParam>,
     Query(q_params): Query<params::DocumentFormatParams>,
     State(api_impl): State<Arc<LTZFServer>>,
@@ -176,7 +178,16 @@ async fn dokument_get_by_id(
     {
         return GetSingleResponse::NotImpl;
     }
-    libmisc::dokument_get_by_id(api_impl.as_ref(), &path_params)
+    let ims = match params::IfModSince::try_from(
+        headers.get(HeaderName::from_static("if-modified-since")),
+    ) {
+        Ok(thing) => thing,
+        Err(e) => {
+            warn!("{e}");
+            return GetSingleResponse::BadReq;
+        }
+    };
+    libmisc::dokument_get_by_id(api_impl.as_ref(), &ims, &path_params)
         .await
         .unwrap_or_else(|e| {
             error!(error = ?e);

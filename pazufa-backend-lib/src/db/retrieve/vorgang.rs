@@ -4,6 +4,90 @@ use crate::error::{DataValidationError, LTZFError, Result};
 use crate::models;
 use crate::models::enumerations::{Ressort, Sachgebiet};
 use std::str::FromStr;
+use uuid::Uuid;
+
+async fn lobbyreg_of_vorgang(
+    id: i32,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Vec<models::Lobbyregistereintrag>> {
+    let mut lobbyreg_records =
+        sqlx::query!("SELECT * FROM lobbyregistereintrag WHERE vg_id = $1", id)
+            .map(|r| {
+                (
+                    r.id,
+                    models::Lobbyregistereintrag {
+                        intention: r.intention,
+                        organisation: models::Autor {
+                            fachgebiet: None,
+                            lobbyregister: None,
+                            organisation: String::new(),
+                            person: None,
+                        },
+                        link: r.link,
+                        interne_id: r.interne_id,
+                        betroffene_drucksachen: vec![],
+                    },
+                    r.organisation,
+                )
+            })
+            .fetch_all(&mut **executor)
+            .await?;
+    let mut lobbyregs = vec![];
+    for (id, object, org_id) in lobbyreg_records.drain(..) {
+        let drucks = sqlx::query!(
+            "SELECT drucksnr FROM rel_lobbyreg_drucksnr WHERE lob_id = $1",
+            id
+        )
+        .map(|r| r.drucksnr)
+        .fetch_all(&mut **executor)
+        .await?;
+        lobbyregs.push(models::Lobbyregistereintrag {
+            organisation: sqlx::query!("SELECT * FROM autor WHERE id = $1", org_id)
+                .map(|r| models::Autor {
+                    fachgebiet: r.fachgebiet,
+                    lobbyregister: r.lobbyregister,
+                    organisation: r.organisation,
+                    person: r.person,
+                })
+                .fetch_one(&mut **executor)
+                .await?,
+            betroffene_drucksachen: drucks,
+            ..object
+        });
+    }
+    Ok(lobbyregs)
+}
+pub async fn vorgang_dbid(
+    api_id: Uuid,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<i32>> {
+    let id = sqlx::query_scalar!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
+        .fetch_optional(&mut **executor)
+        .await?;
+    Ok(id)
+}
+pub async fn vorgang_by_id_ims(
+    id: i32,
+    expand: bool,
+    if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<models::Vorgang>> {
+    let id: Option<i32> = sqlx::query_scalar!(
+        "SELECT id FROM vorgang 
+        WHERE 
+        $1 = id AND 
+        ($2 <= meta_last_modified OR $2 IS NULL)",
+        id,
+        if_mod_since
+    )
+    .fetch_optional(&mut **executor)
+    .await?;
+    if let Some(id) = id {
+        Ok(Some(vorgang_by_id(id, expand, executor).await?))
+    } else {
+        Ok(None)
+    }
+}
 
 pub async fn vorgang_by_id(
     id: i32,
@@ -13,7 +97,9 @@ pub async fn vorgang_by_id(
     let pre_vg = sqlx::query!(
         "SELECT v.*, vt.value FROM vorgang v
         INNER JOIN vorgangstyp vt ON vt.id = v.typ
-        WHERE v.id = $1",
+        WHERE 
+        v.id = $1
+        ",
         id
     )
     .fetch_one(&mut **executor)
@@ -92,56 +178,11 @@ pub async fn vorgang_by_id(
     }
     stationen.sort_by_key(|a| a.zp_start);
 
-    // lobbyregistereinträge
-    let mut lobbyreg_records =
-        sqlx::query!("SELECT * FROM lobbyregistereintrag WHERE vg_id = $1", id)
-            .map(|r| {
-                (
-                    r.id,
-                    models::Lobbyregeintrag {
-                        intention: r.intention,
-                        organisation: models::Autor {
-                            fachgebiet: None,
-                            lobbyregister: None,
-                            organisation: String::new(),
-                            person: None,
-                        },
-                        link: r.link,
-                        interne_id: r.interne_id,
-                        betroffene_drucksachen: vec![],
-                    },
-                    r.organisation,
-                )
-            })
-            .fetch_all(&mut **executor)
-            .await?;
-    let mut lobbyregs = vec![];
-    for (id, object, org_id) in lobbyreg_records.drain(..) {
-        let drucks = sqlx::query!(
-            "SELECT drucksnr FROM rel_lobbyreg_drucksnr WHERE lob_id = $1",
-            id
-        )
-        .map(|r| r.drucksnr)
-        .fetch_all(&mut **executor)
-        .await?;
-        lobbyregs.push(models::Lobbyregeintrag {
-            organisation: sqlx::query!("SELECT * FROM autor WHERE id = $1", org_id)
-                .map(|r| models::Autor {
-                    fachgebiet: r.fachgebiet,
-                    lobbyregister: r.lobbyregister,
-                    organisation: r.organisation,
-                    person: r.person,
-                })
-                .fetch_one(&mut **executor)
-                .await?,
-            betroffene_drucksachen: drucks,
-            ..object
-        });
-    }
+    let lobbyregister = lobbyreg_of_vorgang(id, executor).await?;
 
     Ok(models::Vorgang {
         touched_by: vec![],
-        lobbyregister: lobbyregs,
+        lobbyregister,
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
@@ -298,10 +339,11 @@ pub async fn station_by_id(
         gremium_federf: temp_stat.gremium_isff,
     })
 }
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct VGGetParameters {
     pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
     pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
     pub wp: Option<i32>,
     pub inipsn: Option<String>,
@@ -309,7 +351,6 @@ pub struct VGGetParameters {
     pub inifch: Option<String>,
     pub vgtyp: Option<models::Vorgangstyp>,
 }
-/// returns (total number of available elements, chosen elements)
 pub async fn vorgang_by_parameter(
     params: VGGetParameters,
     page: Option<u32>,
@@ -317,13 +358,15 @@ pub async fn vorgang_by_parameter(
     expand: bool,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
-    let mut vg_list = sqlx::query!(
+    let mut vg_list: Vec<i32> = sqlx::query_scalar!(
         "WITH pre_table AS (
-        SELECT vorgang.id, MAX(ext_stat.zp_start) as lastmod FROM vorgang
+        SELECT vorgang.id, meta_last_modified, MIN(ext_stat.zp_start) as min_start, MAX(ext_stat.zp_start) as max_start FROM vorgang
             INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
-            LEFT JOIN (SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
-            INNER JOIN gremium g ON g.id = s.gr_id
-			INNER JOIN parlament on parlament.id = g.parl) AS ext_stat ON ext_stat.vg_id = vorgang.id
+            LEFT JOIN (
+                    SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
+                    INNER JOIN gremium g ON g.id = s.gr_id
+			        INNER JOIN parlament on parlament.id = g.parl
+                ) AS ext_stat ON ext_stat.vg_id = vorgang.id
             WHERE TRUE
             AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
             AND ($2::text IS NULL OR $2 = vt.value)
@@ -332,17 +375,22 @@ pub async fn vorgang_by_parameter(
 			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
 			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
         GROUP BY vorgang.id
-        ORDER BY lastmod
+        ORDER BY meta_last_modified 
         )
-SELECT * FROM pre_table WHERE
-lastmod > COALESCE($7::timestamptz, '1940-01-01T20:20:20Z') 
-AND lastmod < COALESCE($8, NOW())
-ORDER BY pre_table.lastmod ASC
-",params.wp, params.vgtyp.map(|x|x.to_string()),
+
+SELECT id FROM pre_table WHERE
+($7::timestamptz IS NULL OR $7 <= meta_last_modified) AND
+($8::timestamptz IS NULL OR $8 <= min_start) AND
+($9::timestamptz IS NULL OR $9 >= max_start)
+
+ORDER BY pre_table.meta_last_modified ASC",
+params.wp, params.vgtyp.map(|x|x.to_string()),
 params.parlament.map(|p|p.to_string()),
 params.inipsn, params.iniorg, params.inifch,
-params.lower_date, params.upper_date)
-    .map(|r|r.id)
+params.if_mod_since,
+params.lower_date,
+params.upper_date
+    )
     .fetch_all(&mut **executor).await?;
     let prp = PaginationResponsePart::new(
         u32::try_from(vg_list.len()).map_err(|e| LTZFError::Other {

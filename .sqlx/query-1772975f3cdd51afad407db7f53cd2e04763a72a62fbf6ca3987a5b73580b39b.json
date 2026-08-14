@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH pre_table AS (\n        SELECT vorgang.id, meta_last_modified, MIN(ext_stat.zp_start) as min_start, MAX(ext_stat.zp_start) as max_start FROM vorgang\n            INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ\n            LEFT JOIN (\n                    SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s\n                    INNER JOIN gremium g ON g.id = s.gr_id\n\t\t\t        INNER JOIN parlament on parlament.id = g.parl\n                ) AS ext_stat ON ext_stat.vg_id = vorgang.id\n            WHERE TRUE\n            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)\n            AND ($2::text IS NULL OR $2 = vt.value)\n            AND ($3::text IS NULL OR $3 = ext_stat.parl)\n\t\t\tAND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person ILIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))\n\t\t\tAND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))\n\t\t\tAND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))\n        GROUP BY vorgang.id\n        ORDER BY meta_last_modified \n        )\n\nSELECT id FROM pre_table WHERE\n($7::timestamptz IS NULL OR $7 <= meta_last_modified) AND\n($8::timestamptz IS NULL OR $8 <= min_start) AND\n($9::timestamptz IS NULL OR $9 >= max_start)\n\nORDER BY pre_table.meta_last_modified ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "vorgang",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1772975f3cdd51afad407db7f53cd2e04763a72a62fbf6ca3987a5b73580b39b"
+}

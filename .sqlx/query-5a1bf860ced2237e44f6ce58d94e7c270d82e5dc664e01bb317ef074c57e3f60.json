@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vg_sachgebiete (vg_id, sg_id) \n        SELECT $1, id FROM sachgebiet\n        WHERE value = ANY($2::int4[])\n        ON CONFLICT DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a1bf860ced2237e44f6ce58d94e7c270d82e5dc664e01bb317ef074c57e3f60"
+}

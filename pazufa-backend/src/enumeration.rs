@@ -39,7 +39,7 @@ async fn enum_delete(
 ) -> DeleteResponse {
     // Authentication
     if !matches!(claims.0, APIScope::KeyAdder | APIScope::Admin) {
-        warn!("Unauthorized access to autoren_delete");
+        warn!("Unauthorized access to enum_delete");
         return DeleteResponse::Unauth;
     }
 

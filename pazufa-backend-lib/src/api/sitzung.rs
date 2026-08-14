@@ -2,7 +2,7 @@ use super::RoundTimestamp;
 use super::auth::APIScope;
 use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, PutResponse, auth::Claims};
-use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_parameter};
+use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_parameter, sitzung_dbid};
 use crate::db::{delete, insert, retrieve};
 use crate::error::LTZFError;
 use crate::models::params;
@@ -262,7 +262,7 @@ pub async fn kal_date_get(
         Some(path_params.datum.day()),
         None,
         None,
-        header_params.if_modified_since,
+        None,
     );
     let Some(dr) = dr else {
         info!("Date Range too narrow or invalid");
@@ -277,6 +277,7 @@ pub async fn kal_date_get(
             gremium_like: None,
             since: dt_begin,
             until: dt_end,
+            if_mod_since: header_params.if_modified_since,
             vgid: None,
             wp: None,
         },
@@ -333,7 +334,7 @@ pub async fn kal_get(
         qparams.dom,
         qparams.since,
         qparams.until,
-        hparams.if_modified_since,
+        None,
     );
     let Some(result) = result else {
         warn!(
@@ -346,6 +347,7 @@ pub async fn kal_get(
     let params = retrieve::SitzungFilterParameters {
         gremium_like: qparams.gr.clone(),
         parlament: qparams.p,
+        if_mod_since: hparams.if_modified_since,
         vgid: None,
         wp: qparams.wp,
         since: result.since,
@@ -395,49 +397,39 @@ pub async fn s_get_by_id(
     let claims = (APIScope::Collector, 0);
     let mut tx = server.sqlx_db.begin().await?;
     let api_id = path_params.api_id;
-    let id_exists = sqlx::query!("SELECT 1 as x FROM sitzung WHERE api_id = $1", api_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-    if id_exists.is_none() {
+
+    let Some(id) = sitzung_dbid(api_id, &mut tx).await? else {
         info!("Sitzung does not exist");
         return Ok(GetSingleResponse::NotFound);
-    }
+    };
 
-    let id = sqlx::query!(
-        "SELECT id FROM sitzung WHERE api_id = $1
-        AND last_update > COALESCE($2::timestamptz, '1940-01-01T00:00:00');",
-        api_id,
-        header_params.if_modified_since
-    )
-    .map(|r| r.id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if let Some(id) = id {
-        let mut result = retrieve::sitzung_by_id(id, expand, &mut tx).await?;
-        if claims.0 == APIScope::KeyAdder || claims.0 == APIScope::Admin {
-            result.touched_by = sqlx::query!(
-                "SELECT * FROM scraper_touched_sitzung sts
+    let Some(mut result) =
+        retrieve::sitzung_by_id_ims(id, expand, header_params.if_modified_since, &mut tx).await?
+    else {
+        info!(
+            "Success, but not modified since {:?}",
+            header_params.if_modified_since
+        );
+        return Ok(GetSingleResponse::NotMod);
+    };
+
+    if claims.0 == APIScope::KeyAdder || claims.0 == APIScope::Admin {
+        result.touched_by = sqlx::query!(
+            "SELECT * FROM scraper_touched_sitzung sts
                     INNER JOIN api_keys ON api_keys.id = sts.collector_key
                     WHERE sid = $1",
-                id
-            )
-            .map(|r| models::TouchedByInner {
-                key: Some(r.key_hash),
-                scraper_id: Some(r.scraper),
-            })
-            .fetch_all(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-        info!("Success");
-        Ok(GetSingleResponse::Success(Box::new(result)))
-    } else if let Some(ims) = header_params.if_modified_since {
-        info!("Success, but not modified since {}", ims);
-        Ok(GetSingleResponse::NotMod)
-    } else {
-        unreachable!("Session ID was not found a second time despite if_modified_since being None. This might indicate a grave database state error.\n
-            Call Parameters: {:?}, {:?}", path_params, header_params);
+            id
+        )
+        .map(|r| models::TouchedByInner {
+            key: Some(r.key_hash),
+            scraper_id: Some(r.scraper),
+        })
+        .fetch_all(&mut *tx)
+        .await?;
     }
+    tx.commit().await?;
+    info!("Success");
+    Ok(GetSingleResponse::Success(Box::new(result)))
 }
 
 /// Get Sitzung objects by filters
@@ -459,7 +451,7 @@ pub async fn s_get(
         None,
         query_params.since,
         query_params.until,
-        header_params.if_modified_since,
+        None,
     );
     let Some(range) = range else {
         warn!(
@@ -471,6 +463,7 @@ pub async fn s_get(
     let params = retrieve::SitzungFilterParameters {
         gremium_like: query_params.gr.clone(),
         parlament: query_params.p,
+        if_mod_since: header_params.if_modified_since,
         wp: query_params.wp,
         since: range.since,
         until: range.until,
@@ -572,9 +565,7 @@ mod sitzung_test {
 
         let response = super::kal_date_get(
             &scenario.server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &params::IfModSince::default(),
             &params::KalDateGetPathParams {
                 datum: session.termin.date_naive(),
                 parlament: models::Parlament::Bt,
@@ -590,9 +581,7 @@ mod sitzung_test {
         assert_eq!(response, super::SitzungListingResponse::NoContent);
         let response = super::s_get(
             &scenario.server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &params::IfModSince::default(),
             &params::SGetQueryParams {
                 page: Some(500),
                 ..Default::default()
@@ -665,9 +654,7 @@ mod sitzung_test {
 
         let response = super::kal_date_get(
             server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &params::IfModSince::default(),
             &params::KalDateGetPathParams {
                 datum: today,
                 parlament,
@@ -715,9 +702,7 @@ mod sitzung_test {
         // 2. Get calendar entry for non-existent date
         let response = super::kal_date_get(
             server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &params::IfModSince::default(),
             &params::KalDateGetPathParams {
                 datum: chrono::NaiveDate::from_ymd_opt(1950, 10, 10)
                     .expect("Failed to create date from year, month, day"),
@@ -736,9 +721,7 @@ mod sitzung_test {
         // successful GET
         let response = super::kal_date_get(
             server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &params::IfModSince::default(),
             &params::KalDateGetPathParams {
                 datum: today,
                 parlament,
@@ -788,16 +771,8 @@ mod sitzung_test {
         // Cleanup
         setup.teardown().await;
     }
-
-    #[tokio::test]
-    #[traced_test]
-    async fn test_kal_get() {
-        let setup = TestSetup::new("kal_get").await;
-        let server = &setup.server;
+    async fn insert_default_session(server: &crate::LTZFServer) {
         let session = generate::default_sitzung();
-        let parlament = session.gremium.parlament;
-        let date = session.termin;
-
         let response = super::sid_put(
             server,
             &Claims(auth::APIScope::Admin, 1),
@@ -806,347 +781,282 @@ mod sitzung_test {
             },
             &session.clone(),
         )
-        .await
-        .expect("Failed to create session");
-        assert!(matches!(response, PutResponse::Success));
+        .await;
+        assert!(matches!(response, Ok(PutResponse::Success)));
+    }
 
-        // Test cases for kal_get:
+    #[tokio::test]
+    #[traced_test]
+    async fn kal_get() {
+        let setup = TestSetup::new("kal_get").await;
+        let session = generate::default_sitzung();
+        insert_default_session(&setup.server).await;
+
         // 1. Get calendar entries with valid parameters
-        {
-            let response = super::kal_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::KalGetQueryParams {
-                    y: Some(date.year()),
-                    m: Some(date.month()),
-                    p: Some(parlament),
-                    wp: Some(session.gremium.wahlperiode),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get calendar entries with valid parameters");
-            match &response {
-                super::SitzungListingResponse::Success { body, .. } => {
-                    assert!(
-                        !body.is_empty(),
-                        "Expected 204 no content, got 200 OK with empty body"
-                    );
-                }
-                _ => panic!("Expected to find sessions with valid filters, got: {response:?}"),
-            }
-        }
-
-        // 2. Get calendar entries with invalid parameters (since > until)
-        {
-            let response = super::kal_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::KalGetQueryParams {
-                    since: Some(chrono::Utc::now()),
-                    until: Some(chrono::Utc::now() - chrono::Duration::days(1)), // until is before since
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get calendar entries with invalid parameters");
-            assert!(
-                matches!(response, super::SitzungListingResponse::BadReq),
-                "Got: {response:?}"
-            );
-        }
-
-        // 3. Get calendar entries with date range
-        {
-            let start_date = session
-                .termin
-                .checked_sub_days(chrono::Days::new(1))
-                .expect("Failed to subtract days from session date");
-            let end_date = session
-                .termin
-                .checked_add_days(chrono::Days::new(1))
-                .expect("Failed to add days to session date");
-            let response = super::kal_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::KalGetQueryParams {
-                    p: Some(parlament),
-                    since: Some(start_date),
-                    until: Some(end_date),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get calendar entries with date range");
-            match response {
-                super::SitzungListingResponse::Success { body, .. } => {
-                    assert!(!body.is_empty(), "Expected to find sessions in date range");
-                    for session in body {
-                        assert!(
-                            session.termin >= start_date && session.termin <= end_date,
-                            "Found session outside requested date range"
-                        );
-                    }
-                }
-                _ => panic!("Expected to find sessions in date range"),
-            }
-        }
-
         let response = super::kal_get(
-            server,
-            &params::IfModSince {
-                if_modified_since: Some(
-                    chrono::Utc::now()
-                        .checked_add_days(chrono::Days::new(1))
-                        .expect("Failed to add days to current date"),
-                ),
-            },
+            &setup.server,
+            &params::IfModSince::default(),
             &params::KalGetQueryParams {
-                p: Some(parlament),
+                y: Some(session.termin.year()),
+                m: Some(session.termin.month()),
+                p: Some(session.gremium.parlament),
+                wp: Some(session.gremium.wahlperiode),
                 ..Default::default()
             },
             false,
         )
-        .await
-        .expect("Failed to get calendar entries with if-modified-since header");
+        .await;
+        match &response {
+            Ok(super::SitzungListingResponse::Success { body, .. }) => {
+                assert!(
+                    !body.is_empty(),
+                    "Expected 204 no content, got 200 OK with empty body"
+                );
+            }
+            _ => panic!("Expected to find sessions with valid filters, got: {response:?}"),
+        }
+
+        // 2. Get calendar entries with invalid parameters (since > until)
+        let response = super::kal_get(
+            &setup.server,
+            &params::IfModSince::default(),
+            &params::KalGetQueryParams {
+                since: Some(chrono::Utc::now()),
+                until: Some(chrono::Utc::now() - chrono::Duration::days(1)), // until is before since
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
         assert!(
-            matches!(response, super::SitzungListingResponse::NotMod),
+            matches!(response, Ok(super::SitzungListingResponse::BadReq)),
+            "Got: {response:?}"
+        );
+
+        // 3. Get calendar entries with date range
+        let start_date = session.termin - chrono::Days::new(1);
+        let end_date = session.termin + chrono::Days::new(1);
+        let response = super::kal_get(
+            &setup.server,
+            &params::IfModSince::default(),
+            &params::KalGetQueryParams {
+                p: Some(session.gremium.parlament),
+                since: Some(start_date),
+                until: Some(end_date),
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        match response {
+            Ok(super::SitzungListingResponse::Success { body, .. }) => {
+                assert!(!body.is_empty(), "Expected to find sessions in date range");
+                for session in body {
+                    assert!(
+                        session.termin >= start_date && session.termin <= end_date,
+                        "Found session outside requested date range"
+                    );
+                }
+            }
+            _ => panic!("Expected to find sessions in date range"),
+        }
+
+        let response = super::kal_get(
+            &setup.server,
+            &params::IfModSince {
+                if_modified_since: Some(chrono::Utc::now() + chrono::Days::new(1)),
+            },
+            &params::KalGetQueryParams {
+                p: Some(session.gremium.parlament),
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        assert!(
+            matches!(response, Ok(super::SitzungListingResponse::NotMod)),
             "{response:?}"
         );
 
         let response = super::kal_get(
-            server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &setup.server,
+            &params::IfModSince::default(),
             &params::KalGetQueryParams {
-                p: Some(parlament),
-                since: Some(
-                    chrono::Utc::now()
-                        .checked_add_days(chrono::Days::new(1))
-                        .expect("Failed to add days to current date"),
-                ),
+                p: Some(session.gremium.parlament),
+                since: Some(chrono::Utc::now() + chrono::Days::new(1)),
                 ..Default::default()
             },
             false,
         )
-        .await
-        .expect("Failed to get calendar entries with future date range");
-        assert!(matches!(response, super::SitzungListingResponse::NoContent));
+        .await;
+        assert!(matches!(
+            response,
+            Ok(super::SitzungListingResponse::NoContent)
+        ));
 
         setup.teardown().await;
     }
 
     #[tokio::test]
-    pub(crate) async fn test_session_get_endpoints() {
+    async fn session_get() {
         // Setup test server and database
         let scenario = TestSetup::new("test_session_get").await;
         let server = &scenario.server;
-
-        let test_session = generate::default_sitzung();
-        // First create the session
-        let response = super::sid_put(
-            server,
-            &Claims(auth::APIScope::Admin, 1),
-            &params::ApiIdPathParam {
-                api_id: test_session
-                    .api_id
-                    .expect("Failed to get API ID from test session"),
-            },
-            &test_session,
-        )
-        .await
-        .expect("Failed to create session");
-        assert!(matches!(response, PutResponse::Success));
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-
-        // Test cases for s_get_by_id:
-        // 1. Get existing session
-        {
-            let response = super::s_get_by_id(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::ApiIdPathParam {
-                    api_id: test_session
-                        .api_id
-                        .expect("Failed to get API ID from test session"),
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get existing session");
-            match response {
-                GetSingleResponse::Success(body) => {
-                    assert_eq!(body.api_id, test_session.api_id);
-                    assert_eq!(body.titel, test_session.titel);
-                }
-                _ => panic!("Expected successful operation response"),
-            }
-        }
-
-        // 2. Get non-existent session
-        {
-            let non_existent_id = Uuid::now_v7();
-            let response = super::s_get_by_id(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::ApiIdPathParam {
-                    api_id: non_existent_id,
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get non-existent session");
-            assert!(matches!(response, GetSingleResponse::NotFound));
-        }
-
-        // 3. Get session with invalid ID
-        {
-            let invalid_id = Uuid::nil();
-            let response = super::s_get_by_id(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::ApiIdPathParam { api_id: invalid_id },
-                false,
-            )
-            .await
-            .expect("Failed to get session with invalid ID");
-            assert!(matches!(response, GetSingleResponse::NotFound));
-        }
-
-        // Test if-modified-since header
-        {
-            let response = super::s_get_by_id(
-                server,
-                &params::IfModSince {
-                    if_modified_since: Some(chrono::Utc::now()),
-                },
-                &params::ApiIdPathParam {
-                    api_id: test_session
-                        .api_id
-                        .expect("Failed to get API ID from test session"),
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get session with if-modified-since header");
-            assert!(matches!(response, GetSingleResponse::NotMod));
-        }
+        let session = generate::default_sitzung();
+        insert_default_session(&scenario.server).await;
 
         // Test cases for s_get:
         // 1. Get sessions with valid parameters
-        {
-            let response = super::s_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::SGetQueryParams {
-                    p: Some(test_session.gremium.parlament),
-                    wp: Some(20),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get sessions with valid parameters");
-            assert!(
-                matches!(response, super::SitzungListingResponse::Success { body, ..} if !body.is_empty())
-            );
-        }
+        let response = super::s_get(
+            server,
+            &params::IfModSince::default(),
+            &params::SGetQueryParams {
+                p: Some(session.gremium.parlament),
+                wp: Some(20),
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get sessions with valid parameters");
+        assert!(
+            matches!(response, super::SitzungListingResponse::Success { body, ..} if !body.is_empty())
+        );
 
         // 2. Get sessions with invalid parameters
-        {
-            let response = super::s_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::SGetQueryParams {
-                    since: Some(Utc::now()),
-                    until: Some(Utc::now() - chrono::Duration::days(365)),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get sessions with invalid parameters");
-            assert!(matches!(response, super::SitzungListingResponse::BadReq));
-        }
+        let response = super::s_get(
+            server,
+            &params::IfModSince::default(),
+            &params::SGetQueryParams {
+                since: Some(Utc::now()),
+                until: Some(Utc::now() - chrono::Duration::days(365)),
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get sessions with invalid parameters");
+        assert!(matches!(response, super::SitzungListingResponse::BadReq));
 
         // 3. Get sessions with filters
-        {
-            let response = super::s_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::SGetQueryParams {
-                    p: Some(test_session.gremium.parlament),
-                    wp: Some(20),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get sessions with filters");
-            assert!(
-                matches!(response, super::SitzungListingResponse::Success { body, ..} if !body.is_empty())
-            );
-        }
+        let response = super::s_get(
+            server,
+            &params::IfModSince::default(),
+            &params::SGetQueryParams {
+                p: Some(session.gremium.parlament),
+                wp: Some(20),
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get sessions with filters");
+        assert!(
+            matches!(response, super::SitzungListingResponse::Success { body, ..} if !body.is_empty())
+        );
 
         // Test if-modified-since header for s_get
-        {
-            let response = super::s_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: Some(chrono::Utc::now()),
-                },
-                &params::SGetQueryParams {
-                    p: Some(models::Parlament::Bt),
-                    wp: Some(20),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get sessions with if-modified-since header");
-            assert!(matches!(response, super::SitzungListingResponse::NotMod));
-        }
+        let response = super::s_get(
+            server,
+            &params::IfModSince {
+                if_modified_since: Some(chrono::Utc::now()),
+            },
+            &params::SGetQueryParams {
+                p: Some(models::Parlament::Bt),
+                wp: Some(20),
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get sessions with if-modified-since header");
+        assert!(matches!(response, super::SitzungListingResponse::NotMod));
 
         // Test getting sessions with different wahlperiode
-        {
-            let response = super::s_get(
-                server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
-                &params::SGetQueryParams {
-                    p: Some(models::Parlament::Bt),
-                    wp: Some(22),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-            .expect("Failed to get sessions with different wahlperiode");
-            assert!(matches!(response, super::SitzungListingResponse::NoContent));
+        let response = super::s_get(
+            server,
+            &params::IfModSince::default(),
+            &params::SGetQueryParams {
+                p: Some(models::Parlament::Bt),
+                wp: Some(22),
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get sessions with different wahlperiode");
+        assert!(matches!(response, super::SitzungListingResponse::NoContent));
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn session_get_by_id() {
+        // Setup test server and database
+        let scenario = TestSetup::new("test_session_get_by_id").await;
+        let server = &scenario.server;
+        let session = generate::default_sitzung();
+        insert_default_session(&scenario.server).await;
+
+        // Test cases for s_get_by_id:
+        // 1. Get existing session
+        let response = super::s_get_by_id(
+            server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam {
+                api_id: session.api_id.expect("Failed"),
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get existing session");
+        match response {
+            GetSingleResponse::Success(body) => {
+                assert_eq!(body.api_id, session.api_id);
+                assert_eq!(body.titel, session.titel);
+            }
+            _ => panic!("Expected successful operation response"),
         }
+
+        // 2. Get non-existent session
+        let non_existent_id = Uuid::now_v7();
+        let response = super::s_get_by_id(
+            server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam {
+                api_id: non_existent_id,
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get non-existent session");
+        assert!(matches!(response, GetSingleResponse::NotFound));
+
+        // 3. Get session with invalid ID
+        let invalid_id = Uuid::nil();
+        let response = super::s_get_by_id(
+            server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam { api_id: invalid_id },
+            false,
+        )
+        .await
+        .expect("Failed to get session with invalid ID");
+        assert!(matches!(response, GetSingleResponse::NotFound));
+
+        // Test if-modified-since header
+        let response = super::s_get_by_id(
+            server,
+            &params::IfModSince {
+                if_modified_since: Some(chrono::Utc::now()),
+            },
+            &params::ApiIdPathParam {
+                api_id: session.api_id.expect("Failed"),
+            },
+            false,
+        )
+        .await
+        .expect("Failed to get session with if-modified-since header");
+        assert!(matches!(response, GetSingleResponse::NotMod));
 
         // Cleanup
         scenario.teardown().await;
@@ -1217,9 +1127,7 @@ mod sitzung_test {
             server,
             &Claims(auth::APIScope::Admin, 1),
             &params::ApiIdPathParam {
-                api_id: sitzung
-                    .api_id
-                    .expect("Failed to get API ID from test session"),
+                api_id: sitzung.api_id.expect("Failed"),
             },
             &sitzung,
         )
@@ -1233,9 +1141,7 @@ mod sitzung_test {
             super::sitzung_delete(
                 server,
                 &params::ApiIdPathParam {
-                    api_id: sitzung
-                        .api_id
-                        .expect("Failed to get API ID from test session"),
+                    api_id: sitzung.api_id.expect("Failed"),
                 },
             )
             .await
@@ -1247,9 +1153,7 @@ mod sitzung_test {
             super::sitzung_delete(
                 server,
                 &params::ApiIdPathParam {
-                    api_id: sitzung
-                        .api_id
-                        .expect("Failed to get API ID from test session"),
+                    api_id: sitzung.api_id.expect("Failed"),
                 },
             )
             .await

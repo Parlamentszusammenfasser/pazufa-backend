@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT count(1) as \"cnt!\" FROM dokument WHERE\n        ($1::timestamptz is NULL) OR\n        $1 <= zp_referenz OR\n        $1 <= zp_lastmod OR\n        $1 <= zp_created",
+  "query": "SELECT count(1) as \"cnt!\" FROM dokument WHERE\n        ($1::timestamptz is NULL) OR\n        $1 <= meta_last_modified",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "9e52a5e671a9816cb2214332d64366f032435c40575791cdd63d5e90f8ac716a"
+  "hash": "5d8e8cb058073efffd7110fbe171d7f157581d1f4db10a6ae5f3502dcdab68fd"
 }

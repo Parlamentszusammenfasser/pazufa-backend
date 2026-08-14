@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "meta_last_modified",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "meta_last_modified"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "typ_value",
         "type_info": "Varchar",
         "origin": {
@@ -189,6 +200,7 @@
       false,
       true,
       true,
+      false,
       false
     ]
   },

@@ -1,13 +1,12 @@
 use crate::LTZFServer;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
 use pazufa_backend_lib::api::auth::{
     self as libauth, APIScope, ApiKeyStatus, Claims, CreateApiKey, KeytagListing,
 };
 use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
-use pazufa_backend_lib::models::params::AuthDeleteHeaderParams;
 use pazufa_backend_lib::models::{KeyTag, params};
+use pazufa_backend_lib::utils::header_params::HeaderParams;
 use std::sync::Arc;
 use tracing::warn;
 use utoipa::OpenApi;
@@ -24,7 +23,7 @@ use utoipa_axum::routes;
         auth_listing,
         auth_listing_keytag
     ),
-    components(schemas(ApiKeyStatus, KeytagListing, AuthDeleteHeaderParams))
+    components(schemas(ApiKeyStatus, KeytagListing))
 )]
 pub(super) struct AuthApi;
 
@@ -131,13 +130,11 @@ async fn auth_rotate(
     tag = "Authentifizierung",
     security(("apiKey" = ["keyadder"])),
     description = "Key adder interface for removing API keys from the system. Allows administrators and key management services to revoke access by deleting an existing API key.",
-    params(
-       ("api-key-delete" = params::AuthDeleteHeaderParams, Header, description = "The Key to delete")
-    ),
+    params(params::ApiKeyDelete),
     responses(DeleteResponse)
     )]
 async fn auth_delete(
-    headers: HeaderMap,
+    HeaderParams(api_key_delete): HeaderParams<params::ApiKeyDelete>,
     claims: Claims,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> DeleteResponse {
@@ -146,19 +143,7 @@ async fn auth_delete(
         return DeleteResponse::Unauth;
     }
 
-    let Some(api_key_delete) = headers.get(HeaderName::from_static("api-key-delete")) else {
-        warn!("api-key-delete was not found within the headers");
-        return DeleteResponse::BadReq;
-    };
-    let Ok(api_key_delete) = api_key_delete.to_str() else {
-        warn!("api-key-delete value could not be made into a string");
-        return DeleteResponse::BadReq;
-    };
-
-    let header_params = params::AuthDeleteHeaderParams {
-        api_key_delete: api_key_delete.to_owned(),
-    };
-    libauth::auth_delete(api_impl.as_ref(), &claims, &header_params)
+    libauth::auth_delete(api_impl.as_ref(), &claims, &api_key_delete)
         .await
         .map_or_else(
             |e| {
@@ -227,9 +212,9 @@ async fn auth_listing_keytag(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use axum::http::HeaderMap;
     use pazufa_backend_lib::api::auth::{self as libauth, APIScope, Claims};
-    use pazufa_backend_lib::models::params::{self};
+    use pazufa_backend_lib::models::params::{self, ApiKeyDelete};
+    use pazufa_backend_lib::utils::header_params::HeaderParams;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -292,8 +277,8 @@ mod test {
         let server = Arc::new(scenario.server.take().expect("Expected a server value"));
 
         let call_closure = |claims: Claims, server| async {
-            let hm = HeaderMap::new();
-            super::auth_delete(hm, claims, axum::extract::State(server)).await
+            let del_key = HeaderParams(ApiKeyDelete("nothing".to_owned()));
+            super::auth_delete(del_key, claims, axum::extract::State(server)).await
         };
         authtesting(
             Arc::clone(&server),

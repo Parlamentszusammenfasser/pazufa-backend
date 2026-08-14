@@ -21,7 +21,9 @@ pub(crate) async fn update_scraper_touched_vorgang(
     tx: &mut PgTransaction<'_>,
 ) -> Result<()> {
     sqlx::query!(
-        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) 
+        VALUES ($1, $2, $3) 
+        ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
         vg_id,
         collector_key,
         scraper_id
@@ -48,7 +50,82 @@ pub(crate) async fn update_scraper_touched_vorgang(
     .await?;
     Ok(())
 }
+async fn insert_stations_for_vg(
+    id: i32,
+    stationen: &Vec<models::Station>,
 
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
+    tx: &mut sqlx::PgTransaction<'_>,
+    server: &LTZFServer,
+) -> Result<()> {
+    let mut stat_ids = vec![];
+    for stat in stationen {
+        stat_ids.push(insert_station(stat, id, scraper_id, collector_key, tx, server).await?);
+    }
+    sqlx::query!(
+        "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
+    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        &stat_ids[..],
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT stat_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY stat_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_station
+        )
+        DELETE FROM scraper_touched_station st
+        USING ranked_objects ro
+        WHERE st.stat_id=ro.stat_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        i64::from(server.config.per_object_scraper_log_size)
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    tracing::trace!("Inserted stations for {id}: {stat_ids:?}");
+    Ok(())
+}
+async fn insert_lobbyregister_for_vg(
+    vg_id: i32,
+    lre: &Vec<models::Lobbyregistereintrag>,
+    tx: &mut sqlx::PgTransaction<'_>,
+    server: &LTZFServer,
+) -> Result<()> {
+    for l in lre {
+        let aid = insert_or_retrieve_autor(&l.organisation, tx, server).await?;
+        let lrid = sqlx::query!(
+            "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id",
+            &l.intention,
+            &l.interne_id,
+            &aid,
+            vg_id,
+            &l.link
+        )
+        .map(|r| r.id)
+        .fetch_one(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+            lrid,
+            &l.betroffene_drucksachen
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
 /// Inserts a new Vorgang into the database.
 pub(crate) async fn insert_vorgang(
     vg: &models::Vorgang,
@@ -65,8 +142,7 @@ pub(crate) async fn insert_vorgang(
     let obj = "vorgang";
     // master insert
     let vg_id = sqlx::query!(
-        "
-    INSERT INTO vorgang(api_id, titel, kurztitel, verfaend, wahlperiode, typ, ressort)
+        "INSERT INTO vorgang(api_id, titel, kurztitel, verfaend, wahlperiode, typ, ressort)
     VALUES
     ($1, $2, $3, $4, $5, (SELECT id FROM vorgangstyp WHERE value=$6), (SELECT id from ressort WHERE value = $7))
     RETURNING vorgang.id;",
@@ -148,74 +224,10 @@ pub(crate) async fn insert_vorgang(
     .await?;
 
     // insert stations
-    let mut stat_ids = vec![];
-    for stat in &vg.stationen {
-        stat_ids.push(insert_station(stat, vg_id, scraper_id, collector_key, tx, server).await?);
-    }
-    update_scraper_touched_vorgang(
-        vg_id,
-        server.config.per_object_scraper_log_size,
-        collector_key,
-        scraper_id,
-        tx,
-    )
-    .await?;
-    tracing::trace!("Inserted stations: {:?}", stat_ids);
+    insert_stations_for_vg(vg_id, &vg.stationen, scraper_id, collector_key, tx, server).await?;
 
     // insert Lobbyregister
-    for l in &vg.lobbyregister {
-        let aid = insert_or_retrieve_autor(&l.organisation, tx, server).await?;
-        let lrid = sqlx::query!(
-            "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id",
-            &l.intention,
-            &l.interne_id,
-            &aid,
-            vg_id,
-            &l.link
-        )
-        .map(|r| r.id)
-        .fetch_one(&mut **tx)
-        .await?;
-        sqlx::query!(
-            "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
-            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
-            lrid,
-            &l.betroffene_drucksachen
-        )
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    // bookkeeping
-    sqlx::query!(
-        "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
-    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
-        &stat_ids[..],
-        collector_key,
-        scraper_id
-    )
-    .execute(&mut **tx)
-    .await?;
-    sqlx::query!(
-        "WITH ranked_objects AS (
-        SELECT stat_id, scraper, 
-        ROW_NUMBER() OVER (
-            PARTITION BY stat_id
-            ORDER BY time_stamp DESC
-        ) AS rn 
-        FROM scraper_touched_station
-        )
-        DELETE FROM scraper_touched_station st
-        USING ranked_objects ro
-        WHERE st.stat_id=ro.stat_id AND
-        st.scraper=ro.scraper AND
-        ro.rn > $1",
-        i64::from(server.config.per_object_scraper_log_size)
-    )
-    .execute(&mut **tx)
-    .await?;
+    insert_lobbyregister_for_vg(vg_id, &vg.lobbyregister, tx, server).await?;
 
     tracing::info!("Vorgang Insertion Successful with ID: {}", vg_id);
     Ok(vg_id)
@@ -305,7 +317,88 @@ pub(crate) async fn insert_station(
 
     Ok(stat_id)
 }
-
+async fn insert_hashes_of_dok(
+    did: i32,
+    hash: &models::HashWrapper,
+    tx: &mut sqlx::PgTransaction<'_>,
+) -> Result<()> {
+    let mut v_hashstrats: Vec<String> = vec![];
+    let mut v_hashvalues: Vec<String> = vec![];
+    let mut v_hash_mimes: Vec<String> = vec![];
+    match hash {
+        models::HashWrapper::Legacy(h) => {
+            v_hashstrats.push(HashStrategy::Sha256Bytes.to_string());
+            v_hashvalues.push(h.clone());
+            v_hash_mimes.push(Mime::ApplicationPdf.to_string());
+        }
+        models::HashWrapper::Future(hvec) => {
+            for h in hvec {
+                v_hashvalues.push(h.value.clone());
+                v_hashstrats.push(h.strategy.to_string());
+                v_hash_mimes.push(h.mime.to_string());
+            }
+        }
+    }
+    sqlx::query!(
+        "INSERT INTO dok_hashes(dok_id, hash_strat_id, value, mime_id) 
+        SELECT $1, hs.id, inpt.value, m.id 
+        FROM
+            UNNEST($2::text[], $3::text[], $4::text[]) as inpt(strat, value, mime),
+            hash_strategy hs, 
+            mime as m
+        WHERE 
+            hs.value = inpt.strat AND
+            m.value = inpt.mime
+        ",
+        did,
+        &v_hashstrats[..],
+        &v_hashvalues[..],
+        &v_hash_mimes[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+async fn insert_zusammenfassung_of_dok(
+    did: i32,
+    zusammenfassung: &models::ZusammenfassungWrapper,
+    tx: &mut sqlx::PgTransaction<'_>,
+) -> Result<()> {
+    let mut v_zftypes: Vec<String> = vec![];
+    let mut v_zfvalue: Vec<String> = vec![];
+    match zusammenfassung {
+        models::ZusammenfassungWrapper::Legacy(h) => {
+            v_zftypes.push("full".to_string());
+            v_zfvalue.push(h.clone());
+        }
+        models::ZusammenfassungWrapper::Future(hvec) => {
+            for h in hvec {
+                v_zftypes.push(h.typ.clone());
+                v_zfvalue.push(h.inhalt.clone());
+            }
+        }
+    }
+    sqlx::query!(
+        "INSERT INTO zusammenf_typ (value) 
+            SELECT * FROM UNNEST($1::text[]) ON CONFLICT (value) DO NOTHING",
+        &v_zftypes[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO dok_zusammenfassungen(dok_id, zf_typ, value) 
+        SELECT $1, zft.id, inpt.value FROM
+            zusammenf_typ zft, UNNEST($2::text[], $3::text[]) as inpt(strat, value)
+            WHERE zft.value = inpt.strat
+        ",
+        did,
+        &v_zftypes[..],
+        &v_zfvalue[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
 pub(crate) async fn insert_dokument(
     dok: &models::Dokument,
     scraper_id: Uuid,
@@ -354,82 +447,13 @@ pub(crate) async fn insert_dokument(
     .fetch_one(&mut **tx)
     .await?;
     // hash
-    {
-        let mut v_hashstrats: Vec<String> = vec![];
-        let mut v_hashvalues: Vec<String> = vec![];
-        let mut v_hash_mimes: Vec<String> = vec![];
-        match &dok.hash {
-            models::dokument::HashWrapper::Legacy(h) => {
-                v_hashstrats.push(HashStrategy::Sha256Bytes.to_string());
-                v_hashvalues.push(h.clone());
-                v_hash_mimes.push(Mime::ApplicationPdf.to_string());
-            }
-            models::dokument::HashWrapper::Future(hvec) => {
-                for h in hvec {
-                    v_hashvalues.push(h.value.clone());
-                    v_hashstrats.push(h.strategy.to_string());
-                    v_hash_mimes.push(h.mime.to_string());
-                }
-            }
-        }
-        sqlx::query!(
-            "INSERT INTO dok_hashes(dok_id, hash_strat_id, value, mime_id) 
-        SELECT $1, hs.id, inpt.value, m.id 
-        FROM
-            UNNEST($2::text[], $3::text[], $4::text[]) as inpt(strat, value, mime),
-            hash_strategy hs, 
-            mime as m
-        WHERE 
-            hs.value = inpt.strat AND
-            m.value = inpt.mime
-        ",
-            did,
-            &v_hashstrats[..],
-            &v_hashvalues[..],
-            &v_hash_mimes[..]
-        )
-        .execute(&mut **tx)
-        .await?;
-    }
+    insert_hashes_of_dok(did, &dok.hash, tx).await?;
     // zusammenfassung
-    {
-        let mut v_zftypes: Vec<String> = vec![];
-        let mut v_zfvalue: Vec<String> = vec![];
-        match &dok.zusammenfassung {
-            Some(models::dokument::ZusammenfassungWrapper::Legacy(h)) => {
-                v_zftypes.push("full".to_string());
-                v_zfvalue.push(h.clone());
-            }
-            Some(models::dokument::ZusammenfassungWrapper::Future(hvec)) => {
-                for h in hvec {
-                    v_zftypes.push(h.typ.clone());
-                    v_zfvalue.push(h.inhalt.clone());
-                }
-            }
-            None => {}
-        }
-        sqlx::query!(
-            "INSERT INTO zusammenf_typ (value) 
-            SELECT * FROM UNNEST($1::text[]) ON CONFLICT DO NOTHING",
-            &v_zftypes[..]
-        )
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query!(
-            "INSERT INTO dok_zusammenfassungen(dok_id, zf_typ, value) 
-        SELECT $1, zft.id, inpt.value FROM
-            zusammenf_typ zft, UNNEST($2::text[], $3::text[]) as inpt(strat, value)
-            WHERE zft.value = inpt.strat
-        ",
-            did,
-            &v_zftypes[..],
-            &v_zfvalue[..]
-        )
-        .execute(&mut **tx)
-        .await?;
+    if let Some(zsf) = &dok.zusammenfassung {
+        insert_zusammenfassung_of_dok(did, zsf, tx).await?;
     }
     // Schlagworte
-    insert_dok_sw(did, &dok.schlagworte, tx).await?;
+    insert_schlagworte_of_dok(did, &dok.schlagworte, tx).await?;
 
     // authoren
     let mut aids = vec![];
@@ -806,7 +830,7 @@ pub(crate) async fn insert_station_sw(
     .await?;
     Ok(())
 }
-pub(crate) async fn insert_dok_sw(
+pub(crate) async fn insert_schlagworte_of_dok(
     did: i32,
     sw: &[String],
     tx: &mut PgTransaction<'_>,

@@ -22,14 +22,8 @@ pub async fn index_vorgang(
         // fetch all vorgang objects after last_mod
         let (_, vector) = pazufa_backend_lib::db::retrieve::vorgang_by_parameter(
             pazufa_backend_lib::db::retrieve::VGGetParameters {
-                lower_date: Some(last_mod),
-                upper_date: None,
-                parlament: None,
-                wp: None,
-                inipsn: None,
-                iniorg: None,
-                inifch: None,
-                vgtyp: None,
+                if_mod_since: Some(last_mod),
+                ..Default::default()
             },
             Some(i),
             Some(PER_PAGE_MAX),
@@ -62,11 +56,7 @@ pub async fn index_sitzung(
         let (_, vector) = pazufa_backend_lib::db::retrieve::sitzung_by_parameter(
             &pazufa_backend_lib::db::retrieve::SitzungFilterParameters {
                 since: Some(last_mod),
-                until: None,
-                parlament: None,
-                wp: None,
-                vgid: None,
-                gremium_like: None,
+                ..Default::default()
             },
             Some(i),
             Some(PER_PAGE_MAX),
@@ -97,9 +87,10 @@ pub async fn index_dokument(
         // fetch all vorgang objects after last_mod
         let (_, vector) = pazufa_backend_lib::db::retrieve::get_dokument_by_parameter(
             pazufa_backend_lib::db::retrieve::DokumentRetrivalParameters {
-                last_mod: Some(last_mod),
+                if_mod_since: Some(last_mod),
                 page: Some(i),
                 per_page: Some(PER_PAGE_MAX),
+                ..Default::default()
             },
             &mut ta,
         )

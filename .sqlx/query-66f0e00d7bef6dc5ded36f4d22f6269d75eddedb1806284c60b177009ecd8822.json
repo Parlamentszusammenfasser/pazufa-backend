@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO zusammenf_typ (value) \n            SELECT * FROM UNNEST($1::text[]) ON CONFLICT (value) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "66f0e00d7bef6dc5ded36f4d22f6269d75eddedb1806284c60b177009ecd8822"
+}

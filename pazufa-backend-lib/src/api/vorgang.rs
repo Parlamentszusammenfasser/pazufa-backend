@@ -3,6 +3,7 @@ use super::auth::APIScope;
 use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, ListingGetResponse, RoundTimestamp};
 use crate::db;
+use crate::db::retrieve::vorgang_dbid;
 use crate::db::{delete, insert, merge, retrieve};
 use crate::error::{DataValidationError, LTZFError};
 use crate::models::params;
@@ -132,59 +133,39 @@ pub async fn vorgang_get_by_id(
     let claims = (APIScope::Collector, 0);
 
     let mut tx = server.sqlx_db.begin().await?;
-
-    let dbid = if let Some(if_modified_since) = header_params.if_modified_since {
-            sqlx::query_scalar!(
-                "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
-                    SELECT 1 FROM station s WHERE s.zp_modifiziert > $2::timestamptz AND s.vg_id = vorgang.id
-                )",
-                path_params.api_id,
-                if_modified_since
-            )
-        } else {
-            sqlx::query_scalar!(
-                "SELECT id FROM vorgang WHERE api_id = $1",
-                path_params.api_id
-            )
-        }
-            .fetch_optional(&mut *tx)
-            .await?;
-
-    let res = match (header_params.if_modified_since, dbid) {
-        (_, Some(dbid)) => {
-            let mut result = retrieve::vorgang_by_id(dbid, expand, &mut tx).await?;
-            if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
-                result.touched_by = sqlx::query!(
-                    "SELECT * FROM scraper_touched_vorgang sts
+    let Some(dbid) = vorgang_dbid(path_params.api_id, &mut tx).await? else {
+        info!(
+            "Vorgang with API ID {} is not in the database",
+            path_params.api_id
+        );
+        return Ok(GetSingleResponse::NotFound);
+    };
+    let Some(mut result) =
+        retrieve::vorgang_by_id_ims(dbid, expand, header_params.if_modified_since, &mut tx).await?
+    else {
+        info!(
+            "Successful Retrieval, was unchanged since {:?}",
+            header_params.if_modified_since
+        );
+        return Ok(GetSingleResponse::NotMod);
+    };
+    if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
+        result.touched_by = sqlx::query!(
+            "SELECT * FROM scraper_touched_vorgang sts
                             INNER JOIN api_keys ON api_keys.id = sts.collector_key
                             WHERE vg_id = $1",
-                    dbid
-                )
-                .map(|r| models::TouchedByInner {
-                    key: Some(r.key_hash),
-                    scraper_id: Some(r.scraper),
-                })
-                .fetch_all(&mut *tx)
-                .await?;
-            }
-            info!("Successful retrieval");
-            Ok(GetSingleResponse::Success(Box::new(result)))
-        }
-        (Some(if_modified_since), None) => {
-            info!(
-                "Successful Retrieval, was unchanged since {}",
-                if_modified_since
-            );
-            Ok(GetSingleResponse::NotMod)
-        }
-        (None, None) => {
-            warn!("Vorgang was not found");
-            Ok(GetSingleResponse::NotFound)
-        }
-    };
-
+            dbid
+        )
+        .map(|r| models::TouchedByInner {
+            key: Some(r.key_hash),
+            scraper_id: Some(r.scraper),
+        })
+        .fetch_all(&mut *tx)
+        .await?;
+    }
+    info!("Successful retrieval");
     tx.commit().await?;
-    res
+    Ok(GetSingleResponse::Success(Box::new(result)))
 }
 
 /// Used to get a filtered list of Vorgang objects.
@@ -204,11 +185,12 @@ pub async fn vorgang_get(
         None,
         query_params.since,
         query_params.until,
-        header_params.if_modified_since,
+        None,
     ) {
         let parameters = retrieve::VGGetParameters {
             lower_date: range.since,
             parlament: query_params.p,
+            if_mod_since: header_params.if_modified_since,
             upper_date: range.until,
             vgtyp: query_params.vgtyp,
             wp: query_params.wp.map(i32::from),
@@ -287,9 +269,7 @@ mod test_endpoints {
         {
             let response = super::vorgang_get_by_id(
                 server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
+                &params::IfModSince::default(),
                 &params::ApiIdPathParam {
                     api_id: test_vorgang.api_id,
                 },
@@ -319,9 +299,7 @@ mod test_endpoints {
             let non_existent_id = Uuid::now_v7();
             let response = super::vorgang_get_by_id(
                 server,
-                &params::IfModSince {
-                    if_modified_since: None,
-                },
+                &params::IfModSince::default(),
                 &params::ApiIdPathParam {
                     api_id: non_existent_id,
                 },
@@ -338,9 +316,7 @@ mod test_endpoints {
         {
             let invalid_id = Uuid::nil();
             let response = super::vorgang_get_by_id(server,
-                    &params::IfModSince {
-                        if_modified_since: None,
-                    },
+                    &params::IfModSince::default(),
                     &params::ApiIdPathParam {
                         api_id: invalid_id,
                     },
@@ -381,9 +357,7 @@ mod test_endpoints {
         .expect("Failed to create Vorgang.");
         let response = super::vorgang_get(
                 &scenario.server,
-                    &params::IfModSince {
-                        if_modified_since: None,
-                    },
+                    &params::IfModSince::default(),
                     &params::VorgangGetQueryParams {
                         page: Some(500),
                         ..Default::default()
@@ -415,9 +389,7 @@ mod test_endpoints {
         {
             let response = super::vorgang_get(
                 server,
-                    &params::IfModSince {
-                        if_modified_since: None,
-                    },
+                    &params::IfModSince::default(),
                     &params::VorgangGetQueryParams {
                         since: Some(Utc::now()),
                         until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
@@ -430,9 +402,7 @@ mod test_endpoints {
             assert!(matches!(response, ListingGetResponse::BadReq));
             let response = super::vorgang_get(
                 server,
-                    &params::IfModSince {
-                        if_modified_since: None,
-                    },
+                    &params::IfModSince::default(),
                     &params::VorgangGetQueryParams {
                         since: Some(Utc::now() + chrono::Duration::days(365)),
                         until: Some(Utc::now() + chrono::Duration::days(366)),
@@ -477,9 +447,7 @@ mod test_endpoints {
             // Then get it with matching filters
             let response = super::vorgang_get(
                 server,
-                    &params::IfModSince {
-                        if_modified_since: None,
-                    },
+                    &params::IfModSince::default(),
                     &params::VorgangGetQueryParams {
                         page: Some(0),
                         per_page: Some(32),
@@ -765,9 +733,7 @@ pub(crate) mod test_failed_irl_scenarios {
             .expect("Expected no internal failure after put");
             let _obj = super::vorgang_get_by_id(
                 &test_setup.server,
-                &models::params::IfModSince {
-                    if_modified_since: None,
-                },
+                &models::params::IfModSince::default(),
                 &models::params::ApiIdPathParam { api_id: uuid },
                 false,
             )
@@ -800,9 +766,7 @@ pub(crate) mod test_failed_irl_scenarios {
 
         let vorgang = super::vorgang_get_by_id(
             &scenario.server,
-            &params::IfModSince {
-                if_modified_since: None,
-            },
+            &params::IfModSince::default(),
             &params::ApiIdPathParam { api_id },
             false,
         )

@@ -6,6 +6,7 @@ use crate::models::dokument::{
 };
 use crate::models::enumerations::{HashStrategy, Mime};
 use std::str::FromStr;
+use uuid::Uuid;
 
 /// Retrieves Hashes as Legacy/Future from the database
 ///
@@ -98,6 +99,34 @@ pub async fn zusammenfassungen_of_dok(
     Ok(Some(ZusammenfassungWrapper::Future(tuples)))
 }
 
+pub async fn dokument_dbid(
+    api_id: Uuid,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<i32>> {
+    let id = sqlx::query_scalar!("SELECT id FROM dokument WHERE api_id = $1", api_id)
+        .fetch_optional(&mut **executor)
+        .await?;
+    Ok(id)
+}
+pub async fn dokument_by_id_ims(
+    id: i32,
+    if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<models::Dokument>> {
+    let id: Option<i32> = sqlx::query_scalar!(
+        "SELECT id FROM dokument WHERE 
+    $1 = id AND ($2 <= meta_last_modified OR $2 IS NULL)",
+        id,
+        if_mod_since
+    )
+    .fetch_optional(&mut **executor)
+    .await?;
+    if let Some(id) = id {
+        Ok(Some(dokument_by_id(id, executor).await?))
+    } else {
+        Ok(None)
+    }
+}
 pub async fn dokument_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
@@ -177,10 +206,13 @@ pub async fn dokument_by_id(
     })
 }
 
+#[derive(Default, Debug)]
 pub struct DokumentRetrivalParameters {
     pub page: Option<u32>,
     pub per_page: Option<u32>,
-    pub last_mod: Option<chrono::DateTime<chrono::Utc>>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+    pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn get_dokument_by_parameter(
@@ -190,10 +222,8 @@ pub async fn get_dokument_by_parameter(
     let dokument_count: i64 = sqlx::query_scalar!(
         "SELECT count(1) as \"cnt!\" FROM dokument WHERE
         ($1::timestamptz is NULL) OR
-        $1 <= zp_referenz OR
-        $1 <= zp_lastmod OR
-        $1 <= zp_created",
-        parameters.last_mod
+        $1 <= meta_last_modified",
+        parameters.if_mod_since
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -217,14 +247,14 @@ pub async fn get_dokument_by_parameter(
     }
     let dok_ids = sqlx::query!(
         "SELECT id FROM dokument WHERE
-        ($1::timestamptz is NULL) OR
-        $1 <= zp_referenz OR
-        $1 <= zp_lastmod OR
-        $1 <= zp_created
-        LIMIT $2 
-        OFFSET $3
-        ",
-        parameters.last_mod,
+        ($1::timestamptz is NULL OR $1 <= meta_last_modified) AND
+        ($2::timestamptz is NULL OR $2 <= zp_referenz) AND
+        ($3::timestamptz is NULL OR $3 >= zp_referenz)
+        LIMIT $4 
+        OFFSET $5",
+        parameters.if_mod_since,
+        parameters.since,
+        parameters.until,
         prp.limit(),
         prp.offset()
     )

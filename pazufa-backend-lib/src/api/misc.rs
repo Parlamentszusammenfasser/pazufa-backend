@@ -1,5 +1,5 @@
 use super::PaginationResponsePart;
-use crate::api::{GetSingleResponse, ListingGetResponse, find_applicable_date_range};
+use crate::api::{GetSingleResponse, ListingGetResponse};
 use crate::db::retrieve;
 use crate::models::enumerations::DokumentFormat;
 use crate::models::params::{self, ListingQueryParams};
@@ -8,7 +8,7 @@ use sqlx::Row;
 use sqlx::SqlSafeStr;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 /// GETs all Dokument Objects given the filtering parameters
 /// # Errors
@@ -20,44 +20,20 @@ pub async fn dokumente_get_by_params(
     ims: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<ListingGetResponse<models::Dokument>> {
     let mut tx = server.sqlx_db.begin().await?;
-    let Some(time_span) = find_applicable_date_range(None, None, None, lp.since, lp.until, ims)
-    else {
-        tx.rollback().await?;
-        warn!(
-            "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
-            lp, ims
-        );
-        return Ok(ListingGetResponse::BadReq);
-    };
-    let result: i64 = sqlx::query_scalar!(
-        "WITH dates(id, t) AS (
-            SELECT id, zp_referenz as t FROM dokument d
-            UNION
-            SELECT id, zp_lastmod  as t FROM dokument d 
-            UNION
-            SELECT id, zp_created  as t FROM dokument d
-        ),
-        dates_min(id, t) AS (SELECT id, MIN(t) FROM dates GROUP BY id)
 
-        SELECT COUNT(1) as \"cnt!\" FROM dokument d, dates_min dm
-        WHERE
-            dm.id = d.id AND 
-            dm.t BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz)
-        ",
-        time_span.since,
-        time_span.until
+    let (prp, doks) = retrieve::get_dokument_by_parameter(
+        retrieve::DokumentRetrivalParameters {
+            page: lp.page,
+            per_page: lp.per_page,
+            since: lp.since,
+            until: lp.until,
+            if_mod_since: ims,
+        },
+        &mut tx,
     )
-    .fetch_one(&mut *tx)
     .await?;
 
-    let prp = PaginationResponsePart::new(
-        u32::try_from(result).map_err(|e| LTZFError::Other {
-            message: format!("Failed to convert result length: {e}"),
-        })?,
-        lp.page,
-        lp.per_page,
-    );
-    if result == 0 {
+    if doks.is_empty() {
         return Ok(ListingGetResponse::NoContent);
     }
     if let Some(p) = lp.page
@@ -65,27 +41,7 @@ pub async fn dokumente_get_by_params(
     {
         return Ok(ListingGetResponse::NoContent);
     }
-    let dids: Vec<i32> = sqlx::query_scalar!(
-        "SELECT id FROM dokument d WHERE
-        zp_referenz BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz) OR
-        zp_lastmod  BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz) OR
-        zp_created  BETWEEN COALESCE($1, '1900-01-01T00:00:00Z'::timestamptz) AND COALESCE($2, '3000-01-01T00:00:00Z'::timestamptz)
-        ORDER BY zp_lastmod
-        LIMIT $3
-        OFFSET $4
-        ",
-        time_span.since,
-        time_span.until,
-        prp.limit(),
-        prp.offset()
-    )
-    .fetch_all(&mut *tx)
-    .await?;
-    let mut doks = vec![];
-    // if ftm, query here. not implemented yet
-    for did in dids {
-        doks.push(retrieve::dokument_by_id(did, &mut tx).await?);
-    }
+
     Ok(ListingGetResponse::Success {
         body: doks,
         prp,
@@ -329,24 +285,23 @@ pub async fn enum_get(
 #[instrument(skip_all, fields(dok=%path_params.api_id))]
 pub async fn dokument_get_by_id(
     server: &LTZFServer,
+    header_params: &params::IfModSince,
     path_params: &params::ApiIdPathParam,
 ) -> Result<GetSingleResponse<models::Dokument>> {
     let mut tx = server.sqlx_db.begin().await?;
-    let did = sqlx::query!(
-        "SELECT id FROM dokument WHERE api_id = $1",
-        path_params.api_id
-    )
-    .map(|r| r.id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if let Some(did) = did {
-        let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
-        tx.commit().await?;
-        info!("Document found");
-        return Ok(GetSingleResponse::Success(Box::new(dok)));
-    }
-    info!("Not Found");
-    return Ok(GetSingleResponse::NotFound);
+    let Some(dbid) = retrieve::dokument_dbid(path_params.api_id, &mut tx).await? else {
+        info!("Not Found");
+        return Ok(GetSingleResponse::NotFound);
+    };
+    let Some(result) =
+        retrieve::dokument_by_id_ims(dbid, header_params.if_modified_since, &mut tx).await?
+    else {
+        info!("Not Modified");
+        return Ok(GetSingleResponse::NotMod);
+    };
+    tx.commit().await?;
+    info!("Document found");
+    return Ok(GetSingleResponse::Success(Box::new(result)));
 }
 
 #[cfg(test)]
@@ -753,11 +708,19 @@ mod test_unauthorisiert {
         )
         .await
         .expect("Failed to create Vorgang.");
-        let dokument =
-            super::dokument_get_by_id(&scenario.server, &params::ApiIdPathParam { api_id }).await;
+        let dokument = super::dokument_get_by_id(
+            &scenario.server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam { api_id },
+        )
+        .await;
 
-        let dokument2 =
-            super::dokument_get_by_id(&scenario.server, &params::ApiIdPathParam { api_id }).await;
+        let dokument2 = super::dokument_get_by_id(
+            &scenario.server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam { api_id },
+        )
+        .await;
         assert!(
             matches!(dokument,
             Ok(crate::api::GetSingleResponse::Success(d))

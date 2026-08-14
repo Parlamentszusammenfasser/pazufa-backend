@@ -81,7 +81,37 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
         vorgang_id,
     })
 }
-
+pub async fn sitzung_dbid(
+    api_id: Uuid,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<i32>> {
+    let id = sqlx::query_scalar!("SELECT id FROM sitzung WHERE api_id = $1", api_id)
+        .fetch_optional(&mut **executor)
+        .await?;
+    Ok(id)
+}
+pub async fn sitzung_by_id_ims(
+    id: i32,
+    expand: bool,
+    if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
+    executor: &mut sqlx::PgTransaction<'_>,
+) -> Result<Option<models::Sitzung>> {
+    let id: Option<i32> = sqlx::query_scalar!(
+        "SELECT id FROM sitzung 
+        WHERE 
+        $1 = id AND 
+        ($2 <= meta_last_modified OR $2 IS NULL)",
+        id,
+        if_mod_since
+    )
+    .fetch_optional(&mut **executor)
+    .await?;
+    if let Some(id) = id {
+        Ok(Some(sitzung_by_id(id, expand, executor).await?))
+    } else {
+        Ok(None)
+    }
+}
 pub async fn sitzung_by_id(
     id: i32,
     expand: bool,
@@ -164,9 +194,11 @@ pub async fn sitzung_by_id(
     })
 }
 
+#[derive(Debug, Default)]
 pub struct SitzungFilterParameters {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
+    pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
     pub wp: Option<u16>,
     pub vgid: Option<Uuid>,
@@ -180,17 +212,16 @@ pub async fn sitzung_by_parameter(
     expand: bool,
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Sitzung>)> {
-    let mut as_list = sqlx::query!(
-        "
-      WITH pre_table AS (
-        SELECT a.id, MAX(a.termin) as lastmod FROM  sitzung a
+    let mut as_list : Vec<i32>= sqlx::query_scalar!(
+        "WITH pre_table AS (
+        SELECT a.id, meta_last_modified as lastmod, a.termin 
+        FROM sitzung a
 		INNER JOIN gremium g ON g.id = a.gr_id
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
 		AND g.wp      = COALESCE($2, g.wp)
-        AND ($5::text IS NULL OR g.name ILIKE CONCAT('%', $5, '%'))
-        GROUP BY a.id
-        ORDER BY lastmod
+        AND ($6::text IS NULL OR g.name ILIKE CONCAT('%', $6, '%'))
+        ORDER BY meta_last_modified 
         ),
 	vgref AS   (
 		SELECT p.id, v.api_id FROM pre_table p
@@ -202,10 +233,13 @@ pub async fn sitzung_by_parameter(
 		INNER JOIN vorgang v ON s.vg_id = v.id
 	)
 
-SELECT * FROM pre_table WHERE
-lastmod > COALESCE($3::timestamptz,'1940-01-01T20:20:20Z') AND
-lastmod < COALESCE($4, NOW()) AND
-($6::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($6, vgref.api_id)))
+SELECT id FROM pre_table 
+WHERE
+
+($3::timestamptz is NULL OR $3 <= lastmod) AND
+($4::timestamptz IS NULL OR $4 <= termin)  AND
+($5::timestamptz IS NULL OR $5 >= termin)  AND
+($7::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($7, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x| i32::try_from(x).map_err(|e| LTZFError::Other {
@@ -214,12 +248,12 @@ ORDER BY pre_table.lastmod ASC",
             )
         }))
         .transpose()?,
+        params.if_mod_since,
         params.since,
         params.until,
         params.gremium_like,
         params.vgid
     )
-    .map(|r| r.id)
     .fetch_all(&mut **tx)
     .await?;
     let prp = PaginationResponsePart::new(

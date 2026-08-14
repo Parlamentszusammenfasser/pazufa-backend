@@ -39,13 +39,27 @@ impl TryFrom<HeaderValue> for XScraperId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct AuthDeleteHeaderParams {
-    pub api_key_delete: String,
-}
+/// The Keytag of the key that you are trying to delete
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams)]
+#[into_params(names("api-key-delete"), parameter_in = Header)]
+pub struct ApiKeyDelete(pub String);
+
+impl DeserializeFromHeaderName for ApiKeyDelete {
+    fn header_name() -> &'static str {
+        "api-key-delete"
+    }
+}
+impl TryFrom<HeaderValue> for ApiKeyDelete {
+    type Error = String;
+    fn try_from(value: HeaderValue) -> Result<Self, Self::Error> {
+        Ok(Self(value.to_str().map_err(|e| e.to_string())?.to_owned()))
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams)]
 #[into_params(parameter_in = Header)]
 pub struct IfModSince {
+    #[serde(rename = "if-modified-since")]
     pub if_modified_since: Option<chrono::DateTime<chrono::Utc>>,
 }
 impl TryFrom<Option<&HeaderValue>> for IfModSince {
@@ -154,7 +168,7 @@ pub struct ApiIdPathParam {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
-#[into_params(parameter_in = Path)]
+#[into_params(parameter_in = Query)]
 pub struct AutorenGetQueryParams {
     /// Filter by author name substring. Returns items where an author's name contains this string (case-insensitive).
     #[serde(skip_serializing_if = "Option::is_none")]

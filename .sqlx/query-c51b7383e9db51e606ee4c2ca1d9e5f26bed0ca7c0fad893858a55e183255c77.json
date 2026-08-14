@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM dokument WHERE\n        ($1::timestamptz is NULL OR $1 <= meta_last_modified) AND\n        ($2::timestamptz is NULL OR $2 <= zp_referenz) AND\n        ($3::timestamptz is NULL OR $3 >= zp_referenz)\n        LIMIT $4 \n        OFFSET $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c51b7383e9db51e606ee4c2ca1d9e5f26bed0ca7c0fad893858a55e183255c77"
+}

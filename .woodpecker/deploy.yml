@@ -4,7 +4,7 @@ when:
   - event: manual
 
 variables:
-  - &version "0.3.0"
+  - &version "0.3.1"
   - &companion_version "0.1.0"
 
 labels:
@@ -12,8 +12,39 @@ labels:
   performance: high
 
 steps:
-  - name: deploy backend on docker
+  - name: check-backend-tag-exists
+    image: alpine
+    commands:
+      - apk add --no-cache curl
+      - PB_VERSION=$(grep '^version' pazufa-backend/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+      - PB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/pazufa/backend/tags/$PB_VERSION/")
+      - |
+        if [ "$$PB_STATUS" = "200" ]; then
+          echo "ERROR: All tagged repositories have a pre-existing tag"
+          echo "pazufa/backend.............200"
+          echo "To fix this bump at least one version"
+          exit 1
+        fi
+        echo "pazufa/backend.............$$PB_STATUS"
+
+  - name: check-ec-tag-exists
+    image: alpine
+    commands:
+      - apk add --no-cache curl
+      - EC_VERSION=$(grep '^version' elastic-companion/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
+      - EC_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/pazufa/elastic-companion/tags/$EC_VERSION/")
+      - |
+        if [ "$$EC_STATUS" = "200" ]; then
+          echo "ERROR: All tagged repositories have a pre-existing tag"
+          echo "pazufa/elastic-companion...200"
+          echo "To fix this bump at least one version"
+          exit 1
+        fi
+        echo "pazufa/elastic-companion...$$EC_STATUS"
+
+  - name: backend-deploy
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    depends_on: [check-backend-tag-exists]
     settings:
       repo: pazufa/backend
       dockerfile: docker/Dockerfile
@@ -27,8 +58,9 @@ steps:
       password:
         from_secret: pazufa-docker-pass
 
-  - name: deploy elastic companion on docker
+  - name: ec-deploy
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    depends_on: [check-ec-tag-exists, backend-deploy]
     settings:
       repo: pazufa/elastic-companion
       dockerfile: docker/Dockerfile

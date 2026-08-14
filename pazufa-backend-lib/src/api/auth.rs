@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
 use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
 use crate::utils::as_option;
@@ -12,6 +10,7 @@ use chrono::{DateTime, Utc};
 use models::KeyTag;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 use utoipa::IntoResponses;
 use utoipa::ToSchema;
@@ -168,7 +167,6 @@ impl FromRequestParts<Arc<LTZFServer>> for Claims {
             .map_err(|err| (StatusCode::UNAUTHORIZED, format!("{err}")).into_response())
     }
 }
-
 #[derive(IntoResponses, PartialEq, Debug)]
 pub enum AuthPostResponse {
     #[response(status = 201)]
@@ -445,16 +443,16 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
 /// Deletes a Key with a given keytag
 /// # Errors
 /// Can fail if the database operations fail
-#[instrument(skip_all, fields(claim=%claims.0, keytag=%header_params.api_key_delete))]
+#[instrument(skip_all, fields(claim=%claims.0, keytag=%delete_tag.0))]
 pub async fn auth_delete(
     server: &LTZFServer,
     claims: &Claims,
-    header_params: &params::AuthDeleteHeaderParams,
+    delete_tag: &params::ApiKeyDelete,
 ) -> Result<()> {
     sqlx::query!(
         "UPDATE api_keys SET deleted_by=$1 WHERE keytag=$2",
         claims.1,
-        header_params.api_key_delete
+        delete_tag.0
     )
     .execute(&server.sqlx_db)
     .await?;
@@ -937,9 +935,7 @@ mod auth_test {
         auth_delete(
             server,
             &Claims(APIScope::KeyAdder, 1),
-            &params::AuthDeleteHeaderParams {
-                api_key_delete: tag.clone(),
-            },
+            &params::ApiKeyDelete(tag.clone()),
         )
         .await
         .expect("Failed to delete key.");
@@ -950,9 +946,7 @@ mod auth_test {
         auth_delete(
             server,
             &Claims(APIScope::KeyAdder, 1),
-            &params::AuthDeleteHeaderParams {
-                api_key_delete: tag.clone(),
-            },
+            &params::ApiKeyDelete(tag.clone()),
         )
         .await
         .expect("Failed to delete key.");
@@ -964,9 +958,7 @@ mod auth_test {
         auth_delete(
             server,
             &Claims(APIScope::Admin, 1),
-            &params::AuthDeleteHeaderParams {
-                api_key_delete: tag.clone(),
-            },
+            &params::ApiKeyDelete(tag.clone()),
         )
         .await
         .expect("Failed to delete key.");

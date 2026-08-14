@@ -13,6 +13,7 @@ use super::MatchState;
 use super::candidates::{
     dokument_merge_candidates, station_merge_candidates, vorgang_merge_candidates,
 };
+use crate::api::RoundTimestamp;
 use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
 #[cfg(feature = "track-validation")]
@@ -24,41 +25,15 @@ use crate::{LTZFServer, Result, models};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-pub(crate) async fn execute_merge_dokument(
-    model: &models::Dokument,
-    candidate: i32,
-    scraper_id: Uuid,
-    collector_key: KeyIndex,
+async fn merge_hashes_of_dok(
+    db_id: i32,
+    hash: &models::HashWrapper,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
 ) -> Result<()> {
-    let db_id = candidate;
-    // master update
-    sqlx::query!(
-        "UPDATE dokument SET
-        drucksnr = $2, titel =$3,
-        kurztitel = COALESCE($4, kurztitel), vorwort=COALESCE($5, vorwort),
-        volltext=COALESCE($6, volltext),
-        zp_lastmod=$7, link=$8, meinung=$9
-        WHERE dokument.id = $1
-        ",
-        db_id,
-        model.drucksnr,
-        model.titel,
-        model.kurztitel,
-        model.vorwort,
-        model.volltext,
-        model.zp_modifiziert,
-        model.link,
-        model.meinung.map(i32::from)
-    )
-    .execute(&mut **tx)
-    .await?;
-    // hashes: replace if strategy bin conflicts
     let mut hash_values: Vec<String> = vec![];
     let mut hash_types: Vec<String> = vec![];
     let mut hash_mimes: Vec<String> = vec![];
-    match &model.hash {
+    match hash {
         models::dokument::HashWrapper::Legacy(h) => {
             hash_values.push(h.clone());
             hash_types.push(HashStrategy::Sha256Bytes.to_string());
@@ -94,23 +69,34 @@ pub(crate) async fn execute_merge_dokument(
     )
     .execute(&mut **tx)
     .await?;
-
-    // zusammenfassung: replace by type
+    Ok(())
+}
+async fn merge_zusammenfassung_of_dok(
+    db_id: i32,
+    zusammenfassung: &models::ZusammenfassungWrapper,
+    tx: &mut sqlx::PgTransaction<'_>,
+) -> Result<()> {
     let mut zf_values: Vec<String> = vec![];
     let mut zf_types: Vec<String> = vec![];
-    match &model.zusammenfassung {
-        Some(models::dokument::ZusammenfassungWrapper::Legacy(zf)) => {
+    match &zusammenfassung {
+        models::dokument::ZusammenfassungWrapper::Legacy(zf) => {
             zf_values.push(zf.clone());
             zf_types.push("full".to_string());
         }
-        Some(models::dokument::ZusammenfassungWrapper::Future(zfs)) => {
+        models::dokument::ZusammenfassungWrapper::Future(zfs) => {
             for zf in zfs {
                 zf_values.push(zf.inhalt.clone());
                 zf_types.push(zf.typ.clone());
             }
         }
-        None => {}
     }
+    sqlx::query!(
+        "INSERT INTO zusammenf_typ (value) 
+            SELECT * FROM UNNEST($1::text[]) ON CONFLICT (value) DO NOTHING",
+        &zf_types[..]
+    )
+    .execute(&mut **tx)
+    .await?;
     sqlx::query!(
         "INSERT INTO dok_zusammenfassungen(dok_id, zf_typ, value)
         SELECT $1, zft.id, i.value
@@ -123,8 +109,50 @@ pub(crate) async fn execute_merge_dokument(
     )
     .execute(&mut **tx)
     .await?;
+    Ok(())
+}
+
+pub(crate) async fn execute_merge_dokument(
+    model: &models::Dokument,
+    candidate: i32,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
+    tx: &mut sqlx::PgTransaction<'_>,
+    srv: &LTZFServer,
+) -> Result<()> {
+    let db_id = candidate;
+    let original_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
+    // master update
+    sqlx::query!(
+        "UPDATE dokument SET
+        drucksnr = $2, titel =$3,
+        kurztitel = COALESCE($4, kurztitel), vorwort=COALESCE($5, vorwort),
+        volltext=COALESCE($6, volltext),
+        zp_lastmod=$7, link=$8, meinung=$9
+        WHERE dokument.id = $1
+        ",
+        db_id,
+        model.drucksnr,
+        model.titel,
+        model.kurztitel,
+        model.vorwort,
+        model.volltext,
+        model.zp_modifiziert,
+        model.link,
+        model.meinung.map(i32::from)
+    )
+    .execute(&mut **tx)
+    .await?;
+    // hashes: replace if strategy bin conflicts
+    merge_hashes_of_dok(db_id, &model.hash, tx).await?;
+
+    // zusammenfassung: replace by type
+    if let Some(zusf) = &model.zusammenfassung {
+        merge_zusammenfassung_of_dok(db_id, zusf, tx).await?;
+    }
+
     // schlagworte::UNION
-    insert::insert_dok_sw(db_id, &model.schlagworte, tx).await?;
+    insert::insert_schlagworte_of_dok(db_id, &model.schlagworte, tx).await?;
     // autoren::UNION
     let mut aids = vec![];
     for a in &model.autoren {
@@ -168,6 +196,12 @@ pub(crate) async fn execute_merge_dokument(
     )
     .execute(&mut **tx)
     .await?;
+    let merged_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
+    if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
+        sqlx::query!("UPDATE dokument SET meta_last_modified = NOW()")
+            .execute(&mut **tx)
+            .await?;
+    }
     info!("Merging Dokument into Database successful");
     Ok(())
 }
@@ -359,13 +393,15 @@ pub(crate) async fn execute_merge_vorgang(
     let db_id = candidate;
     let obj = "Vorgang";
     let vapi = model.api_id;
+    let original_state = crate::db::retrieve::vorgang_by_id(candidate, true, &mut *tx).await?;
     // master insert
     sqlx::query!(
         "UPDATE vorgang SET
             titel = $1, kurztitel = $2,
             verfaend = $3, wahlperiode = $4,
-            typ = (SELECT id FROM vorgangstyp WHERE value = $5)
-        WHERE vorgang.id = $6",
+            typ = (SELECT id FROM vorgangstyp WHERE value = $5),
+            ressort = (SELECT id FROM ressort WHERE value = $6)
+        WHERE vorgang.id = $7",
         model.titel,
         model.kurztitel,
         model.verfassungsaendernd,
@@ -373,7 +409,21 @@ pub(crate) async fn execute_merge_vorgang(
             message: format!("Failed to convert wahlperiode as it exceeds i32::MAX: {e}")
         })?,
         srv.guard_ts(&model.typ, vapi, obj),
+        model.ressort.map(|x| x.to_string()),
         db_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    // sachgebiete
+    let sg: Vec<_> = model.sachgebiete.iter().map(|x| *x as i32).collect();
+    sqlx::query!(
+        "INSERT INTO vg_sachgebiete (vg_id, sg_id) 
+        SELECT $1, id FROM sachgebiet
+        WHERE value = ANY($2::int4[])
+        ON CONFLICT DO NOTHING
+        ",
+        db_id,
+        &sg[..]
     )
     .execute(&mut **tx)
     .await?;
@@ -481,10 +531,17 @@ pub(crate) async fn execute_merge_vorgang(
     )
     .await?;
 
+    // validation and updating
+    let merged_state = crate::db::retrieve::vorgang_by_id(candidate, true, &mut *tx).await?;
     #[cfg(feature = "track-validation")]
-    {
-        let merged_state = crate::db::retrieve::vorgang_by_id(candidate, false, &mut *tx).await?;
-        validate::validate_vorgang(&merged_state, srv).await?;
+    validate::validate_vorgang(&merged_state, srv).await?;
+    if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
+        sqlx::query!(
+            "UPDATE vorgang
+                SET meta_last_modified = NOW()"
+        )
+        .execute(&mut **tx)
+        .await?;
     }
 
     info!(
@@ -650,16 +707,7 @@ mod scenariotest {
             Ok(())
         }
         async fn check_result(&self, server: &LTZFServer) -> Result<()> {
-            let paramock = retrieve::VGGetParameters {
-                vgtyp: None,
-                wp: None,
-                inipsn: None,
-                iniorg: None,
-                inifch: None,
-                parlament: None,
-                lower_date: None,
-                upper_date: None,
-            };
+            let paramock = retrieve::VGGetParameters::default();
             let mut tx = server
                 .sqlx_db
                 .begin()
@@ -854,6 +902,38 @@ mod scenariotest {
 
         if let Err(e) = scenario.run().await {
             panic!("Scenatio \"weak_prop_change_override\" failed with the following error: {e}")
+        }
+    }
+    #[tokio::test]
+    async fn test_vorgang_ressort_sachgebiete_merging() {
+        let mut vg = generate::default_vorgang();
+        vg.ressort = Some(models::enumerations::Ressort::Arbeit);
+        vg.sachgebiete = vec![models::enumerations::Sachgebiet::Wahlen];
+
+        let mut vg_mod = vg.clone();
+        vg_mod.ressort = Some(models::enumerations::Ressort::Bildung);
+        vg_mod.sachgebiete = vec![models::enumerations::Sachgebiet::Parlament];
+
+        let mut vg_exp = vg.clone();
+        vg_exp.ressort = vg_mod.ressort; // ressort is overridden by the incoming change
+        vg_exp.sachgebiete = []
+            .iter()
+            .chain(vg.sachgebiete.iter())
+            .chain(vg_mod.sachgebiete.iter())
+            .copied()
+            .collect(); // sachgebiete are merged via union
+
+        let scenario = Scenario::builder("vorgang_ressort_sachgebiete_merging")
+            .with_context(vec![vg])
+            .with_test_object(vg_mod)
+            .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
+            .build()
+            .await;
+
+        if let Err(e) = scenario.run().await {
+            panic!(
+                "Scenatio \"vorgang_ressort_sachgebiete_merging\" failed with the following error: {e}"
+            )
         }
     }
     #[tokio::test]

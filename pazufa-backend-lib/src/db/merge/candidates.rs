@@ -467,6 +467,7 @@ mod candid_test {
 
     #[traced_test]
     #[tokio::test]
+    #[allow(clippy::too_many_lines, reason = "Too many lines are fine for testing")]
     async fn dokument_test() {
         let setup = TestSetup::new("test_dokument_candidates").await;
         let srv = &setup.server;

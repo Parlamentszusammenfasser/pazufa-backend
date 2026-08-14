@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH pre_table AS (\n        SELECT a.id, meta_last_modified as lastmod, a.termin \n        FROM sitzung a\n\t\tINNER JOIN gremium g ON g.id = a.gr_id\n\t\tINNER JOIN parlament p ON p.id = g.parl\n\t\tWHERE p.value = COALESCE($1, p.value)\n\t\tAND g.wp      = COALESCE($2, g.wp)\n        AND ($6::text IS NULL OR g.name ILIKE CONCAT('%', $6, '%'))\n        ORDER BY meta_last_modified \n        ),\n\tvgref AS   (\n\t\tSELECT p.id, v.api_id FROM pre_table p\n\t\tINNER JOIN top on top.sid = p.id\n\t\tINNER JOIN tops_doks ON tops_doks.top_id = top.id\n\t\tLEFT JOIN rel_station_dokument rsd ON rsd.dok_id = tops_doks.dok_id\n\t\tLEFT JOIN rel_station_stln rss ON rss.dok_id = tops_doks.dok_id\n\t\tINNER JOIN station s ON s.id = rsd.stat_id OR s.id = rss.stat_id\n\t\tINNER JOIN vorgang v ON s.vg_id = v.id\n\t)\n\nSELECT id FROM pre_table \nWHERE\n\n($3::timestamptz is NULL OR $3 <= lastmod) AND\n($4::timestamptz IS NULL OR $4 <= termin)  AND\n($5::timestamptz IS NULL OR $5 >= termin)  AND\n($7::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($7, vgref.api_id)))\nORDER BY pre_table.lastmod ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "sitzung",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "262d935a3a4526b6488895b15edf6076301190f0abd1e4929703bc5969378379"
+}

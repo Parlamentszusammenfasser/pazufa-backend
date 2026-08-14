@@ -46,7 +46,7 @@ FROM busybox:latest AS pazufa-backend-runner
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
 # backend-label
-LABEL version="0.3.0"
+LABEL version="0.3.1"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1

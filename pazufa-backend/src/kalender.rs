@@ -31,7 +31,10 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
     description= "Collector interface for adding or updating sessions for a specific date and parliament. Completely replaces all sessions for the given date, with restrictions based on how far in the past the date is. Admin API keys can override the time restriction.",
     tags = ["Sitzung", "Collector-Schnittstellen"],
     security(("apiKey" = [ "collector", "admin", "keyadder"])),
-    params(params::KalDatePutPathParams),
+    params(
+        params::KalDatePutPathParams,
+        params::XScraperId
+    ),
     request_body(content_type = "application/json", content = Vec<models::Sitzung>, description ="Array of parliamentary sessions to set for the specified date" ),
     responses(PutResponse)
 )]
