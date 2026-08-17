@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE vorgang\n                SET meta_last_modified = NOW() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d82af73dfc33606dfce76c7db994b64bc4594d97d9640f54e8cf191dc71f4bce"
+}

@@ -198,9 +198,12 @@ pub(crate) async fn execute_merge_dokument(
     .await?;
     let merged_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
     if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
-        sqlx::query!("UPDATE dokument SET meta_last_modified = NOW()")
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query!(
+            "UPDATE dokument SET meta_last_modified = NOW() WHERE id = $1",
+            db_id
+        )
+        .execute(&mut **tx)
+        .await?;
     }
     info!("Merging Dokument into Database successful");
     Ok(())
@@ -326,15 +329,16 @@ pub(crate) async fn execute_merge_station(
         if let Some(id) = insert_or_merge_dok(dok, scraper_id, collector_key, tx, srv).await? {
             insert_ids.push(id);
         }
-        sqlx::query!(
-            "INSERT INTO rel_station_dokument(stat_id, dok_id) 
-        SELECT $1, did FROM UNNEST($2::int4[]) as did",
-            db_id,
-            &insert_ids[..]
-        )
-        .execute(&mut **tx)
-        .await?;
     }
+    sqlx::query!(
+        "INSERT INTO rel_station_dokument(stat_id, dok_id) 
+        SELECT $1, did FROM UNNEST($2::int4[]) as did
+        ON CONFLICT DO NOTHING",
+        db_id,
+        &insert_ids[..]
+    )
+    .execute(&mut **tx)
+    .await?;
 
     // stellungnahmen
     let mut insert_ids = vec![];
@@ -342,15 +346,17 @@ pub(crate) async fn execute_merge_station(
         if let Some(id) = insert_or_merge_dok(stln, scraper_id, collector_key, tx, srv).await? {
             insert_ids.push(id);
         }
-        sqlx::query!(
-            "INSERT INTO rel_station_stln(stat_id, dok_id) 
-            SELECT $1, did FROM UNNEST($2::int4[]) as did",
-            db_id,
-            &insert_ids[..]
-        )
-        .execute(&mut **tx)
-        .await?;
     }
+
+    sqlx::query!(
+        "INSERT INTO rel_station_stln(stat_id, dok_id) 
+            SELECT $1, did FROM UNNEST($2::int4[]) as did
+            ON CONFLICT DO NOTHING",
+        db_id,
+        &insert_ids[..]
+    )
+    .execute(&mut **tx)
+    .await?;
     sqlx::query!(
         "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
         VALUES ($1, $2, $3) ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
@@ -500,7 +506,7 @@ pub(crate) async fn execute_merge_vorgang(
 
     for l in &model.lobbyregister {
         let aid = insert_or_retrieve_autor(&l.organisation, tx, srv).await?;
-        let lrid = sqlx::query!(
+        let lrid: i32 = sqlx::query_scalar!(
             "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id",
@@ -510,7 +516,6 @@ pub(crate) async fn execute_merge_vorgang(
             db_id,
             &l.link
         )
-        .map(|r| r.id)
         .fetch_one(&mut **tx)
         .await?;
         sqlx::query!(
@@ -538,7 +543,8 @@ pub(crate) async fn execute_merge_vorgang(
     if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
         sqlx::query!(
             "UPDATE vorgang
-                SET meta_last_modified = NOW()"
+                SET meta_last_modified = NOW() WHERE id = $1",
+            db_id
         )
         .execute(&mut **tx)
         .await?;

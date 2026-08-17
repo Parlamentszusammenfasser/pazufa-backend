@@ -4,72 +4,101 @@ when:
   - event: manual
 
 variables:
-  - &version "0.3.1"
+  - &version "0.3.2"
   - &companion_version "0.1.0"
+  - &build_cache "pazufa/backend:buildcache"
 
 labels:
   pazufa_scope: generic
   performance: high
 
 steps:
-  - name: check-backend-tag-exists
+  # Checks both tags once and writes the results to the shared workspace.
+  # Fails (hard, not ignored) only when BOTH tags already exist - that
+  # failure propagates through depends_on and skips every step below,
+  # aborting the whole workflow.
+  - name: check-tags
     image: alpine
     commands:
       - apk add --no-cache curl
-      - PB_VERSION=$(grep '^version' pazufa-backend/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
-      - PB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/pazufa/backend/tags/$PB_VERSION/")
-      - |
-        if [ "$$PB_STATUS" = "200" ]; then
-          echo "ERROR: All tagged repositories have a pre-existing tag"
-          echo "pazufa/backend.............200"
-          echo "To fix this bump at least one version"
-          exit 1
-        fi
-        echo "pazufa/backend.............$$PB_STATUS"
+      - ( sh .woodpecker/docker-tag-free.sh pazufa-backend backend || sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion ) && echo "At least one Tag is free" && exit 0
+      - echo "Both image tags are not available. Aborting"
+      - exit 1
 
-  - name: check-ec-tag-exists
+  # Individually-skippable gates: fail (ignored) only for the one target
+  # whose tag already exists, so a single pre-existing tag never fails the
+  # overall pipeline - it just skips that one target's deploy step below.
+  - name: gate-backend
     image: alpine
+    failure: ignore
+    depends_on: [check-tags]
     commands:
-      - apk add --no-cache curl
-      - EC_VERSION=$(grep '^version' elastic-companion/Cargo.toml | head -1 | sed 's/version = "//;s/"//')
-      - EC_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/pazufa/elastic-companion/tags/$EC_VERSION/")
-      - |
-        if [ "$$EC_STATUS" = "200" ]; then
-          echo "ERROR: All tagged repositories have a pre-existing tag"
-          echo "pazufa/elastic-companion...200"
-          echo "To fix this bump at least one version"
-          exit 1
-        fi
-        echo "pazufa/elastic-companion...$$EC_STATUS"
+      - bash .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
+      - echo "pazufa/backend tag is taken - backend-deploy will not run"
+      - exit 1
+
+  - name: gate-ec
+    image: alpine
+    failure: ignore
+    depends_on: [check-tags]
+    commands:
+      - bash .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
+      - echo "pazufa/elastic-companion tag is taken - ec-deploy will run"
+      - exit 1
+
+  # Compiles both binaries once (through the shared `builder` stage) and
+  # pushes a mode=max registry cache so whichever target(s) below actually
+  # build never recompile from scratch. Only skipped in the abort case above.
+  - name: prebuild-cache
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    depends_on: [check-tags]
+    settings:
+      repo: pazufa/backend
+      dockerfile: docker/Dockerfile
+      context: .
+      target: builder
+      platforms:
+        - linux/amd64
+        - linux/aarch64
+      dry_run: true
+      cache_images:
+        - *build_cache
+      username: pazufa
+      password:
+        from_secret: pazufa-docker-pass
 
   - name: backend-deploy
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [check-backend-tag-exists]
+    depends_on: [gate-backend, prebuild-cache]
     settings:
       repo: pazufa/backend
       dockerfile: docker/Dockerfile
       context: .
       target: pazufa-backend-runner
-      platforms: 
+      platforms:
         - linux/amd64
         - linux/aarch64
       tag: *version
+      cache_images:
+        - *build_cache
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
 
   - name: ec-deploy
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [check-ec-tag-exists, backend-deploy]
+    depends_on: [gate-ec, prebuild-cache]
     settings:
       repo: pazufa/elastic-companion
       dockerfile: docker/Dockerfile
       context: .
       target: elastic-companion-runner
-      platforms: 
+      platforms:
         - linux/amd64
         - linux/aarch64
       tag: *companion_version
+      cache_images:
+        - *build_cache
       username: pazufa
       password:
         from_secret: pazufa-docker-pass

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rel_station_stln(stat_id, dok_id) \n            SELECT $1, did FROM UNNEST($2::int4[]) as did\n            ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ea8eecc89503a6d470ba8816375b5076e756f5833bafea02e2d24bda17f99e33"
+}

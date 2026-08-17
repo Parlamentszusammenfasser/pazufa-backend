@@ -667,6 +667,10 @@ pub(crate) mod test_failed_irl_scenarios {
         "tests/scenarios/500_sqlx_query.jsonl",
         sqlx_ret_500_query_returned_no_rows
     );
+    irl_scenario!(
+        "tests/scenarios/500_on_rel_station_merge.jsonl",
+        sqlx_500_on_rel_station_merge
+    );
 
     /// This test does not assert anything, and crashes as failure case.
     /// this reproduces #110, where a null byte in the full text caused issues when retrieving it

@@ -46,7 +46,7 @@ FROM busybox:latest AS pazufa-backend-runner
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
 # backend-label
-LABEL version="0.3.1"
+LABEL version="0.3.2"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1
@@ -92,8 +92,8 @@ COPY --from=builder /usr/lib/*-linux-gnu/libgcc_s.so.* /usr/lib
 
 RUN mkdir /app && chmod 0766 /app && chown pazufa-user /app
 
-COPY --from=builder --chmod=0400 --chown=pazufa-backend:pazufa-backend /app/tracks.toml /app/tracks.toml
-COPY --from=builder --chmod=0100 --chown=pazufa-backend:pazufa-backend /app/target/release/elastic-companion /app
+COPY --from=builder --chmod=0400 --chown=pazufa-user:pazufa-user /app/tracks.toml /app/tracks.toml
+COPY --from=builder --chmod=0100 --chown=pazufa-user:pazufa-user /app/target/release/elastic-companion /app
 
 WORKDIR /app
 
