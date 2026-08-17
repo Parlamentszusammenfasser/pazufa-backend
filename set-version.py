@@ -29,6 +29,8 @@ ec_version = file["version"]["ec_version"]
 trackfile = file["version"]["trackfile"]
 spec_version = file["version"]["spec_version"]
 
+swagger_ui_download_url = file["external"]["swagger_ui_download_url"]
+
 
 # spec version
 replace(
@@ -96,4 +98,22 @@ replace(
     ".woodpecker/testing.yml",
     r"  - &trackpath \"https://.*",
     f'  - &trackpath "{trackfile}"',
+)
+
+
+# swagger_ui download url
+replace(
+    ".woodpecker/testing.yml",
+    r"  - &swagger_ui_download_url \"https://.*",
+    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"'
+)
+replace(
+    ".woodpecker/staging.yml",
+    r"  - &swagger_ui_download_url \"https://.*",
+    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"'
+)
+replace(
+    ".woodpecker/deploy.yml",
+    r"  - &swagger_ui_download_url \"https://.*",
+    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"'
 )

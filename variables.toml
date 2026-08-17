@@ -5,3 +5,6 @@ backend_version="0.3.2"
 ec_version="0.1.0"
 trackfile="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.4+v0.0.7/tracks.toml"
 spec_version="0.2.6"
+
+[external]
+swagger_ui_download_url="https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"

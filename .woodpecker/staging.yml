@@ -4,13 +4,14 @@ when:
 
 variables:
   - &build_cache "pazufa/backend:buildcache-staging"
+  - &swagger_ui_download_url "https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"
 
 labels:
   pazufa_scope: generic
   performance: high
 
 steps:
-  - name: check-tag-exists
+  - name: check-tags
     image: alpine
     commands:
       - apk add --no-cache curl
@@ -18,12 +19,27 @@ steps:
       - echo "Both image tags are not available. Aborting"
       - exit 1
 
-  # Compiles both binaries once (through the shared `builder` stage) and
-  # pushes a mode=max registry cache so the two target checks below never
-  # recompile - dry-run still exports cache, it only skips the image push.
+  - name: gate-backend
+    image: alpine
+    failure: ignore
+    depends_on: [check-tags]
+    commands:
+      - sh .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
+      - echo "pazufa/backend tag is taken - backend-deploy will not run"
+      - exit 1
+
+  - name: gate-ec
+    image: alpine
+    failure: ignore
+    depends_on: [check-tags]
+    commands:
+      - sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
+      - echo "pazufa/elastic-companion tag is taken - ec-deploy will run"
+      - exit 1
+
   - name: prebuild-cache
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [check-tag-exists]
+    depends_on: [check-tags]
     settings:
       repo: pazufa/backend
       dockerfile: docker/Dockerfile
@@ -32,6 +48,8 @@ steps:
       platforms:
         - linux/amd64
       dry_run: true
+      build_args:
+        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -40,7 +58,7 @@ steps:
 
   - name: build-amd64-dry-run-pb
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [prebuild-cache]
+    depends_on: [prebuild-cache, gate-backend]
     settings:
       target: pazufa-backend-runner
       dockerfile: docker/Dockerfile
@@ -56,7 +74,7 @@ steps:
 
   - name: build-amd64-dry-run-ec
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [prebuild-cache]
+    depends_on: [prebuild-cache, gate-ec]
     settings:
       target: elastic-companion-runner
       dockerfile: docker/Dockerfile
@@ -64,6 +82,8 @@ steps:
       platforms:
         - linux/amd64
       dry_run: true
+      build_args:
+        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa

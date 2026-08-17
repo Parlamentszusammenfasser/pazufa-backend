@@ -1,6 +1,7 @@
 FROM rust:1.97.1-slim-bookworm AS builder
 
 ARG RUSTFLAGS
+ARG SWAGGER_UI_DOWNLOAD_URL
 
 
 ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.4+v0.0.7/tracks.toml"

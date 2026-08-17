@@ -7,6 +7,7 @@ variables:
   - &version "0.3.2"
   - &companion_version "0.1.0"
   - &build_cache "pazufa/backend:buildcache"
+  - &swagger_ui_download_url "https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"
 
 labels:
   pazufa_scope: generic
@@ -33,7 +34,7 @@ steps:
     failure: ignore
     depends_on: [check-tags]
     commands:
-      - bash .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
+      - sh .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
       - echo "pazufa/backend tag is taken - backend-deploy will not run"
       - exit 1
 
@@ -42,7 +43,7 @@ steps:
     failure: ignore
     depends_on: [check-tags]
     commands:
-      - bash .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
+      - sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
       - echo "pazufa/elastic-companion tag is taken - ec-deploy will run"
       - exit 1
 
@@ -61,6 +62,8 @@ steps:
         - linux/amd64
         - linux/aarch64
       dry_run: true
+      build_args:
+        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -78,7 +81,11 @@ steps:
       platforms:
         - linux/amd64
         - linux/aarch64
-      tag: *version
+      tag: 
+        - *version
+        - latest
+      build_args:
+        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -96,7 +103,11 @@ steps:
       platforms:
         - linux/amd64
         - linux/aarch64
-      tag: *companion_version
+      tags: 
+        - *companion_version
+        - latest
+      build_args:
+        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
