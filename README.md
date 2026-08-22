@@ -7,21 +7,21 @@ public API to read the dataset of parliamentary proceedings.
 ## One-Step Setup For Scraper Development
 To just "get it up and running", e.g. locally as a counterpart during 
 scraper development, please run:
-`docker compose up -d` (every time you want the service to start)
+`docker compose up -d pazufa-backend` (every time you want the service to start)
 
 `-d` is for detach, logs are then visible via 
 `docker logs -f <container>`, it can be stopped via 
 `docker stop <container>`, the `<container>` you can get via `docker ps`.
 
-It will be available on http://localhost:8080 and the `ltzf-api-key` you
+It will be available on http://localhost:8080 and the api key you
 need is `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9`. 
 Note that this key has full permissions within the backend and can push 
-past some sanity checks.
+past some sanity checks on certain endpoints.
 If you want to specifically test with a limited scope to catch bugs in 
 your implementation, proceed as follows:
 
 - run `curl https://localhost:8080/api/v2/auth -X POST -d '{"scope": "collector"}' -H "Content-Type: application/json" -H "x-api-key: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9"`
-- take the key your backend generated, and plug it into `ltzf-api-key`
+- take the key your client and plug it into the `x-api-key` http header
 
 Please also note that this requires port 8080 not to be occupied by any other
 program. If you wish to utilize a different port you must set it in the
@@ -40,7 +40,7 @@ database and specify the environment variables as seen in the .env file,
 with changes as pertaining to your specific database setup.
 
 The shortcut is to run the database service from docker compose:  
-`docker compose up -d database`
+`docker compose up -d pazufa-database`
 
 ### Setting up SQLX
 #### Installing
@@ -69,6 +69,10 @@ apply all migrations at runtime.
 SQLX does compile-time query checking. This means you will need a
 configured database state that already contains all the tables and 
 structure _before the program is run for the first time_.
+That means you need a DATABASE_URL that points to the database set up
+with the docker-compose. Currently that would be:
+`DATABASE_URL=postgres://pazufa-user:pazufa-pass@localhost:5432/pazufa` (bash)  
+`set -x DATABASE_URL postgres://pazufa-user:pazufa-pass@localhost:5432/pazufa` (fish)  
 
 To set up the database for development you will need to run:  
 `sqlx database setup`
@@ -79,7 +83,7 @@ To reset the database to the empty-but-configured state, run:
 ## Building and running the project
 1. make sure your cwd is this directory
 2. fetch the track file you want to use with this server. For example: 
-   `curl -o tracks.toml https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/commit/32c125523ec1831edb1fdb73de5dd99d313dae9b/docs/specs/tracks.toml`
+   `curl -o tracks.toml https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.6+v0.0.7/tracks.tomlspec_version=0.2.6`
    please take the latest / Docker-specified version from `variables.toml`
 3. run `sh oapigen.sh` to generate the server portion from the OpenAPI 
    spec at https://codeberg.org/PaZuFa/parlamentszusammenfasser/src/branch/main/openapi.yml
@@ -90,7 +94,7 @@ To reset the database to the empty-but-configured state, run:
 6. `cargo run` to run it.  Easy!
 
 You can configure the backend either via command line arguments or via 
-environment variables. This  project uses the `dotenv` crate, so 
+environment variables. This  project uses the `dotenvy` crate, so 
 configuring via .env files is very much the way to go if you have a 
 complex configuration and want to run this in your directory.
 

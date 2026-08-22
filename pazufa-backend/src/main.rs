@@ -2,16 +2,14 @@
 #![cfg_attr(test, allow(clippy::expect_used, reason = "testing is a free-for-all"))]
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
-use anyhow::{Context, Result, anyhow, bail};
-use axum::routing::get;
-use axum::{extract::DefaultBodyLimit, http::Method};
+use anyhow::{Context, Result, bail};
+use axum::{extract::DefaultBodyLimit, http::Method, routing::get};
 use clap::Parser;
 use pazufa_backend_lib::Configuration;
 use pazufa_backend_lib::api::LTZFServer;
 use pazufa_backend_lib::utils::auth as util_auth;
 use pazufa_backend_lib::utils::{notify::MailBundle, shutdown_signal, tracing::Logging};
-use sqlx::PgTransaction;
-use sqlx::SqlSafeStr;
+use sqlx::{PgTransaction, SqlSafeStr};
 use std::process::exit;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -156,19 +154,28 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
         tokio::time::sleep(std::time::Duration::from_millis(milliseconds)).await;
     }
     if !available {
-        return Err(anyhow!("Server Connection failed after 10 retries"));
+        bail!("Server Connection failed after 10 retries");
     }
     tracing::debug!("Started Database Pool");
     sqlx::migrate!("../migrations/").run(&sqlx_db).await?;
+    let record =
+        sqlx::query!("SELECT current_database() as \"curr_db!\", current_user as \"curr_user!\"")
+            .fetch_one(&sqlx_db)
+            .await?;
+    tracing::info!(
+        "Healthy Database Connection to DB `{}` using `{}`",
+        record.curr_db,
+        record.curr_user
+    );
     tracing::debug!("Executed Migrations");
     Ok(sqlx_db)
 }
 
 async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<()> {
     if !util_auth::check_key(key) {
-        return Err(anyhow!(
+        bail!(
             "Initialization keyadder key did not pass Sanity check. Is it maybe malformed or corrupted? Generate a key with <backend binary> --generate-key"
-        ));
+        );
     }
     let tag = util_auth::keytag_of(key);
     let salt = util_auth::generate_salt();
@@ -179,9 +186,20 @@ async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<
     sqlx::query!(
         "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
         VALUES
-        ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
-        ON CONFLICT DO NOTHING;", hash, salt, tag)
-    .execute(&mut **tx).await?;
+        ($1, 
+            (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), 
+            (SELECT last_value FROM api_keys_id_seq), 
+            $2, 
+            $3
+        )
+        ON CONFLICT DO NOTHING;",
+        hash,
+        salt,
+        tag
+    )
+    .execute(&mut **tx)
+    .await?;
+    tracing::debug!("Master Key Created");
     Ok(())
 }
 
@@ -194,21 +212,33 @@ async fn initialize_readonly_user(pass: String, tx: &mut PgTransaction<'_>) -> R
     if pass.contains(FORBIDDEN) {
         bail!("Error: password String contains any of a few forbidden characters: {FORBIDDEN}");
     }
-    // ignored return bc it might fail if the user does not exist
-    let _ = sqlx::query!("DROP OWNED BY pazufa_ro CASCADE")
-        .execute(&mut **tx)
-        .await;
-    sqlx::query!("DROP USER IF EXISTS pazufa_ro")
+    // DROP OWNED BY has no IF EXISTS variant, and a failed statement would poison
+    // the whole transaction, so check for the role first
+    let role_exists = sqlx::query_scalar!("SELECT 1 FROM pg_roles WHERE rolname = 'pazufa_ro' ")
+        .fetch_optional(&mut **tx)
+        .await?
+        .is_some();
+    if role_exists {
+        tracing::debug!("pazufa_ro was found in db");
+        sqlx::query(
+            sqlx::AssertSqlSafe(format!("ALTER ROLE pazufa_ro WITH PASSWORD '{pass}'"))
+                .into_sql_str(),
+        )
         .execute(&mut **tx)
         .await?;
-    sqlx::query(
-        sqlx::AssertSqlSafe(format!("CREATE USER pazufa_ro WITH PASSWORD '{pass}'")).into_sql_str(),
-    )
-    .execute(&mut **tx)
-    .await?;
+    } else {
+        sqlx::query(
+            sqlx::AssertSqlSafe(format!("CREATE USER pazufa_ro WITH PASSWORD '{pass}'"))
+                .into_sql_str(),
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+
     sqlx::query!("GRANT SELECT ON ALL TABLES IN SCHEMA public TO pazufa_ro")
         .execute(&mut **tx)
         .await?;
+    tracing::debug!("pazufa_ro was set to use supplied password");
     Ok(())
 }
 

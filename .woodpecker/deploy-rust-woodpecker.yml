@@ -1,0 +1,26 @@
+when:
+  - event: manual
+
+variables:
+  - &version "1.2.0"
+
+labels:
+  pazufa_scope: generic
+
+steps:
+  - name: deploy
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    settings:
+      repo: pazufa/rust-woodpecker
+      dockerfile: docker/woodpecker.Dockerfile
+      context: .
+      platforms:
+        - linux/amd64
+        - linux/aarch64
+      tags: 
+        - latest
+        - *version
+      username: pazufa
+      password:
+        from_secret: pazufa-docker-pass
+

@@ -6,9 +6,9 @@ labels:
   performance: high
 
 variables:
-  - &trackpath "https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.4+v0.0.7/tracks.toml"
+  - &trackpath "https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.6+v0.0.7/tracks.toml"
   - &dburl "postgres://pazufa-user:pazufa-pass@database:5432/pazufadb"
-  - &rust_image pazufa/rust-woodpecker:1.1.0
+  - &rust_image pazufa/rust-woodpecker:1.2.0
   - &swagger_ui_download_url "https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"
 
 services:
@@ -26,6 +26,11 @@ steps:
       - nice cargo fmt --check
     environment:
       SQLX_OFFLINE: true
+
+  - name: set-version-run
+    image: *rust_image
+    commands:
+      - nice python3 scripts/set-version.py || ( echo "Run python3 set-version.py before pushing" && exit 1 )
 
   - name: machete
     image: *rust_image
@@ -60,17 +65,30 @@ steps:
     depends_on: [database-setup, lint-check-lockfile, machete, formatting]
     image: *rust_image 
     commands:
-      # run the backend once
-      - nice cargo build
+      # run the backend once in a fresh db state
+      - nice cargo build --workspace --all-targets
+      - nice cargo build --bin pazufa-backend
       - curl -o tracks.toml $TP
       - echo "cargo run --bin pazufa-backend &
-              sleep 5; 
+              sleep 10; 
               kill \$!" > run.sh
       - bash run.sh
+
+      # run it a second time with a dirty / migration needed db state
+      - 7z x /pazufa/dbstate.sql.7z
+      - sqlx database drop -yf
+      - sqlx database create
+      - psql $DATABASE_URL -f pazufa_staging_backend_2026-07-29-11-38-24.sql
+      - bash run.sh
+
+      # check that the spec is valid openapi/swagger
       - cargo run --bin pazufa-backend -- --dump-spec > openapi.json && /oapigen/openapi-generator-cli validate -i openapi.json
       - cp tracks.toml pazufa-backend-lib
       - cp tracks.toml pazufa-backend
-      - nice cargo test
+      # 12 jobs are enough to currently not overwhelm the postgres connection pooling mechanism
+      # if this scales up to more databases we might need to find a better way like pgbouncer
+      - NJOBS=$(bash -c "[ $(nproc) -gt 16 ] && echo 16 || echo $(nproc)")
+      - nice cargo test --jobs $NJOBS
     environment:
       TP: *trackpath
       PAZUFA_PORT: 20200

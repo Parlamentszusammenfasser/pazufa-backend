@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT current_database() as \"curr_db!\", current_user as \"curr_user!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "curr_db!",
+        "type_info": "Name",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "curr_user!",
+        "type_info": "Name",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "60657c4b4fd0299a1aa755dd9ab63548a0243554ca03ed043fc51551f4870a47"
+}

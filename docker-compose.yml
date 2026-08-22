@@ -108,6 +108,8 @@ services:
     restart: unless-stopped
     ports:
       - 5432:5432
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - pazufa-network
     environment:
@@ -137,7 +139,7 @@ services:
       ELASTICSEARCH_PASS: "elastic-testpassword"
       ELASTICSEARCH_URL: "http://pazufa-elastic:9200"
       REINDEX_SECONDS: 60
-      RUST_LOG: "warn,elastic_companion=info"                                           # optional
+      RUST_LOG: "warn,elastic_companion=info"                                         # optional
 
   pazufa-backend:
     image: pazufa/backend:0.3.2
@@ -158,8 +160,8 @@ services:
     networks:
       - pazufa-network
     environment:
-      DATABASE_URL: "postgres://pazufa-user:pazufa-pass@pazufa-database:5432/pazufa" # required
-      RUST_LOG: "warn,pazufa_backend=info"                                           # optional
+      DATABASE_URL: "postgres://pazufa_pg:pazufa_pg@pazufa-database:5432/pazufa" # required
+      RUST_LOG: "warn,pazufa_backend=info"                                       # optional
       PAZUFA_PORT: "8080"
       PAZUFA_KEYADDER_KEY: "pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9"             # required
       PAZUFA_RO_DBPASS: "pazufa-ro-pass"

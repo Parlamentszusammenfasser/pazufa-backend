@@ -34,6 +34,7 @@ steps:
     failure: ignore
     depends_on: [check-tags]
     commands:
+      - apk add --no-cache curl
       - sh .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
       - echo "pazufa/backend tag is taken - backend-deploy will not run"
       - exit 1
@@ -43,6 +44,7 @@ steps:
     failure: ignore
     depends_on: [check-tags]
     commands:
+      - apk add --no-cache curl
       - sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
       - echo "pazufa/elastic-companion tag is taken - ec-deploy will run"
       - exit 1
