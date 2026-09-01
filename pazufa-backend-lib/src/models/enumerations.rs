@@ -138,10 +138,29 @@ string_enum_convenience!(Parlament);
 /// The legislative Track we are on. Together with a parliament, this tells us about the possible stations that can occurr within
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Vorgangstyp {
-    #[serde(rename = "gg-einspruch")]
-    GgEinspruch,
-    #[serde(rename = "gg-zustimmung")]
-    GgZustimmung,
+    #[serde(rename = "bu-einspruch-inibreg")]
+    BuEinspruchInibreg,
+    #[serde(rename = "bu-einspruch-inibreg-haushalt")]
+    BuEinspruchInibregHaushalt,
+    #[serde(rename = "bu-zustimmung-inibreg")]
+    BuZustimmungInibreg,
+    #[serde(rename = "bu-zustimmung-inibreg-haushalt")]
+    BuZustimmungInibregHaushalt,
+    #[serde(rename = "bu-einspruch-inibreg-intvertrag")]
+    BuEinspruchInibregIntvertrag,
+    #[serde(rename = "bu-zustimmung-inibreg-intvertrag")]
+    BuZustimmungInibregIntvertrag,
+    #[serde(rename = "bu-einspruch-inisonst")]
+    BuEinspruchInisonst,
+
+    #[serde(rename = "bu-einspruch-inisonst-intvertrag")]
+    BuEinspruchInisonstIntvertrag,
+    #[serde(rename = "bu-zustimmung-inisonst")]
+    BuZustimmungInisonst,
+    #[serde(rename = "bu-zustimmung-inisonst-intvertrag")]
+    BuZustimmungInisonstIntvertrag,
+    #[serde(rename = "bu-antrag-bweinsatz")]
+    BuAntragBweinsatz,
     #[serde(rename = "gg-land-parl")]
     GgLandParl,
     #[serde(rename = "gg-land-volk")]

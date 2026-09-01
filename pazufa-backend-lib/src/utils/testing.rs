@@ -445,8 +445,8 @@ pub(crate) mod generate {
         }
         pub(crate) fn random_vorgang(rng: &mut StdRng) -> models::Vorgang {
             let vorgangstyp_variants = [
-                models::Vorgangstyp::GgZustimmung,
-                models::Vorgangstyp::GgEinspruch,
+                models::Vorgangstyp::BuZustimmungInibreg,
+                models::Vorgangstyp::BuEinspruchInibreg,
                 models::Vorgangstyp::GgLandParl,
                 models::Vorgangstyp::GgLandVolk,
                 models::Vorgangstyp::BwEinsatz,
@@ -462,7 +462,8 @@ pub(crate) mod generate {
             // Generate the main vorgang
             let stat_parls = {
                 match typ {
-                    models::Vorgangstyp::GgZustimmung | models::Vorgangstyp::GgEinspruch => {
+                    models::Vorgangstyp::BuZustimmungInibreg
+                    | models::Vorgangstyp::BuEinspruchInibreg => {
                         vec![models::Parlament::Bt, models::Parlament::Br]
                     }
                     models::Vorgangstyp::BwEinsatz => vec![models::Parlament::Bt],
@@ -868,7 +869,7 @@ pub(crate) mod generate {
             titel: "Testtitel".to_string(),
             kurztitel: Some("Kurzer Testtitel".to_string()),
             stationen: vec![default_station()],
-            typ: models::Vorgangstyp::GgZustimmung,
+            typ: models::Vorgangstyp::BuZustimmungInibreg,
             verfassungsaendernd: false,
             wahlperiode: 20,
             touched_by: vec![],

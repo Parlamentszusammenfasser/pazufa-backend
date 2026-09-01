@@ -330,7 +330,7 @@ mod candid_test {
         let vgs: Vec<_> = vec![
             generate::random::vorgang_with_stations(
                 1,
-                models::Vorgangstyp::GgEinspruch,
+                models::Vorgangstyp::BuEinspruchInibreg,
                 "IL",
                 &srv.tracks.station_mapping,
             ),
@@ -348,7 +348,7 @@ mod candid_test {
             ),
             generate::random::vorgang_with_stations(
                 4,
-                models::Vorgangstyp::GgEinspruch,
+                models::Vorgangstyp::BuEinspruchInibreg,
                 "ILAAA",
                 &srv.tracks.station_mapping,
             ),
@@ -430,12 +430,12 @@ mod candid_test {
         let srv = &setup.server;
         let vg_a = generate::random::vorgang_with_stations(
             470,
-            models::Vorgangstyp::GgEinspruch,
+            models::Vorgangstyp::BuEinspruchInibreg,
             "IL",
             &srv.tracks.station_mapping,
         );
         let vg_b = models::Vorgang {
-            typ: models::Vorgangstyp::GgZustimmung,
+            typ: models::Vorgangstyp::BuZustimmungInibreg,
             ..vg_a.clone()
         };
         let _ = vorgang_id_put(
@@ -508,12 +508,12 @@ mod candid_test {
                     typ: models::Stationstyp::ParlInitiativ,
                     ..generate::random::station(0)
                 }],
-                typ: models::Vorgangstyp::GgEinspruch,
+                typ: models::Vorgangstyp::BuEinspruchInibreg,
                 ..generate::random::vorgang(0)
             },
             generate::random::vorgang_with_stations(
                 1,
-                models::Vorgangstyp::GgEinspruch,
+                models::Vorgangstyp::BuEinspruchInibreg,
                 "IL",
                 &srv.tracks.station_mapping,
             ),
@@ -531,7 +531,7 @@ mod candid_test {
             ),
             generate::random::vorgang_with_stations(
                 4,
-                models::Vorgangstyp::GgEinspruch,
+                models::Vorgangstyp::BuEinspruchInibreg,
                 "ILAAA",
                 &srv.tracks.station_mapping,
             ),
@@ -552,7 +552,7 @@ mod candid_test {
                     typ: models::Stationstyp::ParlInitiativ,
                     ..generate::random::station(0)
                 }],
-                typ: models::Vorgangstyp::GgEinspruch,
+                typ: models::Vorgangstyp::BuEinspruchInibreg,
                 ..generate::random::vorgang(0)
             }))
             .collect();
