@@ -1,15 +1,12 @@
 #!/usr/bin/python3
+import re
+import tomllib
+from pathlib import Path
 
 # takes the variables in variables.toml and sets all affected files to the values
 # specified there. for example: Project version, API Spec version, ...
-
-
-import re
-import tomllib
-
-from pathlib import Path
-
 STATE_IS_DIRTY = False
+
 
 def replace(file: str, pattern: str, replacement: str):
     global STATE_IS_DIRTY
@@ -34,14 +31,14 @@ trackfile = file["version"]["trackfile"]
 spec_version = file["version"]["spec_version"]
 
 swagger_ui_download_url = file["external"]["swagger_ui_download_url"]
-database_state_url=file["external"]["database_state_url"]
-wp_dockerfile_version=file["version"]["wp_dockerfile_version"]
+database_state_url = file["external"]["database_state_url"]
+wp_dockerfile_version = file["version"]["wp_dockerfile_version"]
 
 # spec version
 replace(
-    "pazufa-backend/src/main.rs",
-    '\n\\s+version\\s*=\\s*"\\d+\\.\\d+\\.\\d+.*",',
-    f'\n        version = "{spec_version}",',
+    "pazufa-backend-lib/src/utils/status.rs",
+    '\nconst SPEC_VERSION:\\s*&str\\s*=\\s*"\\d+\\.\\d+\\.\\d+"',
+    f'\nconst SPEC_VERSION: &str = "{spec_version}"',
 )
 
 # backend version
@@ -110,24 +107,24 @@ replace(
 replace(
     ".woodpecker/testing.yml",
     r"  - &swagger_ui_download_url \"https://.*",
-    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"'
+    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"',
 )
 replace(
     ".woodpecker/staging.yml",
     r"  - &swagger_ui_download_url \"https://.*",
-    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"'
+    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"',
 )
 replace(
     ".woodpecker/deploy.yml",
     r"  - &swagger_ui_download_url \"https://.*",
-    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"'
+    f'  - &swagger_ui_download_url "{swagger_ui_download_url}"',
 )
 
 # legacy db state
 replace(
     "docker/woodpecker.Dockerfile",
     r"ARG DATABASE_STATE_URL=\"https://.*\"",
-    f'ARG DATABASE_STATE_URL="{database_state_url}"'
+    f'ARG DATABASE_STATE_URL="{database_state_url}"',
 )
 
 
@@ -135,18 +132,18 @@ replace(
 replace(
     "docker/woodpecker.Dockerfile",
     r"LABEL version=\".*\"",
-    f'LABEL version="{wp_dockerfile_version}"'
+    f'LABEL version="{wp_dockerfile_version}"',
 )
 replace(
     ".woodpecker/testing.yml",
     r"  - &rust_image pazufa/rust-woodpecker:.*",
-    f"  - &rust_image pazufa/rust-woodpecker:{wp_dockerfile_version}"
-    )
+    f"  - &rust_image pazufa/rust-woodpecker:{wp_dockerfile_version}",
+)
 replace(
     ".woodpecker/deploy-rust-woodpecker.yml",
     r"  - &version \".*\"",
-    f'  - &version "{wp_dockerfile_version}"'
-    )
+    f'  - &version "{wp_dockerfile_version}"',
+)
 
 if STATE_IS_DIRTY:
     exit(1)

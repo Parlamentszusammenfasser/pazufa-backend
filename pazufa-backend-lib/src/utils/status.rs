@@ -10,12 +10,14 @@ use tracing::{instrument, warn};
 // the maxmium number of user agents / pathcount entries.
 // this is to prevent clogging memory at runtime
 const MAX_COUNT: usize = 1024;
-const COMMIT_HASH: &str = env!("GIT_HASH");
-const CRATE_VERSION: &str = crate_version!();
+pub const COMMIT_HASH: &str = env!("GIT_HASH");
+pub const CRATE_VERSION: &str = crate_version!();
+pub const SPEC_VERSION: &str = "0.2.6";
 
 #[derive(Serialize)]
 pub struct StatOutput {
     version: &'static str,
+    spec: &'static str,
     commit: &'static str,
     #[cfg(feature = "track-validation")]
     track_version: String,
@@ -102,6 +104,7 @@ impl Statistics {
                 .unwrap_or((&"None recorded".to_owned(), &0))
                 .0
                 .clone(),
+            spec: SPEC_VERSION,
             commit: COMMIT_HASH,
             version: CRATE_VERSION,
             #[cfg(feature = "track-validation")]

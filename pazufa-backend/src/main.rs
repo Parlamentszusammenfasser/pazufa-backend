@@ -49,6 +49,7 @@ mod openapi {
     use super::kalender;
     use super::sitzung;
     use super::vorgang;
+    use pazufa_backend_lib::utils::status::SPEC_VERSION;
     use utoipa::OpenApi;
     use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
     // initialize OpenAPI
@@ -56,7 +57,7 @@ mod openapi {
     #[openapi(
     info(
         title= "LTZF API",
-        version = "0.2.6",
+        version = SPEC_VERSION,
         contact(email="info@pazufa.de"),
         license(name = "GPLv3", url = "https://www.gnu.org/licenses/gpl-3.0.en.html"),
         description = "Description of the PaZuFa API. 
