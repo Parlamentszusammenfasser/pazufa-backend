@@ -55,6 +55,9 @@ impl FromStr for Regex {
 }
 
 impl Regex {
+    /// Constructs a Regex from a char array
+    /// # Errors
+    /// Fails orderly if the regex is invalid
     pub fn new(rx: &[char]) -> Result<Self, TrackValidationError> {
         if rx.len() == usize::MAX {
             Err(TrackValidationError::RxParsingError)
