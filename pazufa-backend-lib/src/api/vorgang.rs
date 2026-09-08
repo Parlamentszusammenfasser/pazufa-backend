@@ -511,7 +511,9 @@ mod test_endpoints {
             let mut vg2 = vg1.clone();
             let mut vg3 = vg1.clone();
             vg2.api_id = Uuid::now_v7();
+            vg2.stationen[0].api_id = Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeefeeed"));
             vg3.api_id = Uuid::now_v7();
+            vg3.stationen[0].api_id = Some(uuid::uuid!("b18bde64-c0ff-eeee-ff0c-deadbeefeeec"));
 
             let rsp1 = super::vorgang_id_put(
                 server,
@@ -629,7 +631,11 @@ pub(crate) mod test_failed_irl_scenarios {
         let mut records = vec![];
         let mut lines = buf_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            records.push(serde_json::from_str(&line).expect("Failed to deserialize JSON line."));
+            records.push(
+                serde_json::from_str(&line).unwrap_or_else(|_| {
+                    panic!("Failed to deserialize JSON line in file: {path:?}")
+                }),
+            );
         }
         records
     }
@@ -654,6 +660,36 @@ pub(crate) mod test_failed_irl_scenarios {
                     .await
                     .expect("Expected no internal failure after put");
                     assert!(matches!(response, super::super::PutResponse::Success));
+                }
+                test_setup.teardown().await;
+            }
+        };
+        ($path:expr, $name:ident, $ltzf_error_variant:path, $error_source_matches:path) => {
+            #[traced_test]
+            #[tokio::test]
+            async fn $name() {
+                let path = PathBuf::from($path);
+                let test_setup =
+                    TestSetup::new(&concat!("scenario_test_", stringify!($name))).await;
+                let objects = read_jsonl(&path).await;
+                for obj in &objects {
+                    tracing::trace!("next to be inserted: {}", obj.api_id);
+                    let response = super::vorgang_put(
+                        &test_setup.server,
+                        1,
+                        &crate::models::params::XScraperId(Uuid::nil()),
+                        obj,
+                    )
+                    .await
+                    .expect_err("Expected a failure, got success instead");
+                    assert!(matches!(
+                        response,
+                        $ltzf_error_variant { source }
+                        if matches!(
+                            *source,
+                            $error_source_matches {..}
+                            )
+                    ));
                 }
                 test_setup.teardown().await;
             }

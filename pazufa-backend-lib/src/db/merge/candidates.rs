@@ -314,11 +314,14 @@ mod candid_test {
     use crate::api::vorgang::vorgang_id_put;
     use crate::db::merge::MatchState;
     use crate::models::{self, params};
+    use crate::utils::testing::generate::random::random_uuid;
     use crate::utils::testing::{TestSetup, generate};
     use chrono::DateTime;
+    use rand::{SeedableRng, rngs::StdRng};
     use tracing_test::traced_test;
 
     #[tokio::test]
+    #[traced_test]
     async fn vorgang_test() {
         let setup = TestSetup::new("test_vorgang_candidates").await;
         let srv = &setup.server;
@@ -351,10 +354,18 @@ mod candid_test {
             ),
         ];
 
+        for vg in &vgs {
+            tracing::debug!("Vorgang: {}", vg.api_id);
+            for s in &vg.stationen {
+                tracing::debug!("Station api id: {}", s.api_id.expect(""));
+            }
+        }
+
         #[cfg(not(feature = "track-validation"))]
         let vgs: Vec<_> = (1..5).map(generate::random::vorgang).collect();
         // insert vorgang 1,2,3, ...
         for vg in &vgs {
+            tracing::info!("Inserting {}", vg.api_id);
             vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg)
                 .await
                 .expect("Failed ot get valid server respone when trying to push new Vorgang.");
@@ -364,27 +375,38 @@ mod candid_test {
             .begin()
             .await
             .expect("Failed to start dabase transaction.");
-        // check wether all conditions are "enough" to find a specific station
+        tracing::info!("check wether all conditions are 'enough' to find a specific station");
         let mod_v0 = models::Vorgang {
             api_id: uuid::Uuid::nil(),
             ..vgs[0].clone()
         };
-        // matching on exactly one if only differing el is the api_id
+        tracing::info!("matching on exactly one if only differing el is the api_id");
         let candidate = super::vorgang_merge_candidates(&mod_v0, &mut *tx, srv)
             .await
             .expect("Failed to find merge candidate.");
         assert!(matches!(candidate, MatchState::ExactlyOne(_)));
-        // check wether insufficient uniqueness conditions yield appropriate results:
-        // no match for something not in the db
+        tracing::info!(
+            "check wether insufficient uniqueness conditions yield appropriate results: no match for something not in the db"
+        );
         let candidate =
             super::vorgang_merge_candidates(&generate::default_vorgang(), &mut *tx, srv)
                 .await
                 .expect("Failed to find non-existent merge candidate.");
         assert!(matches!(candidate, MatchState::NoMatch));
 
-        // ambiguous match for ambiguous conditions
+        tracing::info!("ambiguous match for ambiguous conditions");
+        let mut rng = StdRng::seed_from_u64(0);
         let double_vg = models::Vorgang {
             api_id: Uuid::nil(), // different UUID, but same other criteria
+            stationen: vgs[0]
+                .stationen
+                .iter()
+                .cloned()
+                .map(|s| models::Station {
+                    api_id: Some(random_uuid(&mut rng)),
+                    ..s
+                })
+                .collect(),
             ..vgs[0].clone()
         };
         vorgang_id_put(

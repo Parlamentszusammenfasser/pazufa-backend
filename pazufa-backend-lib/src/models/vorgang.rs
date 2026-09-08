@@ -352,6 +352,14 @@ impl<'de> Deserialize<'de> for Vorgang {
                         unchecked.stationen[j].zp_start,
                     ));
                 }
+                if let Some(a) = s1.api_id
+                    && let Some(b) = s2.api_id
+                    && a == b
+                {
+                    return Err(de::Error::custom(format!(
+                        "Two API IDs are equal for different stations in the input data: {a}"
+                    )));
+                }
             }
         }
         if fails.is_empty() {
@@ -422,6 +430,17 @@ mod serialization_tests {
         models::enumerations::{Ressort, Sachgebiet},
         utils::testing::generate,
     };
+    #[test]
+    fn fails_because_duplicate_api_ids_179() {
+        let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
+            "./../../tests/serialization/179-station-api-id.json"
+        ));
+
+        assert!(
+            v.is_err(),
+            "Expected to fail due to duplicate api ids being in there for two differing stations"
+        );
+    }
 
     #[test]
     fn fails_due_to_apiiddoks() {
@@ -466,7 +485,7 @@ mod serialization_tests {
         assert!(vgstr.contains("Familie/Senioren"), "{vgstr}");
         let result: Result<super::Vorgang, _> = serde_json::from_str(&vgstr);
         assert!(
-            matches!(result, Ok(vg) 
+            matches!(result, Ok(vg)
                 if matches!(vg.ressort, Some(Ressort::FamilieSenioren))),
             "{vgstr}"
         );

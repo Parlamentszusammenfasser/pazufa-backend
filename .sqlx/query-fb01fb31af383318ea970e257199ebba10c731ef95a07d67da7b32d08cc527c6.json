@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) \n        SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid \n        ON CONFLICT(stat_id, scraper) \n        DO UPDATE SET time_stamp=NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fb01fb31af383318ea970e257199ebba10c731ef95a07d67da7b32d08cc527c6"
+}

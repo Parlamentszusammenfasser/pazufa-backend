@@ -3,7 +3,7 @@ use crate::db::gen_identifier;
 use crate::db::merge::candidates::dokument_merge_candidates;
 #[cfg(feature = "track-validation")]
 use crate::db::validate;
-use crate::error::LTZFError;
+use crate::error::{DataValidationError, LTZFError};
 use crate::models;
 use crate::models::enumerations::{HashStrategy, Mime};
 use crate::{
@@ -63,9 +63,12 @@ async fn insert_stations_for_vg(
     for stat in stationen {
         stat_ids.push(insert_station(stat, id, scraper_id, collector_key, tx, server).await?);
     }
+    tracing::debug!("station IDs to be inserted: {stat_ids:?}");
     sqlx::query!(
         "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
-    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid 
+        ON CONFLICT(stat_id, scraper) 
+        DO UPDATE SET time_stamp=NOW()",
         &stat_ids[..],
         collector_key,
         scraper_id
@@ -244,11 +247,16 @@ pub(crate) async fn insert_station(
     // master insert
     let sapi = stat.api_id.unwrap_or(gen_identifier(scraper_id));
     let obj = "station";
-    if let Some(id) = sqlx::query!("SELECT id FROM station WHERE api_id = $1", sapi)
+    if sqlx::query!("SELECT 1 as id FROM station WHERE api_id = $1", sapi)
         .fetch_optional(&mut **tx)
         .await?
+        .is_some()
     {
-        return Ok(id.id);
+        return Err(DataValidationError::DuplicateApiId {
+            id: sapi,
+            object: obj.to_owned(),
+        }
+        .into());
     }
     let gr_id = insert_or_retrieve_gremium(&stat.gremium, tx, srv).await?;
     let stat_id = sqlx::query!(

@@ -52,8 +52,8 @@ pub enum DataValidationError {
     #[snafu(display("Incomplete Data supplied: Expected to find `{input}` in DB but didn't"))]
     IncompleteDataSupplied { input: String },
 
-    #[snafu(display("Duplicate API ID: {id}"))]
-    DuplicateApiId { id: Uuid },
+    #[snafu(display("Duplicate API ID of a {object}: {id}"))]
+    DuplicateApiId { id: Uuid, object: String },
 
     #[snafu(display("Ambiguous match found: {message}"))]
     AmbiguousMatch { message: String },
