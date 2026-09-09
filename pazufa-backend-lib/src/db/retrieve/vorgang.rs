@@ -6,6 +6,21 @@ use crate::models::enumerations::{Ressort, Sachgebiet};
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// This struct contains all applicable filters for a database query that
+/// filters Vorgang Objects
+#[derive(Debug, Default)]
+pub struct VGGetParameters {
+    pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
+    pub parlament: Option<models::Parlament>,
+    pub wp: Option<i32>,
+    pub inipsn: Option<String>,
+    pub iniorg: Option<String>,
+    pub inifch: Option<String>,
+    pub vgtyp: Option<models::Vorgangstyp>,
+}
+
 async fn lobbyreg_of_vorgang(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
@@ -57,15 +72,71 @@ async fn lobbyreg_of_vorgang(
     }
     Ok(lobbyregs)
 }
-pub async fn vorgang_dbid(
+
+/// Returns the database row ID (primary key) of any Vorgang object
+/// given it's API ID
+/// # Errors
+/// Can fail if the database operation fails
+pub async fn vorgang_dbid<'e, E: sqlx::PgExecutor<'e>>(
     api_id: Uuid,
-    executor: &mut sqlx::PgTransaction<'_>,
+    executor: E,
 ) -> Result<Option<i32>> {
     let id = sqlx::query_scalar!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
-        .fetch_optional(&mut **executor)
+        .fetch_optional(executor)
         .await?;
     Ok(id)
 }
+/// Fetches the Database Primary keys of the Vorgang table, filtered according to the parameter
+/// struct passed along.
+/// Note that `VGGetParameters::default()` will NOT yield an empty result, so be careful
+///
+/// # Errors
+/// Can fail due to database constraints
+pub async fn vorgang_fetch_dbids<'e, E: sqlx::PgExecutor<'e>>(
+    filters: VGGetParameters,
+    exec: E,
+) -> Result<Vec<i32>> {
+    let vg_list: Vec<i32> = sqlx::query_scalar!(
+        "WITH pre_table AS (
+        SELECT vorgang.id, meta_last_modified, MIN(ext_stat.zp_start) as min_start, MAX(ext_stat.zp_start) as max_start FROM vorgang
+            INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
+            LEFT JOIN (
+                    SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
+                    INNER JOIN gremium g ON g.id = s.gr_id
+			        INNER JOIN parlament on parlament.id = g.parl
+                ) AS ext_stat ON ext_stat.vg_id = vorgang.id
+            WHERE TRUE
+            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
+            AND ($2::text IS NULL OR $2 = vt.value)
+            AND ($3::text IS NULL OR $3 = ext_stat.parl)
+			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person ILIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
+        GROUP BY vorgang.id
+        ORDER BY meta_last_modified 
+        )
+
+SELECT id FROM pre_table WHERE
+($7::timestamptz IS NULL OR $7 <= meta_last_modified) AND
+($8::timestamptz IS NULL OR $8 <= min_start) AND
+($9::timestamptz IS NULL OR $9 >= max_start)
+
+ORDER BY pre_table.meta_last_modified ASC",
+filters.wp, filters.vgtyp.map(|x|x.to_string()),
+filters.parlament.map(|p|p.to_string()),
+filters.inipsn, filters.iniorg, filters.inifch,
+filters.if_mod_since,
+filters.lower_date,
+filters.upper_date
+    )
+    .fetch_all(exec).await?;
+    Ok(vg_list)
+}
+
+/// Get a Vorgang by it's DB ID with options to expand the result (not fold the documents)
+/// and limit by `if_mod_since` timestamps
+/// # Errors
+/// Can fail due to Database errors
 pub async fn vorgang_by_id_ims(
     id: i32,
     expand: bool,
@@ -340,18 +411,12 @@ pub async fn station_by_id(
         gremium_federf: temp_stat.gremium_isff,
     })
 }
-#[derive(Debug, Default)]
-pub struct VGGetParameters {
-    pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
-    pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
-    pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
-    pub parlament: Option<models::Parlament>,
-    pub wp: Option<i32>,
-    pub inipsn: Option<String>,
-    pub iniorg: Option<String>,
-    pub inifch: Option<String>,
-    pub vgtyp: Option<models::Vorgangstyp>,
-}
+
+/// Filters Vorgang Objects by the passed parameters, applies pagination and returns the result
+/// as full Objects.
+/// Optionally Represents them with folded Documents (`expand==false`) or expanded ones
+/// # Errors
+/// Can fail due to database errors or integer conversion issues(very unlikely)
 pub async fn vorgang_by_parameter(
     params: VGGetParameters,
     page: Option<u32>,
@@ -359,40 +424,7 @@ pub async fn vorgang_by_parameter(
     expand: bool,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
-    let mut vg_list: Vec<i32> = sqlx::query_scalar!(
-        "WITH pre_table AS (
-        SELECT vorgang.id, meta_last_modified, MIN(ext_stat.zp_start) as min_start, MAX(ext_stat.zp_start) as max_start FROM vorgang
-            INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
-            LEFT JOIN (
-                    SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
-                    INNER JOIN gremium g ON g.id = s.gr_id
-			        INNER JOIN parlament on parlament.id = g.parl
-                ) AS ext_stat ON ext_stat.vg_id = vorgang.id
-            WHERE TRUE
-            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
-            AND ($2::text IS NULL OR $2 = vt.value)
-            AND ($3::text IS NULL OR $3 = ext_stat.parl)
-			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person ILIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
-			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
-			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
-        GROUP BY vorgang.id
-        ORDER BY meta_last_modified 
-        )
-
-SELECT id FROM pre_table WHERE
-($7::timestamptz IS NULL OR $7 <= meta_last_modified) AND
-($8::timestamptz IS NULL OR $8 <= min_start) AND
-($9::timestamptz IS NULL OR $9 >= max_start)
-
-ORDER BY pre_table.meta_last_modified ASC",
-params.wp, params.vgtyp.map(|x|x.to_string()),
-params.parlament.map(|p|p.to_string()),
-params.inipsn, params.iniorg, params.inifch,
-params.if_mod_since,
-params.lower_date,
-params.upper_date
-    )
-    .fetch_all(&mut **executor).await?;
+    let mut vg_list = vorgang_fetch_dbids(params, &mut **executor).await?;
     let prp = PaginationResponsePart::new(
         u32::try_from(vg_list.len()).map_err(|e| LTZFError::Other {
             message: format!(

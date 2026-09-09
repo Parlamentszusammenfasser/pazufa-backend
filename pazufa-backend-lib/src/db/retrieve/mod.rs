@@ -1,6 +1,6 @@
-mod dokument;
-mod sitzung;
-mod vorgang;
+pub mod dokument;
+pub mod sitzung;
+pub mod vorgang;
 
 pub use dokument::{
     DokumentRetrivalParameters, dokument_by_id, dokument_by_id_ims, dokument_dbid,

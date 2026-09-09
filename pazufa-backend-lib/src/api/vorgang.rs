@@ -1,7 +1,6 @@
 use super::PutResponse;
 use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, ListingGetResponse, RoundTimestamp};
-use crate::db;
 use crate::db::retrieve::vorgang_dbid;
 use crate::db::{delete, insert, merge, retrieve};
 use crate::error::{DataValidationError, LTZFError};
@@ -9,19 +8,6 @@ use crate::models::{APIScope, params};
 use crate::{LTZFServer, Result, models};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
-
-/// Deletes a single Vorgang
-/// # Errors
-/// Can fail due to database errors
-#[instrument(skip_all, fields( vg_id=%path_params.api_id))]
-pub async fn vorgang_delete(
-    server: &LTZFServer,
-    path_params: &params::ApiIdPathParam,
-) -> Result<()> {
-    db::delete::delete_vorgang_by_api_id(path_params.api_id, &server.sqlx_db).await?;
-    info!(target: "obj", "Deleted Vorgang {}", path_params.api_id);
-    Ok(())
-}
 
 /// Inserts a single vorgang, bypassing the merge algorithm.
 /// If called, the state of the request body is then the exact state of the database
@@ -38,10 +24,7 @@ pub async fn vorgang_id_put(
 ) -> Result<PutResponse> {
     let mut tx = server.sqlx_db.begin().await?;
     let api_id = path_params.api_id;
-    let db_id = sqlx::query!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
-        .map(|x| x.id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let db_id = retrieve::vorgang_dbid(api_id, &mut *tx).await?;
     if let Some(db_id) = db_id {
         debug!("Match found: {db_id}");
         let db_cmpvg = retrieve::vorgang_by_id(db_id, false, &mut tx).await?;
@@ -132,7 +115,7 @@ pub async fn vorgang_get_by_id(
     let claims = (APIScope::Collector, 0);
 
     let mut tx = server.sqlx_db.begin().await?;
-    let Some(dbid) = vorgang_dbid(path_params.api_id, &mut tx).await? else {
+    let Some(dbid) = vorgang_dbid(path_params.api_id, &mut *tx).await? else {
         info!(
             "Vorgang with API ID {} is not in the database",
             path_params.api_id
@@ -549,56 +532,6 @@ mod test_endpoints {
         scenario.teardown().await;
     }
 
-    #[tokio::test]
-    pub async fn test_vorgang_delete_endpoints() {
-        // Setup test server and database
-        let scenario = TestSetup::new("test_vorgang_delete").await;
-        let server = &scenario.server;
-
-        // Test cases for vorgang_delete:
-        // 1. Delete existing procedure with proper permissions
-        {
-            let test_vorgang = generate::default_vorgang();
-            // First create the procedure
-            let create_response = super::vorgang_put(
-                server,
-                1,
-                &params::XScraperId(Uuid::now_v7()),
-                &test_vorgang,
-            )
-            .await
-            .expect("Failed to get valid server respone when trying to push new Vorgang.");
-            assert!(matches!(create_response, PutResponse::Success));
-
-            // Then delete it
-            super::vorgang_delete(
-                server,
-                &params::ApiIdPathParam {
-                    api_id: test_vorgang.api_id,
-                },
-            )
-            .await
-            .expect("Failed to get valid server respone when trying to delete Vorgang.");
-        }
-
-        // 2. Delete non-existent procedure
-        {
-            let non_existent_id = Uuid::now_v7();
-            super::vorgang_delete(
-                server,
-                &params::ApiIdPathParam {
-                    api_id: non_existent_id,
-                },
-            )
-            .await
-            .expect(
-                "Failed to get valid server respone when trying to delete non-existent Vorgang.",
-            );
-        }
-
-        // Cleanup
-        scenario.teardown().await;
-    }
     #[tokio::test]
     pub async fn test_malformed_data_vorgang() {
         // TODO test multiple conflicting stations

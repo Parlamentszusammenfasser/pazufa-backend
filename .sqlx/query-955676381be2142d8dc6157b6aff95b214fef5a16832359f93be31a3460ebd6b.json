@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM vorgang WHERE id = ANY($1::int4[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "955676381be2142d8dc6157b6aff95b214fef5a16832359f93be31a3460ebd6b"
+}
