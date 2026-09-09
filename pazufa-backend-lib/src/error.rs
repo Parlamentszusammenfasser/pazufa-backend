@@ -23,15 +23,13 @@ pub enum DataValidationError {
     #[snafu(display("Deliberate Conflict: {reason}"))]
     Conflict { reason: String },
 
-    //    #[snafu(display(
-    //        "Error compiling regex {regex:?} @ index {ci} with char {c}. Parsed so far: {parsed_so_far:?}"
-    //    ))]
-    //    RegexError {
-    //        regex: Vec<char>,
-    //        ci: usize,
-    //        c: char,
-    //        parsed_so_far: Regex,
-    //    },
+    #[snafu(display("Password Hashing Issue"))]
+    PasswordHashing {
+        source: argon2::password_hash::Error,
+    },
+    #[snafu(display("Format error decoding this base64-expression"))]
+    Base64Decode { source: base64::DecodeError },
+
     #[snafu(display("Track Validation Failed"))]
     TrackValidation {
         source: track_validation::TrackValidationError,
@@ -74,6 +72,18 @@ error_from!(
     TrackValidation
 );
 error_from!(uuid::Error, Validation, DataValidationError, UuidParse);
+error_from!(
+    argon2::password_hash::Error,
+    Validation,
+    DataValidationError,
+    PasswordHashing
+);
+error_from!(
+    base64::DecodeError,
+    Validation,
+    DataValidationError,
+    Base64Decode
+);
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]

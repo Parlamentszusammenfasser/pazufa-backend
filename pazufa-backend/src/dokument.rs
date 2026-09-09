@@ -1,13 +1,13 @@
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use pazufa_backend_lib::LTZFServer;
-use pazufa_backend_lib::api::auth::{APIScope, Claims};
+use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, ListingGetResponse, PazufaOrFtmListingResponse, PutResponse,
     misc as libmisc, misc_auth as libmisca,
 };
 use pazufa_backend_lib::models;
-use pazufa_backend_lib::models::enumerations::{DokumentFormat, Mime};
+use pazufa_backend_lib::models::enumerations::{APIScope, DokumentFormat, Mime};
 use pazufa_backend_lib::models::params;
 use std::sync::Arc;
 use tracing::{error, warn};
@@ -200,7 +200,7 @@ mod test {
     use crate::testing::{TestSetup, authtesting};
     use axum::extract::Query;
     use axum::http::Uri;
-    use pazufa_backend_lib::api::auth::APIScope;
+    use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::enumerations::DokumentFormat;
     use pazufa_backend_lib::models::{self, params};
     use std::sync::Arc;

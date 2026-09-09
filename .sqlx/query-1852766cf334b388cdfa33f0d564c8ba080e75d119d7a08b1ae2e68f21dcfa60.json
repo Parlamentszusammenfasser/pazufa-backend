@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT k.id, k.deleted_by, k.expires_at, value as \"scope: APIScope\", k.salt, k.key_hash\n            FROM api_keys k\n            INNER JOIN api_scope s ON s.id = k.scope\n            WHERE keytag = $1",
+  "query": "SELECT k.id, k.deleted_by, k.expires_at, s.value as \"scope: APIScope\", k.salt, k.key_hash, ha.value as \"algo: HashAlgorithm\"\n            FROM api_keys k\n            INNER JOIN api_scope s ON s.id = k.scope\n            INNER JOIN hash_algorithm ha ON ha.id = k.algo\n            WHERE keytag = $1",
   "describe": {
     "columns": [
       {
@@ -50,7 +50,7 @@
       {
         "ordinal": 4,
         "name": "salt",
-        "type_info": "Varchar",
+        "type_info": "Bytea",
         "origin": {
           "Table": {
             "table": "api_keys",
@@ -68,6 +68,17 @@
             "name": "key_hash"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "algo: HashAlgorithm",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "hash_algorithm",
+            "name": "value"
+          }
+        }
       }
     ],
     "parameters": {
@@ -81,8 +92,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "057c398bc3e850f0242013365e4099d64ed2ad97c10a6c6e79f718be0fbe9835"
+  "hash": "1852766cf334b388cdfa33f0d564c8ba080e75d119d7a08b1ae2e68f21dcfa60"
 }

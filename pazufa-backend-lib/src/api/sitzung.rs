@@ -1,12 +1,11 @@
 use super::RoundTimestamp;
-use super::auth::APIScope;
 use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, PutResponse, auth::Claims};
 use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_parameter, sitzung_dbid};
 use crate::db::{delete, insert, retrieve};
 use crate::error::LTZFError;
-use crate::models::params;
 use crate::models::params::XScraperId;
+use crate::models::{APIScope, params};
 use crate::{LTZFServer, Result, models};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
@@ -505,20 +504,13 @@ pub async fn s_get(
 
 #[cfg(test)]
 mod sitzung_test {
-    use crate::models::params;
-    use chrono::Utc;
+    use crate::api::{GetSingleResponse, PutResponse, RoundTimestamp, auth::Claims};
+    use crate::models::{self, APIScope, params};
+    use crate::utils::testing::{TestSetup, generate};
+    use chrono::{Datelike, Utc};
     use tracing::info;
     use tracing_test::traced_test;
-
-    use crate::models;
-    use chrono::Datelike;
     use uuid::Uuid;
-
-    use crate::api::{GetSingleResponse, PutResponse, RoundTimestamp, auth::Claims};
-
-    use crate::utils::testing::{TestSetup, generate};
-
-    use super::super::auth;
 
     // Calendar tests
     #[tokio::test]
@@ -535,7 +527,7 @@ mod sitzung_test {
 
         super::kal_date_put(
             server,
-            &Claims(auth::APIScope::Collector, 1),
+            &Claims(APIScope::Collector, 1),
             &params::XScraperId(Uuid::nil()),
             &params::KalDatePutPathParams {
                 datum,
@@ -553,7 +545,7 @@ mod sitzung_test {
 
         super::kal_date_put(
             &scenario.server,
-            &Claims(auth::APIScope::Collector, 1),
+            &Claims(APIScope::Collector, 1),
             &params::XScraperId(Uuid::nil()),
             &params::KalDatePutPathParams {
                 datum: session.termin.date_naive(),
@@ -614,7 +606,7 @@ mod sitzung_test {
         // 1. Create calendar entry out of valid date range with admin permissions
         super::kal_date_put(
             server,
-            &Claims(auth::APIScope::Admin, 1),
+            &Claims(APIScope::Admin, 1),
             &params::XScraperId(Uuid::nil()),
             &params::KalDatePutPathParams {
                 datum: today,
@@ -628,7 +620,7 @@ mod sitzung_test {
         // 2. Update calendar entry with date constraints and fail (collector is only allowed to update recent dates)
         super::kal_date_put(
             server,
-            &Claims(auth::APIScope::Collector, 1),
+            &Claims(APIScope::Collector, 1),
             &params::XScraperId(Uuid::nil()),
             &params::KalDatePutPathParams {
                 datum: today,
@@ -642,7 +634,7 @@ mod sitzung_test {
         // Update calendar entry with date constraints and succeed
         super::kal_date_put(
             server,
-            &Claims(auth::APIScope::Collector, 1),
+            &Claims(APIScope::Collector, 1),
             &params::XScraperId(Uuid::nil()),
             &params::KalDatePutPathParams {
                 datum: today,
@@ -689,7 +681,7 @@ mod sitzung_test {
 
         super::kal_date_put(
             server,
-            &Claims(auth::APIScope::Collector, 1),
+            &Claims(APIScope::Collector, 1),
             &params::XScraperId(Uuid::nil()),
             &params::KalDatePutPathParams {
                 datum: session.termin.date_naive(),
@@ -776,7 +768,7 @@ mod sitzung_test {
         let session = generate::default_sitzung();
         let response = super::sid_put(
             server,
-            &Claims(auth::APIScope::Admin, 1),
+            &Claims(APIScope::Admin, 1),
             &params::ApiIdPathParam {
                 api_id: Uuid::nil(),
             },
@@ -1072,7 +1064,7 @@ mod sitzung_test {
         // Test case: Input non-existing session
         let response = super::sid_put(
             server,
-            &Claims(auth::APIScope::Admin, 1),
+            &Claims(APIScope::Admin, 1),
             &params::ApiIdPathParam {
                 api_id: sitzung.api_id.expect("session API ID is none"),
             },
@@ -1085,7 +1077,7 @@ mod sitzung_test {
         // Test case: Update existing session with the same data
         let response = super::sid_put(
             server,
-            &Claims(auth::APIScope::Admin, 1),
+            &Claims(APIScope::Admin, 1),
             &params::ApiIdPathParam {
                 api_id: sitzung.api_id.expect("session API ID is none"),
             },
@@ -1105,7 +1097,7 @@ mod sitzung_test {
         };
         let response = super::sid_put(
             server,
-            &Claims(auth::APIScope::Admin, 1),
+            &Claims(APIScope::Admin, 1),
             &params::ApiIdPathParam {
                 api_id: sitzung.api_id.expect("session API ID is none"),
             },
@@ -1126,7 +1118,7 @@ mod sitzung_test {
         // Test case: Input non-existing session
         let response = super::sid_put(
             server,
-            &Claims(auth::APIScope::Admin, 1),
+            &Claims(APIScope::Admin, 1),
             &params::ApiIdPathParam {
                 api_id: sitzung.api_id.expect("Failed"),
             },

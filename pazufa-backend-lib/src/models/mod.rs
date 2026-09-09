@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod dokument;
 pub mod enumerations;
 pub mod headers;
@@ -10,7 +11,9 @@ pub use dokument::{
     Dokument, DokumentHash, DokumentOrApiId, FTMDokumentPages, HashWrapper, ZusammenfassungWrapper,
     Zusammenfassungstupel,
 };
-pub use enumerations::{Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdentTyp, Vorgangstyp};
+pub use enumerations::{
+    APIScope, Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdentTyp, Vorgangstyp,
+};
 pub use misc::{Autor, Gremium, KeyTag, TouchedByInner};
 use serde::{Deserialize, Deserializer, Serialize, de};
 pub use sitzung::{Sitzung, Top};

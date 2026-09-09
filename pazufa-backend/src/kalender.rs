@@ -3,9 +3,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
 use pazufa_backend_lib::api::PutResponse;
-use pazufa_backend_lib::api::auth::{APIScope, Claims};
+use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::sitzung::{self as libsitz, SitzungListingResponse};
 use pazufa_backend_lib::models;
+use pazufa_backend_lib::models::APIScope;
 use pazufa_backend_lib::models::params::{self, XScraperId};
 use pazufa_backend_lib::utils::header_params::HeaderParams;
 use std::sync::Arc;
@@ -149,7 +150,7 @@ async fn kal_get(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::api::auth::APIScope;
+    use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::params::{self, XScraperId};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
     use std::sync::Arc;

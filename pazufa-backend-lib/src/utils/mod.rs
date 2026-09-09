@@ -1,6 +1,5 @@
 use tokio::signal;
 
-pub mod auth;
 pub mod header_params;
 pub mod notify;
 pub mod status;

@@ -2,7 +2,9 @@
     clippy::disallowed_methods,
     reason = "Database setup and taredown requires use of `sqlx::query` as those cannot be statically verified."
 )]
-use pazufa_backend_lib::api::auth::{APIScope, Claims};
+use pazufa_backend_lib::api::auth::Claims;
+use pazufa_backend_lib::models::APIScope;
+use pazufa_backend_lib::models::auth::HashAlgorithm;
 use pazufa_backend_lib::models::params::XAPIKey;
 use pazufa_backend_lib::utils::tracing::Logging;
 use pazufa_backend_lib::{Configuration, LTZFServer};
@@ -78,11 +80,20 @@ impl TestSetup {
             .expect("Failed to run migrations.");
         let hash = digest("total-nutzloser-wert");
         sqlx::query!(
-            "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
+            "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag, algo)
             VALUES
-            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
-            ON CONFLICT DO NOTHING;", hash, "salziger-salzkeks", "total-nutzlos")
-        .execute(&pool).await.expect("Failed to create test API keys.");
+            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), 
+            (SELECT last_value FROM api_keys_id_seq), $2, $3, 
+            (SELECT id FROM hash_algorithm WHERE value = 'sha256')
+            )
+            ON CONFLICT DO NOTHING;",
+            hash,
+            "salziger-salzkeks".as_bytes(),
+            "total-nutzlos",
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to create test API keys.");
         let logging = Logging::new("testing_error.log".into(), None);
 
         Self {
@@ -118,36 +129,37 @@ impl TestSetup {
 pub async fn gen_all_keylevels(
     server: &LTZFServer,
 ) -> pazufa_backend_lib::Result<(String, String, String)> {
-    use pazufa_backend_lib::api::auth as libauth;
-    let collector_key = libauth::auth_post(
-        server,
-        &Claims(APIScope::KeyAdder, 1),
-        &libauth::CreateApiKey {
-            scope: "collector".to_owned(),
-            expires_at: chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
-        },
+    use pazufa_backend_lib::db::auth as dbauth;
+    let mut tx = server.sqlx_db.begin().await?;
+    let collector_key = dbauth::create_apikey(
+        1,
+        APIScope::Collector,
+        chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
+        HashAlgorithm::Sha256,
+        &mut tx,
     )
     .await?;
-    let admin_key = libauth::auth_post(
-        server,
-        &Claims(APIScope::KeyAdder, 1),
-        &libauth::CreateApiKey {
-            scope: "admin".to_owned(),
-            expires_at: chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
-        },
+    let admin_key = dbauth::create_apikey(
+        1,
+        APIScope::Admin,
+        chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
+        HashAlgorithm::Sha256,
+        &mut tx,
     )
     .await?;
-    let keyadder_key = libauth::auth_post(
-        server,
-        &Claims(APIScope::KeyAdder, 1),
-        &libauth::CreateApiKey {
-            scope: "keyadder".to_owned(),
-            expires_at: chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
-        },
+    let keyadder_key = dbauth::create_apikey(
+        1,
+        APIScope::KeyAdder,
+        chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
+        HashAlgorithm::Sha256,
+        &mut tx,
     )
     .await?;
+    tx.commit().await?;
+
     Ok((collector_key, admin_key, keyadder_key))
 }
+
 pub async fn authtesting<F, T>(
     server: Arc<pazufa_backend_lib::LTZFServer>,
     allowed_levels: &[APIScope],

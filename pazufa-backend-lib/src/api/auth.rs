@@ -1,8 +1,14 @@
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
+use crate::db::auth::create_apikey;
+use crate::models::APIScope;
+use crate::models::auth::{
+    APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
+};
 use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
 use crate::utils::as_option;
 use crate::utils::header_params::HeaderParams;
 use crate::{LTZFServer, Result, error::LTZFError, models};
+use argon2::password_hash::SaltString;
 use axum::extract::FromRequestParts;
 use axum::http::{StatusCode, request::Parts};
 use axum::response::{IntoResponse, Json, Response};
@@ -15,21 +21,8 @@ use tracing::{debug, info, instrument, warn};
 use utoipa::IntoResponses;
 use utoipa::ToSchema;
 
+#[derive(Debug)]
 pub struct Claims(pub APIScope, pub i32);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "\"APIScope\"")]
-pub enum APIScope {
-    #[sqlx(rename = "keyadder")]
-    #[serde(rename = "keyadder")]
-    KeyAdder,
-    #[sqlx(rename = "admin")]
-    #[serde(rename = "admin")]
-    Admin,
-    #[sqlx(rename = "collector")]
-    #[serde(rename = "collector")]
-    Collector,
-}
 
 impl std::fmt::Display for APIScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,48 +54,49 @@ impl Claims {
             pub deleted_by: Option<i32>,
             pub expires_at: DateTime<Utc>,
             pub scope: APIScope,
-            pub salt: String,
+            pub salt: Vec<u8>,
             pub key_hash: String,
+            pub algo: HashAlgorithm,
         }
+        let api_key: APIKey<NoopKeyGenerator> = key.clone().try_into()?;
 
-        let tag = crate::utils::auth::keytag_of(&key);
-        if !crate::utils::auth::check_key(&key) {
-            warn!("Incoming Key is not a valid key");
-            return Err(crate::error::DataValidationError::Unauthorized {
-                reason: "The key is malformed (Checksum failed)".to_owned(),
-            }
-            .into());
-        }
-        debug!("Authenticating Key: `{}`", tag);
+        debug!("Authenticating Key: `{}`", api_key.keytag());
 
-        if let Some(Response {id, deleted_by, expires_at, scope, salt, key_hash}) = sqlx::query_as!(Response,
-            r#"SELECT k.id, k.deleted_by, k.expires_at, value as "scope: APIScope", k.salt, k.key_hash
+        if let Some(Response {id, deleted_by, expires_at, scope, salt, key_hash, algo}) = sqlx::query_as!(Response,
+            r#"SELECT k.id, k.deleted_by, k.expires_at, s.value as "scope: APIScope", k.salt, k.key_hash, ha.value as "algo: HashAlgorithm"
             FROM api_keys k
             INNER JOIN api_scope s ON s.id = k.scope
+            INNER JOIN hash_algorithm ha ON ha.id = k.algo
             WHERE keytag = $1"#,
-            tag
+            api_key.keytag()
         )
         .fetch_optional(&server.sqlx_db)
         .await?
         {
-            let incoming_hash = crate::utils::auth::hash_full_key(&salt, &key);
+            let incoming_hash = match algo {
+                HashAlgorithm::Sha256 => {
+                    let key : APIKey<Sha256KeyGenerator> = key.clone().try_into()?;
+                    key.hash(SaltString::encode_b64(&salt)?.as_salt())?
+                },
+                HashAlgorithm::Argon2id => {
+                    let key : APIKey<Argon2KeyGenerator> = key.clone().try_into()?;
+                    key.hash(SaltString::encode_b64(&salt)?.as_salt())?
+
+                }
+            };
             if key_hash != incoming_hash {
                 warn!("Hash is not matching");
-                Err(LTZFError::Validation {
-                    source: Box::new(crate::error::DataValidationError::Unauthorized {
-                        reason: format!("API Key is not valid. Tag: {tag}"),
-                    }),
-                })
+                Err(crate::error::DataValidationError::Unauthorized {
+                        reason: format!("API Key is not valid. Tag: {}", api_key.keytag()),
+                    }.into())
             } else if let Some(deleted_by) = deleted_by {
                 if deleted_by == id {
                     warn!("API Key was valid but was either rotated or expired");
-                    Err(LTZFError::Validation {
-                        source: Box::new(crate::error::DataValidationError::Unauthorized {
+                    Err(crate::error::DataValidationError::Unauthorized {
                             reason: format!(
-                                "API Key was valid but was either rotated or expired. Tag: {tag}"
-                            ),
-                        }),
-                    })
+                                "API Key was valid but was either rotated or expired. Tag: {}", api_key.keytag()
+                            )
+                    }.into())
                 } else {
                     let delkeytag = sqlx::query!("SELECT keytag FROM api_keys WHERE id=$1", deleted_by)
                         .map(|r| r.keytag)
@@ -112,7 +106,7 @@ impl Claims {
                     Err(LTZFError::Validation {
                         source: Box::new(crate::error::DataValidationError::Unauthorized {
                             reason: format!(
-                                "API Key was valid but is deleted. Tag: {tag}\nAdministrator Key: {delkeytag}"
+                                "API Key was valid but is deleted. Tag: {}\nAdministrator Key: {delkeytag}", api_key.keytag()
                             ),
                         }),
                     })
@@ -124,7 +118,7 @@ impl Claims {
                 warn!("Key was valid but has expired since last use");
                 Err(LTZFError::Validation {
                     source: Box::new(crate::error::DataValidationError::Unauthorized {
-                        reason: format!("API Key was valid but has expired. Tag: {tag}"),
+                        reason: format!("API Key was valid but has expired. Tag: {}", api_key.keytag()),
                     }),
                 })
             } else {
@@ -136,7 +130,7 @@ impl Claims {
                 )
                 .execute(&server.sqlx_db)
                 .await?;
-                debug!("Scope of key with tag`{}`: {:?}", tag, scope.0);
+                debug!("Scope of key with tag`{}`: {:?}", api_key.keytag(), scope.0);
                 Ok(scope)
             }
         } else {
@@ -268,7 +262,7 @@ impl IntoResponse for AuthListingKeytagResponse {
 pub struct CreateApiKey {
     /// Note: inline enums are not fully supported by openapi-generator
     #[serde(rename = "scope")]
-    pub scope: String,
+    pub scope: APIScope,
 
     /// The expiration date of the API Key
     #[serde(rename = "expires_at")]
@@ -288,32 +282,15 @@ pub async fn auth_post(
     body: &CreateApiKey,
 ) -> Result<String> {
     let mut tx = server.sqlx_db.begin().await?;
-    let (key, salt) = crate::utils::auth::new_key();
-    let tag = crate::utils::auth::keytag_of(&key);
-
-    let key_digest = crate::utils::auth::hash_full_key(&salt, &key);
-
-    sqlx::query!(
-        "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)
-            VALUES
-            ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4), $5, $6)",
-        key_digest,
+    let key = create_apikey(
         claims.1,
-        body.expires_at
-            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(365)),
-        body.scope.clone(),
-        salt,
-        tag
+        body.scope,
+        body.expires_at,
+        HashAlgorithm::Argon2id,
+        &mut tx,
     )
-    .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-
-    tracing::info!(
-        "Generated Fresh API Key with Scope: {} and keytag {}",
-        body.scope,
-        tag
-    );
     Ok(key)
 }
 /// Status information about the API key used in the current request
@@ -373,21 +350,24 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
     .await?;
 
     // new key, replacing the old one
-    let (new_key, new_salt) = crate::utils::auth::new_key();
-    let new_hash = crate::utils::auth::hash_full_key(&new_salt, &new_key);
-    let new_keytag = crate::utils::auth::keytag_of(&new_key);
+    let api_key = crate::models::auth::APIKey::<crate::models::auth::Argon2KeyGenerator>::default();
+    let new_salt = crate::models::auth::generate_salt();
+    let new_hash = api_key.hash(new_salt.as_salt())?;
+    let mut vec_data = vec![0; new_salt.len()];
+    let salt_bytes: Vec<_> = new_salt.decode_b64(&mut vec_data)?.into();
 
     let new_id = sqlx::query!(
-        "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)
+        "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag, algo)
             VALUES
-            ($1, $2, $3, $4,$5, $6)
+            ($1, $2, $3, $4,$5, $6, ( SELECT id FROM hash_algorithm WHERE value = $7 ))
             RETURNING id",
         new_hash,
         claims.1,
         chrono::Utc::now() + (old_key_entry.expires_at - old_key_entry.created_at),
         old_key_entry.scope,
-        new_salt,
-        new_keytag
+        salt_bytes,
+        api_key.keytag(),
+        HashAlgorithm::Argon2id.to_string()
     )
     .map(|r| r.id)
     .fetch_one(&mut *tx)
@@ -435,7 +415,7 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
         old_key_entry.keytag, old_key_entry.named_scope
     );
     Ok(AuthRotateResponse::Created {
-        new_api_key: new_key,
+        new_api_key: api_key.to_string(),
         rotation_complete_date: rot_expiration_date,
     })
 }
@@ -621,10 +601,16 @@ mod auth_test {
     use crate::LTZFServer;
     use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
+    use crate::models::auth::{APIKey, KEY_LENGTH, NoopKeyGenerator, check_crc};
     use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
-    use crate::utils::auth::{KEY_LENGTH, check_crc, keytag_of};
     use crate::utils::testing::{TestSetup, generate};
 
+    fn keytag_of(key: &str) -> String {
+        APIKey::<NoopKeyGenerator>::try_from(key.to_string())
+            .expect("key format invalid")
+            .keytag()
+            .to_string()
+    }
     async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
         fetch_key_row(server, keytag).await.id
     }
@@ -640,7 +626,7 @@ mod auth_test {
         last_used: Option<chrono::DateTime<chrono::Utc>>,
         scope: i32,
         rotated_for: Option<i32>,
-        salt: String,
+        salt: Vec<u8>,
         keytag: String,
     }
 
@@ -694,7 +680,7 @@ mod auth_test {
             &Claims(APIScope::KeyAdder, 1), // one is the default keyadder key
             &CreateApiKey {
                 expires_at: Some(expiry_date),
-                scope: APIScope::KeyAdder.to_string(),
+                scope: APIScope::KeyAdder,
             },
         )
         .await
@@ -751,7 +737,7 @@ mod auth_test {
             server,
             &Claims(APIScope::KeyAdder, 1),
             &CreateApiKey {
-                scope: "keyadder".to_string(),
+                scope: APIScope::KeyAdder,
                 expires_at: None,
             },
         )
@@ -777,7 +763,7 @@ mod auth_test {
                 server,
                 &Claims(APIScope::KeyAdder, 1),
                 &CreateApiKey {
-                    scope: "keyadder".to_string(),
+                    scope: APIScope::KeyAdder,
                     expires_at: None,
                 },
             )
@@ -790,7 +776,7 @@ mod auth_test {
                 server,
                 &Claims(APIScope::KeyAdder, 1),
                 &CreateApiKey {
-                    scope: "collector".to_string(),
+                    scope: APIScope::Collector,
                     expires_at: None,
                 },
             )
@@ -802,7 +788,7 @@ mod auth_test {
                 server,
                 &Claims(APIScope::KeyAdder, 1),
                 &CreateApiKey {
-                    scope: "keyadder".to_string(),
+                    scope: APIScope::KeyAdder,
                     expires_at: None,
                 },
             )
@@ -814,7 +800,7 @@ mod auth_test {
                 server,
                 &Claims(APIScope::KeyAdder, 1),
                 &CreateApiKey {
-                    scope: "admin".to_string(),
+                    scope: APIScope::Admin,
                     expires_at: None,
                 },
             )
@@ -869,7 +855,7 @@ mod auth_test {
             server,
             &Claims(APIScope::KeyAdder, 1),
             &CreateApiKey {
-                scope: "keyadder".to_string(),
+                scope: APIScope::KeyAdder,
                 expires_at: None,
             },
         )
@@ -921,7 +907,7 @@ mod auth_test {
             server,
             &Claims(APIScope::KeyAdder, 1),
             &CreateApiKey {
-                scope: "keyadder".to_string(),
+                scope: APIScope::KeyAdder,
                 expires_at: None,
             },
         )
@@ -965,6 +951,45 @@ mod auth_test {
 
         scenario.teardown().await;
     }
+    #[tokio::test]
+    async fn sha256_and_argon2_side_by_side_auth() {
+        let scenario = TestSetup::new("test_sha256_and_argon2_side_by_side_auth").await;
+        let server = &scenario.server;
+        let mut tx = server.sqlx_db.begin().await.expect("sdkf");
+        let key1 = crate::db::auth::create_apikey(
+            1,
+            APIScope::KeyAdder,
+            None,
+            crate::models::auth::HashAlgorithm::Sha256,
+            &mut tx,
+        )
+        .await
+        .expect("failed key cr");
+        let key2 = crate::db::auth::create_apikey(
+            1,
+            APIScope::Collector,
+            None,
+            crate::models::auth::HashAlgorithm::Argon2id,
+            &mut tx,
+        )
+        .await
+        .expect("failed key cr");
+        tx.commit().await.expect("commit failed");
+
+        // authenticate
+        let claims = Claims::extract(server, params::XAPIKey(key1)).await;
+        assert!(
+            matches!(claims, Ok(Claims(APIScope::KeyAdder, 2))),
+            "{claims:?}"
+        );
+        let claims = Claims::extract(server, params::XAPIKey(key2)).await;
+        assert!(
+            matches!(claims, Ok(Claims(APIScope::Collector, 3))),
+            "{claims:?}"
+        );
+
+        scenario.teardown().await;
+    }
 
     // POST /auth/rotate
     #[tokio::test]
@@ -975,7 +1000,7 @@ mod auth_test {
             server,
             &Claims(APIScope::KeyAdder, 1),
             &super::CreateApiKey {
-                scope: "keyadder".to_string(),
+                scope: APIScope::KeyAdder,
                 expires_at: None,
             },
         )

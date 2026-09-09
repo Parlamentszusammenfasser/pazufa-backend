@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag, algo)\n        VALUES\n        ($1, \n            (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), \n            (SELECT last_value FROM api_keys_id_seq), \n            $2, \n            $3,\n            (SELECT id FROM hash_algorithm WHERE value = $4)\n        )\n        ON CONFLICT DO NOTHING;",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Bytea",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2f656fa2a684555acc11df52cf68457d0ae60bfd74cfc4ea30d4634500a31755"
+}

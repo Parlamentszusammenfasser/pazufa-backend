@@ -1,12 +1,11 @@
 use super::PutResponse;
-use super::auth::APIScope;
 use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, ListingGetResponse, RoundTimestamp};
 use crate::db;
 use crate::db::retrieve::vorgang_dbid;
 use crate::db::{delete, insert, merge, retrieve};
 use crate::error::{DataValidationError, LTZFError};
-use crate::models::params;
+use crate::models::{APIScope, params};
 use crate::{LTZFServer, Result, models};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;

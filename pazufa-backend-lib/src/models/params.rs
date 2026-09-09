@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize, de, ser};
 use utoipa::{IntoParams, ToSchema};
 use uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams)]
+#[derive(Debug, Clone, PartialEq, Deserialize, ToSchema, IntoParams)]
 #[into_params(names("X-API-Key"), parameter_in = Header)]
 pub struct XAPIKey(pub String);
 impl DeserializeFromHeaderName for XAPIKey {

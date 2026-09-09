@@ -20,7 +20,19 @@ macro_rules! string_enum_convenience {
         }
     };
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize, ToSchema)]
+#[sqlx(type_name = "\"APIScope\"")]
+pub enum APIScope {
+    #[sqlx(rename = "keyadder")]
+    #[serde(rename = "keyadder")]
+    KeyAdder,
+    #[sqlx(rename = "admin")]
+    #[serde(rename = "admin")]
+    Admin,
+    #[sqlx(rename = "collector")]
+    #[serde(rename = "collector")]
+    Collector,
+}
 /// Type of a Document
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Doktyp {

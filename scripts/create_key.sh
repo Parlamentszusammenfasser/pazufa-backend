@@ -7,6 +7,7 @@ elif [ $1 = "staging" ]; then
     BACKEND="https://staging.api.pazufa.de"
 else
     echo "Unknown Backend, use either \`prod\` or \`staging\`"
+    echo "$USAGE"
     exit 1
 fi
 
@@ -16,8 +17,8 @@ if [ -z ${4+x} ]; then
 else
     EXPIRY=$4
 fi
-SCOPE=$3
-KEY=$2
+SCOPE=$2
+KEY=$3
 
 echo "Called with"
 echo "Backend: $BACKEND"

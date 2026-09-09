@@ -2,10 +2,11 @@ use crate::LTZFServer;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
-use pazufa_backend_lib::api::auth::{APIScope, Claims};
+use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::sitzung::{self as libsitz, SitzungListingResponse};
 use pazufa_backend_lib::api::{DeleteResponse, GetSingleResponse, PutResponse};
 use pazufa_backend_lib::models;
+use pazufa_backend_lib::models::APIScope;
 use pazufa_backend_lib::models::params;
 use std::sync::Arc;
 use tracing::warn;
@@ -172,7 +173,7 @@ async fn s_get_by_id(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::api::auth::APIScope;
+    use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::params::{self};
 
     use std::sync::Arc;

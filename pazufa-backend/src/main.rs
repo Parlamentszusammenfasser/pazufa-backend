@@ -7,7 +7,7 @@ use axum::{extract::DefaultBodyLimit, http::Method, routing::get};
 use clap::Parser;
 use pazufa_backend_lib::Configuration;
 use pazufa_backend_lib::api::LTZFServer;
-use pazufa_backend_lib::utils::auth as util_auth;
+use pazufa_backend_lib::models::auth::{APIKey, Argon2KeyGenerator, generate_salt};
 use pazufa_backend_lib::utils::{notify::MailBundle, shutdown_signal, tracing::Logging};
 use sqlx::{PgTransaction, SqlSafeStr};
 use std::process::exit;
@@ -173,30 +173,29 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 }
 
 async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<()> {
-    if !util_auth::check_key(key) {
-        bail!(
-            "Initialization keyadder key did not pass Sanity check. Is it maybe malformed or corrupted? Generate a key with <backend binary> --generate-key"
-        );
-    }
-    let tag = util_auth::keytag_of(key);
-    let salt = util_auth::generate_salt();
-    let hash = util_auth::hash_full_key(&salt, key);
+    let key: APIKey<Argon2KeyGenerator> = APIKey::try_from(key.to_owned())?;
 
-    tracing::info!("Master key of this session has keytag {}", tag);
+    let salt = generate_salt();
+    let mut salt_bytes = vec![0; salt.len()];
+    let salt_bytes = salt.decode_b64(&mut salt_bytes)?;
+
+    tracing::info!("Master key of this session has keytag {}", key.keytag());
 
     sqlx::query!(
-        "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
+        "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag, algo)
         VALUES
         ($1, 
             (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), 
             (SELECT last_value FROM api_keys_id_seq), 
             $2, 
-            $3
+            $3,
+            (SELECT id FROM hash_algorithm WHERE value = $4)
         )
         ON CONFLICT DO NOTHING;",
-        hash,
-        salt,
-        tag
+        key.hash(salt.as_salt())?,
+        salt_bytes,
+        key.keytag(),
+        key.hash_algorithm().to_string()
     )
     .execute(&mut **tx)
     .await?;
@@ -343,7 +342,8 @@ fn early_exits(config: &Configuration) {
         exit(0);
     }
     if config.generate_key {
-        println!("{}", util_auth::generate_api_key());
+        let key: APIKey<Argon2KeyGenerator> = APIKey::default();
+        println!("{key}");
         exit(0);
     }
     if config.dump_spec {

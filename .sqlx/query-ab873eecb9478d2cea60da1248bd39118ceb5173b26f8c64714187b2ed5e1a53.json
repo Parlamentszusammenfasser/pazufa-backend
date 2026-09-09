@@ -94,7 +94,7 @@
       {
         "ordinal": 8,
         "name": "salt",
-        "type_info": "Varchar",
+        "type_info": "Bytea",
         "origin": {
           "Table": {
             "table": "api_keys",
@@ -123,6 +123,17 @@
             "name": "deleted_by"
           }
         }
+      },
+      {
+        "ordinal": 11,
+        "name": "algo",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "algo"
+          }
+        }
       }
     ],
     "parameters": {
@@ -141,7 +152,8 @@
       true,
       false,
       false,
-      true
+      true,
+      false
     ]
   },
   "hash": "ab873eecb9478d2cea60da1248bd39118ceb5173b26f8c64714187b2ed5e1a53"

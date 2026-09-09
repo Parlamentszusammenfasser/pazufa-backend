@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+pub mod auth;
 pub mod delete;
 pub mod insert;
 pub mod merge;

@@ -1,6 +1,10 @@
 #![allow(
     clippy::disallowed_methods,
-    reason = "Database setup and taredown requires use of `sqlx::query` as those cannot be statically verified."
+    reason = "Database setup and teardown requires use of `sqlx::query` as those cannot be statically verified."
+)]
+#![allow(
+    clippy::too_many_lines,
+    reason = "just a testing mod will largely be replaced with arbitrary anyways at some point"
 )]
 use crate::utils::tracing::Logging;
 use crate::{Configuration, LTZFServer};
@@ -75,11 +79,19 @@ impl TestSetup {
             .expect("Failed to run migrations.");
         let hash = digest("total-nutzloser-wert");
         sqlx::query!(
-            "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
+            "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag, algo)
             VALUES
-            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
-            ON CONFLICT DO NOTHING;", hash, "salziger-salzkeks", "total-nutzlos")
-        .execute(&pool).await.expect("Failed to create test API keys.");
+            ($1, 
+            (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), 
+            (SELECT last_value FROM api_keys_id_seq), $2, $3, 1)
+            ON CONFLICT DO NOTHING;",
+            hash,
+            "salziger-salzkeks".as_bytes(),
+            "total-nutzlos"
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to create test API keys.");
         let logging = Logging::new("testing_error.log".into(), None);
 
         Self {

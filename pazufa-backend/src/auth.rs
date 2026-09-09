@@ -2,10 +2,10 @@ use crate::LTZFServer;
 use axum::extract::{Path, Query, State};
 use axum::response::Json;
 use pazufa_backend_lib::api::auth::{
-    self as libauth, APIScope, ApiKeyStatus, Claims, CreateApiKey, KeytagListing,
+    self as libauth, ApiKeyStatus, Claims, CreateApiKey, KeytagListing,
 };
 use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
-use pazufa_backend_lib::models::{KeyTag, params};
+use pazufa_backend_lib::models::{APIScope, KeyTag, params};
 use pazufa_backend_lib::utils::header_params::HeaderParams;
 use std::sync::Arc;
 use tracing::warn;
@@ -212,10 +212,12 @@ async fn auth_listing_keytag(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::api::auth::{self as libauth, APIScope, Claims};
+    use pazufa_backend_lib::api::auth::{self as libauth, Claims};
+    use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::params::{self, ApiKeyDelete};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
     use std::sync::Arc;
+    use tracing_test::traced_test;
 
     #[tokio::test]
     async fn test_auth_listing_keytag() {
@@ -272,6 +274,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_auth_delete() {
         let mut scenario = TestSetup::new("test_auth_delete").await;
         let server = Arc::new(scenario.server.take().expect("Expected a server value"));
@@ -342,7 +345,7 @@ mod test {
                 axum::extract::State(server),
                 axum::Json(libauth::CreateApiKey {
                     expires_at: None,
-                    scope: "collector".to_owned(),
+                    scope: APIScope::Collector,
                 }),
             )
             .await

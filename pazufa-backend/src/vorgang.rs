@@ -1,12 +1,12 @@
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use pazufa_backend_lib::LTZFServer;
-use pazufa_backend_lib::api::auth::{APIScope, Claims};
+use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, ListingGetResponse, PutResponse, vorgang as libvg,
 };
 use pazufa_backend_lib::models::params::{IfModSince, XScraperId};
-use pazufa_backend_lib::models::{self, params};
+use pazufa_backend_lib::models::{self, APIScope, params};
 use pazufa_backend_lib::utils::header_params::HeaderParams;
 use std::sync::Arc;
 use tracing::warn;
@@ -210,8 +210,8 @@ async fn vorgang_id_put(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::api::auth::APIScope;
     use pazufa_backend_lib::models;
+    use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::params::{self, XScraperId};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
     use std::sync::Arc;
