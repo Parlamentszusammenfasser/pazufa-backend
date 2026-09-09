@@ -205,8 +205,8 @@ pub enum Stationstyp {
     ParlGgentwurf,
     #[serde(rename = "parl-vermittas")]
     ParlVermittas,
-    #[serde(rename = "parl-verfgstop")]
-    ParlVerfgstop,
+    #[serde(rename = "postparl-vgstp")]
+    PostparlVgstp,
     #[serde(rename = "postparl-vesja")]
     PostparlVesja,
     #[serde(rename = "postparl-vesne")]

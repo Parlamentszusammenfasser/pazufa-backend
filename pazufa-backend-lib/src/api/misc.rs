@@ -777,7 +777,8 @@ mod test_unauthorisiert {
         .await;
 
         assert!(
-            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if body.len() == 2)
+            matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if body.len() == 2),
+            "{result:?}"
         );
         assert!(
             matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. }) if body.contains(&generate::default_stellungnahme()))
