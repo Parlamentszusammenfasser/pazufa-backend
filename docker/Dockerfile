@@ -45,17 +45,16 @@ ENV RUST_LOG=warn,pazufa_backend=info
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
 # backend-label
-LABEL version="0.3.2"
+LABEL version="0.3.3"
 
 ENV PAZUFA_PORT 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-            CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1
+
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
 
 RUN mkdir -p /var/log/pazufa-backend && chmod 0766 /var/log/pazufa-backend && chown pazufa-user /var/log/pazufa-backend
 RUN mkdir /app && chmod 0766 /app && chown pazufa-user /app
 
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
 COPY --from=builder /usr/lib/*-linux-gnu/libssl.so.* /usr/lib/
 COPY --from=builder /usr/lib/*-linux-gnu/libcrypto.so.* /usr/lib/
 COPY --from=builder /usr/lib/*-linux-gnu/libpq.so.* /usr/lib/
@@ -67,6 +66,8 @@ WORKDIR /app
 
 USER pazufa-user
  
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+            CMD wget -q --spider "http://localhost:$PAZUFA_PORT" || exit 1
 ENTRYPOINT ["./pazufa-backend"]
 
 # ELASTIC COMPANION RUNNER
@@ -79,13 +80,14 @@ LABEL description="Elastic Companion Application to PaZuFa Backend"
 # ec-label
 LABEL version="0.1.0"
 
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+
 RUN mkdir /app && chmod 0766 /app && chown pazufa-user /app
 WORKDIR /app
 
 COPY --from=builder --chmod=0400 --chown=pazufa-user:pazufa-user /app/tracks.toml /app/tracks.toml
 COPY --from=builder --chmod=0100 --chown=pazufa-user:pazufa-user /app/target/release/elastic-companion /app
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
 COPY --from=builder /usr/lib/*-linux-gnu/libssl.so.* /usr/lib/
 COPY --from=builder /usr/lib/*-linux-gnu/libcrypto.so.* /usr/lib/
 COPY --from=builder /usr/lib/*-linux-gnu/libpq.so.* /usr/lib/
