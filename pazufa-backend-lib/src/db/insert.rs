@@ -129,6 +129,37 @@ async fn insert_lobbyregister_for_vg(
     }
     Ok(())
 }
+pub async fn insert_schlagworte_of_vorgang(
+    vg_id: i32,
+    sw: &[String],
+    tx: &mut PgTransaction<'_>,
+) -> Result<()> {
+    let sw: Vec<_> = sw.iter().map(|s| s.trim().to_lowercase()).collect();
+    sqlx::query!(
+        "WITH 
+    existing_ids AS (SELECT DISTINCT id FROM schlagwort WHERE value = ANY($1::text[])),
+    inserted AS (
+        INSERT INTO schlagwort(value) 
+        SELECT DISTINCT(key) FROM UNNEST($1::text[]) as key
+        ON CONFLICT DO NOTHING
+        RETURNING id
+    ),
+    allofthem AS(
+        SELECT id FROM inserted 
+        UNION 
+        SELECT id FROM existing_ids
+    )
+
+    INSERT INTO rel_vorgang_schlagwort(vg_id, sw_id)
+    SELECT $2, allofthem.id FROM allofthem
+    ON CONFLICT DO NOTHING",
+        &sw[..],
+        vg_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
 /// Inserts a new Vorgang into the database.
 pub(crate) async fn insert_vorgang(
     vg: &models::Vorgang,
@@ -170,12 +201,13 @@ pub(crate) async fn insert_vorgang(
         tx,
     )
     .await?;
+    // insert schlagworte
+    insert_schlagworte_of_vorgang(vg_id, &vg.schlagworte, tx).await?;
     // insert sachgebiete
     let sg_numbers: Vec<_> = vg.sachgebiete.iter().map(|x| i32::from(*x)).collect();
     sqlx::query!(
         "INSERT INTO vg_sachgebiete(vg_id, sg_id)
-        SELECT $1, s.id FROM 
-            UNNEST($2::int4[]) as i, sachgebiet s
+        SELECT $1, s.id FROM UNNEST($2::int4[]) as i, sachgebiet s
         WHERE i = s.value
         ",
         vg_id,
@@ -320,8 +352,8 @@ pub(crate) async fn insert_station(
     )
     .execute(&mut **tx)
     .await?;
-    // schlagworte
-    insert_station_sw(stat_id, &stat.schlagworte, tx).await?;
+    // schlagworte, inserted on a vorgang level, see #54 for details
+    insert_schlagworte_of_vorgang(vg_id, &stat.schlagworte, tx).await?;
 
     Ok(stat_id)
 }
@@ -808,36 +840,7 @@ pub(crate) async fn insert_or_retrieve_dok(
         .await?),
     }
 }
-pub(crate) async fn insert_station_sw(
-    sid: i32,
-    sw: &[String],
-    tx: &mut PgTransaction<'_>,
-) -> Result<()> {
-    let sw: Vec<_> = sw.iter().map(|s| s.trim().to_lowercase()).collect();
-    sqlx::query!(
-        "
-    WITH 
-    existing_ids AS (SELECT DISTINCT id FROM schlagwort WHERE value = ANY($1::text[])),
-    inserted AS (
-        INSERT INTO schlagwort(value) 
-        SELECT DISTINCT(key) FROM UNNEST($1::text[]) as key
-        ON CONFLICT DO NOTHING
-        RETURNING id
-    ),
-    allofthem AS(
-        SELECT id FROM inserted UNION SELECT id FROM existing_ids
-    )
 
-    INSERT INTO rel_station_schlagwort(stat_id, sw_id)
-    SELECT $2, allofthem.id FROM allofthem
-    ON CONFLICT DO NOTHING",
-        &sw[..],
-        sid
-    )
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
 pub(crate) async fn insert_schlagworte_of_dok(
     did: i32,
     sw: &[String],
@@ -855,7 +858,9 @@ pub(crate) async fn insert_schlagworte_of_dok(
         RETURNING id
     ),
     allofthem AS(
-        SELECT id FROM inserted UNION SELECT id FROM existing_ids
+        SELECT id FROM inserted 
+        UNION 
+        SELECT id FROM existing_ids
     )
 
     INSERT INTO rel_dok_schlagwort(dok_id, sw_id)

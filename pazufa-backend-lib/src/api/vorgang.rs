@@ -877,6 +877,113 @@ pub(crate) mod test_failed_irl_scenarios {
             vorgang.with_round_timestamps(),
             fetched_vorgang.with_round_timestamps()
         );
+    }
+
+    #[tokio::test]
+    async fn station_schlagworte_are_merged_into_vorgang() {
+        let scenario = TestSetup::new("test_station_schlagworte_are_merged").await;
+        let api_id = uuid!("06836a6d-30e6-4200-bbbb-ca362af92d2e");
+
+        let vorgang = models::Vorgang {
+            api_id,
+            schlagworte: [
+                "kakaotee",
+                "computervirus",
+                "exploit",
+                "kenspaltung",
+                "dirty bomb",
+            ]
+            .iter()
+            .map(|&x| x.to_owned())
+            .collect(),
+            stationen: vec![models::Station {
+                schlagworte: vec!["neues schlagwort".to_owned(), "kartenspiele".to_owned()],
+                ..generate::default_station()
+            }],
+            ..generate::default_vorgang()
+        };
+        let _insert = super::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+
+        let retr_vorgang = super::vorgang_get_by_id(
+            &scenario.server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam { api_id },
+            false,
+        )
+        .await
+        .expect("");
+        let api::GetSingleResponse::Success(retr_vorgang) = retr_vorgang else {
+            panic!("unexpected response")
+        };
+        let mut output_sw = retr_vorgang.schlagworte.clone();
+        output_sw.sort();
+
+        let mut expected_sw: Vec<String> = vorgang
+            .schlagworte
+            .iter()
+            .chain(vorgang.stationen[0].schlagworte.iter())
+            .cloned()
+            .collect();
+        expected_sw.sort_unstable();
+        assert_eq!(expected_sw, output_sw);
+
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn vorgang_schlagworte() {
+        let scenario = TestSetup::new("test_vorgang_schlagworte").await;
+        let api_id = uuid!("06836a6d-30e6-4200-bbbb-ca362af92d2e");
+        let mut schlagworte = vec![
+            "kakaotee",
+            "computervirus",
+            "exploit",
+            "kenspaltung",
+            "dirty bomb",
+        ];
+        schlagworte.sort_unstable();
+
+        let vorgang = models::Vorgang {
+            api_id,
+            schlagworte: schlagworte.iter().map(|&x| x.to_owned()).collect(),
+            stationen: vec![generate::default_station()],
+            ..generate::default_vorgang()
+        };
+        let _insert = super::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+
+        let retr_vorgang = super::vorgang_get_by_id(
+            &scenario.server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam { api_id },
+            false,
+        )
+        .await
+        .expect("");
+        let api::GetSingleResponse::Success(retr_vorgang) = retr_vorgang else {
+            panic!("unexpected response")
+        };
+        let mut output_sw = retr_vorgang.schlagworte.clone();
+        output_sw.sort();
+        assert_eq!(schlagworte, output_sw);
+
         scenario.teardown().await;
     }
 }

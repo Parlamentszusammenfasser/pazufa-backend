@@ -7,6 +7,12 @@ CREATE TABLE rel_vorgang_schlagwort(
     sw_id INTEGER NOT NULL REFERENCES schlagwort(id)ON DELETE CASCADE,
     PRIMARY KEY (vg_id, sw_id)
 );
+INSERT INTO rel_vorgang_schlagwort(vg_id, sw_id)
+    SELECT s.vg_id, rss.sw_id FROM station s, rel_station_schlagwort rss
+        WHERE s.id = rss.stat_id
+    GROUP BY s.vg_id, rss.sw_id
+;
+DROP TABLE rel_station_schlagwort;
 
 -- PaZuFa/parlamentszusammenfasser#62 (bt-values)
 

@@ -338,7 +338,6 @@ pub(crate) mod generate {
             let has_link = rng.random_bool(0.8);
             let has_gremium_federf = rng.random_bool(0.4);
             let has_trojanergefahr = rng.random_bool(0.5);
-            let has_schlagworte = rng.random_bool(0.6);
             let has_additional_links = rng.random_bool(0.3);
 
             let num_dokumente = rng.random_range(1..=4);
@@ -348,19 +347,6 @@ pub(crate) mod generate {
                     random_dokument(rng),
                 )));
             }
-
-            let schlagworte_count = if has_schlagworte {
-                rng.random_range(1..=4)
-            } else {
-                0
-            };
-            let schlagworte = {
-                let mut words = Vec::new();
-                for _ in 0..schlagworte_count {
-                    words.push(random_string(rng, "station_", 5, 15));
-                }
-                words
-            };
 
             let additional_links_count = if has_additional_links {
                 rng.random_range(1..=3)
@@ -437,7 +423,7 @@ pub(crate) mod generate {
                 } else {
                     None
                 },
-                schlagworte,
+                schlagworte: vec![],
                 dokumente,
                 additional_links,
                 stellungnahmen,
@@ -564,6 +550,14 @@ pub(crate) mod generate {
                 }
                 lobby_list
             };
+            let schlagworte_count = rng.random_range(0..=5);
+            let schlagworte = {
+                let mut words = Vec::new();
+                for _ in 0..schlagworte_count {
+                    words.push(random_string(rng, "tag_", 3, 12));
+                }
+                words
+            };
 
             models::Vorgang {
                 api_id: random_uuid(rng),
@@ -580,6 +574,7 @@ pub(crate) mod generate {
                 wahlperiode: rng.random_range(15..=25),
                 verfassungsaendernd: rng.random_bool(0.2),
                 typ,
+                schlagworte,
                 ids,
                 links,
                 ressort: None,
@@ -718,7 +713,7 @@ pub(crate) mod generate {
                     .to_utc(),
             ),
             trojanergefahr: Some(2u8),
-            schlagworte: vec!["stationär".to_string()],
+            schlagworte: vec![],
             touched_by: vec![],
             stellungnahmen: vec![models::DokumentOrApiId::Dokument(Box::new(
                 default_stellungnahme(),
@@ -873,6 +868,11 @@ pub(crate) mod generate {
             verfassungsaendernd: false,
             wahlperiode: 20,
             touched_by: vec![],
+            schlagworte: vec![
+                "biowaffen".to_owned(),
+                "kabbelei".to_owned(),
+                "wasserstoffbombe".to_owned(),
+            ],
             links: vec!["https://example.com/ichmagmoneten".to_string()],
             initiatoren: at,
             ids: vec![models::VgIdent {

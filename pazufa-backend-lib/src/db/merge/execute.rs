@@ -275,8 +275,10 @@ pub(crate) async fn execute_merge_station(
 ) -> Result<()> {
     let db_id = candidate;
     let obj = "merge station";
-    let sapi = sqlx::query!("SELECT api_id FROM station WHERE id = $1", db_id)
-        .map(|x| x.api_id)
+    let sapi: uuid::Uuid = sqlx::query_scalar!("SELECT api_id FROM station WHERE id = $1", db_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    let vg_id: i32 = sqlx::query_scalar!("SELECT vg_id FROM station WHERE id = $1", db_id)
         .fetch_one(&mut **tx)
         .await?;
     // pre-master updates
@@ -317,7 +319,7 @@ pub(crate) async fn execute_merge_station(
     .await?;
 
     // schlagworte::UNION
-    insert::insert_station_sw(db_id, &model.schlagworte, tx).await?;
+    insert::insert_schlagworte_of_vorgang(vg_id, &model.schlagworte, tx).await?;
 
     // dokumente::UNION
     let mut insert_ids = vec![];
@@ -969,12 +971,11 @@ mod scenariotest {
     #[tokio::test]
     async fn test_schlagwort_duplicate_elimination_and_formatting() {
         let mut vg = generate::default_vorgang();
-        vg.stationen[0].schlagworte =
-            vec!["AiNz".to_string(), "ainz".to_string(), "AINZ".to_string()];
+        vg.schlagworte = vec!["AiNz".to_string(), "ainz".to_string(), "AINZ".to_string()];
         let vg2 = vg.clone();
 
         let mut vg_exp = vg.clone();
-        vg_exp.stationen[0].schlagworte = vec!["ainz".to_string()];
+        vg_exp.schlagworte = vec!["ainz".to_string()];
         let scenario = Scenario::builder("schlagwort_duplicate_elimination_and_formatting")
             .with_context(vec![vg])
             .with_test_object(vg2)

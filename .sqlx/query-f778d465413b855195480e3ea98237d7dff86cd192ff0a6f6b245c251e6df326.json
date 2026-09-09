@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT vg_id FROM station WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "vg_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "vg_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f778d465413b855195480e3ea98237d7dff86cd192ff0a6f6b245c251e6df326"
+}

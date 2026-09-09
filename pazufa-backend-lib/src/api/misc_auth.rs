@@ -674,7 +674,7 @@ async fn enum_put_conflict_cleanup(
     // stationstyp: station(typ)
     // vg_ident_typ: rel_vorgang_ident(typ)
     // vorgangstyp: vorgang(typ)
-    // schlagwort: rel_station_schlagwort(sw_id) / rel_dok_schlagwort(sw_id)
+    // schlagwort: rel_vorgang_schlagwort(sw_id) / rel_dok_schlagwort(sw_id)
     #[rustfmt::skip]
     let mut enum_table_refs: BTreeMap<models::EnumerationNames, BTreeSet<ReplacementTuple>> = BTreeMap::new();
     enum_table_refs.insert(
@@ -710,8 +710,8 @@ async fn enum_put_conflict_cleanup(
         [("rel_dok_schlagwort", "sw_id",
           Some(conflict_resolve_query!("rel_dok_schlagwort","rds","dok_id", "sw_id")),
         ),
-        ("rel_station_schlagwort", "sw_id",
-         Some(conflict_resolve_query!( "rel_station_schlagwort", "rss", "stat_id", "sw_id")),
+        ("rel_vorgang_schlagwort", "sw_id",
+         Some(conflict_resolve_query!( "rel_vorgang_schlagwort", "rvs", "vg_id", "sw_id")),
         ),
         ]
         .into_iter()

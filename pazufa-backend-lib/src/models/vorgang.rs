@@ -120,6 +120,9 @@ pub struct Station {
     #[schema(minimum = 1, maximum = 10)]
     pub trojanergefahr: Option<u8>,
 
+    /// DEPRECATED: This has been moved to the Vorgang level.
+    /// Please do not submit any data here, it will be merged as Vorgangs-Schlagworte
+    /// For details, see https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues/54
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[serde(deserialize_with = "de_vecstring")]
     pub schlagworte: Vec<String>,
@@ -315,6 +318,12 @@ pub struct Vorgang {
     /// Sachgebiet information
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub sachgebiete: Vec<Sachgebiet>,
+
+    /// General Vorgangs-Schlagworte
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "de_vecstring")]
+    pub schlagworte: Vec<String>,
+
     /// Ressort. Skipped if None
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ressort: Option<Ressort>,
@@ -379,6 +388,7 @@ impl std::default::Default for Vorgang {
             touched_by: vec![],
             titel: String::new(),
             kurztitel: None,
+            schlagworte: vec![],
             wahlperiode: 0,
             verfassungsaendernd: false,
             typ: models::Vorgangstyp::Sonstig,

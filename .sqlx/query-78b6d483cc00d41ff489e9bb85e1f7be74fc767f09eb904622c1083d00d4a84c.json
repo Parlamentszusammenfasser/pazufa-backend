@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vg_sachgebiete(vg_id, sg_id)\n        SELECT $1, s.id FROM UNNEST($2::int4[]) as i, sachgebiet s\n        WHERE i = s.value\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "78b6d483cc00d41ff489e9bb85e1f7be74fc767f09eb904622c1083d00d4a84c"
+}

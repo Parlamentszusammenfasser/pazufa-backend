@@ -167,6 +167,16 @@ pub async fn vorgang_by_id(
     .fetch_all(&mut **executor)
     .await?;
 
+    let schlagworte: Vec<String> = sqlx::query_scalar!(
+        "SELECT s.value from schlagwort s
+    INNER JOIN rel_vorgang_schlagwort rvs ON rvs.sw_id = s.id
+    WHERE rvs.vg_id = $1
+    ORDER BY s.value ASC",
+        id
+    )
+    .fetch_all(&mut **executor)
+    .await?;
+
     let station_ids = sqlx::query!("SELECT id FROM station WHERE vg_id = $1", id)
         .map(|row| row.id)
         .fetch_all(&mut **executor)
@@ -189,6 +199,7 @@ pub async fn vorgang_by_id(
         wahlperiode: u16::try_from(pre_vg.wahlperiode).map_err(|e| LTZFError::Other {
             message: format!("Failed to convert vorgang wahlperiode as it is negative: {e}"),
         })?,
+        schlagworte,
         verfassungsaendernd: pre_vg.verfaend,
         typ: models::Vorgangstyp::from_str(pre_vg.value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
@@ -265,16 +276,6 @@ pub async fn station_by_id(
         .fetch_all(&mut **executor)
         .await?
     };
-    let schlagworte = sqlx::query!(
-        "SELECT DISTINCT(value) FROM rel_station_schlagwort r
-        LEFT JOIN schlagwort sw ON sw.id = r.sw_id
-        WHERE r.stat_id = $1
-        ORDER BY value ASC",
-        id
-    )
-    .map(|sw| sw.value)
-    .fetch_all(&mut **executor)
-    .await?;
 
     let additional_links = sqlx::query!("SELECT link FROM rel_station_link WHERE stat_id = $1", id)
         .map(|r| r.link)
@@ -318,7 +319,7 @@ pub async fn station_by_id(
         typ: models::Stationstyp::from_str(temp_stat.stattyp.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         dokumente: doks,
-        schlagworte,
+        schlagworte: vec![],
         stellungnahmen,
         zp_start: temp_stat.zp_start,
         zp_modifiziert: Some(temp_stat.zp_modifiziert),
