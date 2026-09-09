@@ -107,7 +107,8 @@ pub async fn sitzung_delete(
     server: &LTZFServer,
     path_params: &params::ApiIdPathParam,
 ) -> Result<()> {
-    delete::delete_sitzung_by_api_id(path_params.api_id, server).await?;
+    let mut tx = server.sqlx_db.begin().await?;
+    delete::delete_sitzung_by_api_id(path_params.api_id, &mut *tx).await?;
     info!(target: "obj", "Deleted Sitzung {}", path_params.api_id);
     info!("Success");
     Ok(())
@@ -233,7 +234,7 @@ pub async fn sid_put(
             info!("Sitzung has the same state as the input object");
             return Ok(PutResponse::NotMod);
         }
-        delete::delete_sitzung_by_api_id(api_id, server).await?;
+        delete::delete_sitzung_by_api_id(api_id, &mut *tx).await?;
         insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, server).await?;
     } else {
         insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, server).await?;

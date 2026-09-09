@@ -19,7 +19,7 @@ pub async fn vorgang_delete(
     server: &LTZFServer,
     path_params: &params::ApiIdPathParam,
 ) -> Result<()> {
-    db::delete::delete_vorgang_by_api_id(path_params.api_id, server).await?;
+    db::delete::delete_vorgang_by_api_id(path_params.api_id, &server.sqlx_db).await?;
     info!(target: "obj", "Deleted Vorgang {}", path_params.api_id);
     Ok(())
 }
@@ -51,7 +51,7 @@ pub async fn vorgang_id_put(
             return Ok(PutResponse::NotMod);
         }
         debug!("Found to be different enough to not be exactly the same. Deleting...");
-        delete::delete_vorgang_by_api_id(api_id, server).await?;
+        delete::delete_vorgang_by_api_id(api_id, &mut *tx).await?;
         debug!("Delete successful, now inserting...");
     } else {
         debug!("No Match found");
@@ -613,10 +613,11 @@ mod test_endpoints {
 
 #[cfg(test)]
 pub(crate) mod test_failed_irl_scenarios {
-    use crate::models;
+    use crate::api::RoundTimestamp;
     use crate::models::enumerations::{Ressort, Sachgebiet};
     use crate::models::params;
     use crate::utils::testing::{TestSetup, generate};
+    use crate::{api, models};
     use std::path::{Path, PathBuf};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
@@ -818,6 +819,65 @@ pub(crate) mod test_failed_irl_scenarios {
             v.sachgebiete.contains(&Sachgebiet::Normung) &&
             v.sachgebiete.contains(&Sachgebiet::JagdFischerei)
         ));
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn issue184_vorgang_id_put_fails_if_vorgang_is_malformed() {
+        let scenario =
+            TestSetup::new("test_issue184_vorgang_id_put_fails_if_vorgang_is_malformed").await;
+
+        let api_id = uuid!("06836a6d-30e6-4200-b968-ca362af92d2e");
+        let vorgang = models::Vorgang {
+            api_id,
+            ..generate::default_vorgang()
+        };
+
+        let _insert = super::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            &vorgang,
+        )
+        .await
+        .expect("Failed to create Vorgang.");
+        let malformed_vorgang = models::Vorgang {
+            stationen: vec![models::Station {
+                typ: models::Stationstyp::ParlAblehnung,
+                ..generate::default_station()
+            }],
+            ..vorgang.clone()
+        };
+        let fail = super::vorgang_id_put(
+            &scenario.server,
+            1,
+            &params::ApiIdPathParam {
+                api_id: malformed_vorgang.api_id,
+            },
+            &malformed_vorgang,
+        )
+        .await
+        .expect("Expected bad request");
+        assert!(matches!(fail, api::PutResponse::BadReq(..)));
+
+        let fetched_vorgang = super::vorgang_get_by_id(
+            &scenario.server,
+            &params::IfModSince::default(),
+            &params::ApiIdPathParam {
+                api_id: vorgang.api_id,
+            },
+            true,
+        )
+        .await;
+        let Ok(api::GetSingleResponse::Success(fetched_vorgang)) = fetched_vorgang else {
+            panic!()
+        };
+
+        assert_eq!(
+            vorgang.with_round_timestamps(),
+            fetched_vorgang.with_round_timestamps()
+        );
         scenario.teardown().await;
     }
 }
