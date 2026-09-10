@@ -4,48 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, str::FromStr};
 use utoipa::ToSchema;
 
-/// A uniquely identifying string that is generated from key data within the database
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, ToSchema)]
-pub struct KeyTag(pub String);
-
-impl std::convert::From<String> for KeyTag {
-    fn from(x: String) -> Self {
-        KeyTag(x)
-    }
-}
-
-impl std::fmt::Display for KeyTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::str::FromStr for KeyTag {
-    type Err = std::string::ParseError;
-    fn from_str(x: &str) -> std::result::Result<Self, Self::Err> {
-        std::result::Result::Ok(KeyTag(x.to_string()))
-    }
-}
-
-impl std::convert::From<KeyTag> for String {
-    fn from(x: KeyTag) -> Self {
-        x.0
-    }
-}
-
-impl std::ops::Deref for KeyTag {
-    type Target = String;
-    fn deref(&self) -> &String {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for KeyTag {
-    fn deref_mut(&mut self) -> &mut String {
-        &mut self.0
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct TouchedByInner {
     /// uuid of the scraper that touched this object

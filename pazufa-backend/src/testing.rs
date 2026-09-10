@@ -135,6 +135,7 @@ pub async fn gen_all_keylevels(
         1,
         APIScope::Collector,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
+        None,
         HashAlgorithm::Sha256,
         &mut tx,
     )
@@ -143,6 +144,7 @@ pub async fn gen_all_keylevels(
         1,
         APIScope::Admin,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
+        None,
         HashAlgorithm::Sha256,
         &mut tx,
     )
@@ -151,6 +153,7 @@ pub async fn gen_all_keylevels(
         1,
         APIScope::KeyAdder,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
+        None,
         HashAlgorithm::Sha256,
         &mut tx,
     )

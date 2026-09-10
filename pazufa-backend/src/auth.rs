@@ -346,6 +346,7 @@ mod test {
                 axum::Json(libauth::CreateApiKey {
                     expires_at: None,
                     scope: APIScope::Collector,
+                    keytag_prefix: None,
                 }),
             )
             .await

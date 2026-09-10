@@ -7,6 +7,7 @@ pub mod params;
 pub mod sitzung;
 pub mod vorgang;
 
+pub use auth::{APIKey, KeyTag};
 pub use dokument::{
     Dokument, DokumentHash, DokumentOrApiId, FTMDokumentPages, HashWrapper, ZusammenfassungWrapper,
     Zusammenfassungstupel,
@@ -14,7 +15,7 @@ pub use dokument::{
 pub use enumerations::{
     APIScope, Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdentTyp, Vorgangstyp,
 };
-pub use misc::{Autor, Gremium, KeyTag, TouchedByInner};
+pub use misc::{Autor, Gremium, TouchedByInner};
 use serde::{Deserialize, Deserializer, Serialize, de};
 pub use sitzung::{Sitzung, Top};
 use std::str::FromStr;

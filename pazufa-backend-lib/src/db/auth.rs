@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::models::auth::{
-    APIKey, Argon2KeyGenerator, HashAlgorithm, Sha256KeyGenerator, generate_salt,
+    APIKey, Argon2KeyGenerator, HashAlgorithm, Sha256KeyGenerator, generate_keytag, generate_salt,
 };
 use crate::models::enumerations::APIScope;
 
@@ -11,21 +11,23 @@ pub async fn create_apikey(
     creator_key: i32,
     with_scope: APIScope,
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    keytag_prefix: Option<&str>,
     algorithm: HashAlgorithm,
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<String> {
     let salt = generate_salt();
     let mut vec_data = vec![0; salt.len()];
     let salt_bytes: Vec<_> = salt.decode_b64(&mut vec_data)?.into();
+    let keytag = generate_keytag(keytag_prefix);
 
     let (keytag, hash, key) = match algorithm {
         HashAlgorithm::Sha256 => {
-            let k = APIKey::<Sha256KeyGenerator>::default();
+            let k = APIKey::<Sha256KeyGenerator>::new(&keytag);
             let h = k.hash(salt.as_salt())?;
             (k.keytag().to_owned(), h, k.to_string())
         }
         HashAlgorithm::Argon2id => {
-            let k = APIKey::<Argon2KeyGenerator>::default();
+            let k = APIKey::<Argon2KeyGenerator>::new(&keytag);
             let h = k.hash(salt.as_salt())?;
             (k.keytag().to_owned(), h, k.to_string())
         }

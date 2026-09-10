@@ -9,9 +9,15 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
 use std::marker::PhantomData;
+use utoipa::ToSchema;
 
 pub const KEY_LENGTH: usize = 128;
+
+// Keytag = [<prefix>+<suffix>], where prefix can be any named ascii string and suffix is randomly
+// generated. The suffix length is KEYTAG_LENGTH-prefix.len()
 pub const KEYTAG_LENGTH: usize = 16;
+pub const KEYTAG_MAX_PREFIX_LENGTH: usize = 10;
+
 pub const SALT_LENGTH: usize = 16;
 pub const SLUG_LENGTH: usize = 6;
 pub const CRC_LENGTH: usize = 8;
@@ -36,6 +42,49 @@ impl Display for HashAlgorithm {
         }
     }
 }
+
+/// A uniquely identifying string that is generated from key data within the database
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, ToSchema)]
+pub struct KeyTag(pub String);
+
+impl std::convert::From<String> for KeyTag {
+    fn from(x: String) -> Self {
+        KeyTag(x)
+    }
+}
+
+impl std::fmt::Display for KeyTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for KeyTag {
+    type Err = std::string::ParseError;
+    fn from_str(x: &str) -> std::result::Result<Self, Self::Err> {
+        std::result::Result::Ok(KeyTag(x.to_string()))
+    }
+}
+
+impl std::convert::From<KeyTag> for String {
+    fn from(x: KeyTag) -> Self {
+        x.0
+    }
+}
+
+impl std::ops::Deref for KeyTag {
+    type Target = String;
+    fn deref(&self) -> &String {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for KeyTag {
+    fn deref_mut(&mut self) -> &mut String {
+        &mut self.0
+    }
+}
+
 struct CryptoRngAdapter<'a, T: rand::CryptoRng>(&'a mut T);
 impl<T: rand::CryptoRng> argon2::password_hash::rand_core::CryptoRng for CryptoRngAdapter<'_, T> {}
 impl<T: rand::CryptoRng> argon2::password_hash::rand_core::RngCore for CryptoRngAdapter<'_, T> {
@@ -55,6 +104,42 @@ impl<T: rand::CryptoRng> argon2::password_hash::rand_core::RngCore for CryptoRng
         self.0
             .try_fill_bytes(dest)
             .map_err(|e| unreachable!("trying to map infallible: {e}"))
+    }
+}
+
+#[must_use]
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "Bounded by 0..KEYTAG_LENGTH"
+)]
+pub fn generate_keytag(prefix: Option<&str>) -> [char; KEYTAG_LENGTH] {
+    let prefix_length = prefix.map_or(0, str::len).min(KEYTAG_MAX_PREFIX_LENGTH);
+
+    let array: Vec<_> = prefix
+        .unwrap_or("")
+        .chars()
+        .take(prefix_length)
+        .chain(
+            StdRng::from_rng(&mut rng())
+                .sample_iter(Alphanumeric)
+                .take(KEYTAG_LENGTH - prefix_length)
+                .map(char::from)
+                .map(|c| {
+                    if rng().random_bool(0.5f64) {
+                        c.to_ascii_lowercase()
+                    } else {
+                        c.to_ascii_uppercase()
+                    }
+                }),
+        )
+        .collect();
+
+    let array = array.as_slice().try_into();
+    match array {
+        Ok(array) => array,
+        Err(error) => {
+            unreachable!("happens when the number of chars != KEYTAG_LENGTH: {error}")
+        }
     }
 }
 

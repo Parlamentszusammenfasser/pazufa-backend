@@ -1,5 +1,5 @@
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
-use crate::db::auth::create_apikey;
+use crate::db;
 use crate::models::APIScope;
 use crate::models::auth::{
     APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
@@ -259,15 +259,45 @@ impl IntoResponse for AuthListingKeytagResponse {
 }
 /// Requests a new API key. The key will be saved as hash in the database and only produced once in clear text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(remote = "Self")]
 pub struct CreateApiKey {
     /// Note: inline enums are not fully supported by openapi-generator
-    #[serde(rename = "scope")]
     pub scope: APIScope,
 
     /// The expiration date of the API Key
-    #[serde(rename = "expires_at")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// Keytag name, maximal length is 10 Characters, the rest of the keytag will be filled with
+    /// random data. It is recommended to use this to later identify the keys more easily
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keytag_prefix: Option<String>,
+}
+impl<'de> Deserialize<'de> for CreateApiKey {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let unchecked = Self::deserialize(deserializer)?;
+        // check that the max length of the keytag name is <= 10
+        if let Some(kt) = &unchecked.keytag_prefix
+            && kt.len() > 10
+        {
+            return Err(serde::de::Error::custom(
+                "Error: Supplied Keytag is too long (>10 ascii characters)",
+            ));
+        }
+        Ok(unchecked)
+    }
+}
+
+impl Serialize for CreateApiKey {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        Self::serialize(self, serializer)
+    }
 }
 
 /// Entry point to create a new key with a given scope
@@ -282,10 +312,11 @@ pub async fn auth_post(
     body: &CreateApiKey,
 ) -> Result<String> {
     let mut tx = server.sqlx_db.begin().await?;
-    let key = create_apikey(
+    let key = db::auth::create_apikey(
         claims.1,
         body.scope,
         body.expires_at,
+        body.keytag_prefix.as_deref(),
         HashAlgorithm::Argon2id,
         &mut tx,
     )
@@ -681,6 +712,7 @@ mod auth_test {
             &CreateApiKey {
                 expires_at: Some(expiry_date),
                 scope: APIScope::KeyAdder,
+                keytag_prefix: None,
             },
         )
         .await
@@ -739,6 +771,7 @@ mod auth_test {
             &CreateApiKey {
                 scope: APIScope::KeyAdder,
                 expires_at: None,
+                keytag_prefix: None,
             },
         )
         .await;
@@ -765,6 +798,7 @@ mod auth_test {
                 &CreateApiKey {
                     scope: APIScope::KeyAdder,
                     expires_at: None,
+                    keytag_prefix: None,
                 },
             )
             .await
@@ -778,6 +812,7 @@ mod auth_test {
                 &CreateApiKey {
                     scope: APIScope::Collector,
                     expires_at: None,
+                    keytag_prefix: None,
                 },
             )
             .await
@@ -790,6 +825,7 @@ mod auth_test {
                 &CreateApiKey {
                     scope: APIScope::KeyAdder,
                     expires_at: None,
+                    keytag_prefix: None,
                 },
             )
             .await
@@ -802,6 +838,7 @@ mod auth_test {
                 &CreateApiKey {
                     scope: APIScope::Admin,
                     expires_at: None,
+                    keytag_prefix: None,
                 },
             )
             .await
@@ -857,6 +894,7 @@ mod auth_test {
             &CreateApiKey {
                 scope: APIScope::KeyAdder,
                 expires_at: None,
+                keytag_prefix: None,
             },
         )
         .await
@@ -909,6 +947,7 @@ mod auth_test {
             &CreateApiKey {
                 scope: APIScope::KeyAdder,
                 expires_at: None,
+                keytag_prefix: None,
             },
         )
         .await
@@ -960,6 +999,7 @@ mod auth_test {
             1,
             APIScope::KeyAdder,
             None,
+            None,
             crate::models::auth::HashAlgorithm::Sha256,
             &mut tx,
         )
@@ -968,6 +1008,7 @@ mod auth_test {
         let key2 = crate::db::auth::create_apikey(
             1,
             APIScope::Collector,
+            None,
             None,
             crate::models::auth::HashAlgorithm::Argon2id,
             &mut tx,
@@ -1002,6 +1043,7 @@ mod auth_test {
             &super::CreateApiKey {
                 scope: APIScope::KeyAdder,
                 expires_at: None,
+                keytag_prefix: None,
             },
         )
         .await
