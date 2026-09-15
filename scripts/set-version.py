@@ -37,8 +37,8 @@ wp_dockerfile_version = file["version"]["wp_dockerfile_version"]
 # spec version
 replace(
     "pazufa-backend-lib/src/utils/status.rs",
-    '\nconst SPEC_VERSION:\\s*&str\\s*=\\s*"\\d+\\.\\d+\\.\\d+"',
-    f'\nconst SPEC_VERSION: &str = "{spec_version}"',
+    'pub\\s+const\\s+SPEC_VERSION:\\s+&str\\s+=\\s+"\\d+\\.\\d+\\.\\d+";',
+    f'pub const SPEC_VERSION: &str = "{spec_version}";',
 )
 
 # backend version
