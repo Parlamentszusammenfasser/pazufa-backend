@@ -170,6 +170,17 @@
       },
       {
         "ordinal": 15,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dokument",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
         "name": "typ_value",
         "type_info": "Varchar",
         "origin": {
@@ -200,6 +211,7 @@
       false,
       true,
       true,
+      false,
       false,
       false
     ]

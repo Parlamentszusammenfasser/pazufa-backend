@@ -559,6 +559,18 @@ pub(crate) mod generate {
                 words
             };
 
+            let zusammenfassung = {
+                let mut tuples = vec![];
+                let zusfas_count = schlagworte_count;
+                for _ in 0..zusfas_count {
+                    tuples.push(models::Zusammenfassungstupel {
+                        inhalt: random_string(rng, "zusammenfassung_", 140, 500),
+                        typ: random_string(rng, "zftyp_", 3, 12),
+                    });
+                }
+                tuples
+            };
+
             models::Vorgang {
                 api_id: random_uuid(rng),
                 touched_by: vec![models::TouchedByInner {
@@ -582,6 +594,7 @@ pub(crate) mod generate {
                 initiatoren,
                 stationen,
                 lobbyregister,
+                zusammenfassung,
             }
         }
         fn random_sitzung(rng: &mut StdRng) -> models::Sitzung {
@@ -888,6 +901,11 @@ pub(crate) mod generate {
             }],
             ressort: None,
             sachgebiete: vec![],
+            zusammenfassung: vec![models::Zusammenfassungstupel {
+                typ: "klimpertod".to_owned(),
+                inhalt: "asdfa00dsjf9ajsdpfj ajd f9pajsdpfasdjfjoji toller vorgang paoidcj9pasjdfj"
+                    .to_owned(),
+            }],
         }
     }
 }

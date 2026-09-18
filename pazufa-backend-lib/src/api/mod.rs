@@ -1110,3 +1110,9 @@ impl RoundTimestamp for models::Sitzung {
         }
     }
 }
+
+/// Creates an ETag given an API ID and a version number as u64
+pub fn make_etag(api_id: uuid::Uuid, version_number: u64) -> String {
+    let data = version_number.to_le_bytes();
+    sha256::digest(&uuid::Uuid::new_v5(&api_id, &data).to_bytes_le())
+}

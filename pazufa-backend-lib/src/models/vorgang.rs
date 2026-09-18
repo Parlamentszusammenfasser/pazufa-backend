@@ -2,7 +2,7 @@ use super::{de_link, de_optlink, de_optstring, de_string, de_veclinks, de_vecstr
 use crate::{
     api::RoundTimestamp,
     models::{
-        self,
+        self, Zusammenfassungstupel,
         enumerations::{Ressort, Sachgebiet},
     },
 };
@@ -274,59 +274,86 @@ impl std::fmt::Display for VgIdent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
 pub struct Vorgang {
+    /// The Api ID of this Vorgang
     /// Use UUID version 5 with your collector id as namespace
+    /// ontrack(-)
     pub api_id: uuid::Uuid,
 
     /// list of scraper uuids / key database ids that have touched this object
+    /// ontrack(meta)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub touched_by: Vec<models::TouchedByInner>,
 
+    /// Official Title of this Proceeding
+    /// ontrack(-)
     #[serde(deserialize_with = "de_string")]
     pub titel: String,
 
+    /// A brief, layman-understandable title of this law
+    /// ontrack(-)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "de_optstring", default)]
     pub kurztitel: Option<String>,
 
     /// number of the electoral period
+    /// ontrack(-)
     pub wahlperiode: u16,
 
-    /// Is this Vorgang directly intended to change the constitution of whatever state it happens
-    /// in?
+    /// Is this Vorgang directly intended to change the constitution
+    /// of whatever state it happens in?;
+    /// ontrack(-)
     pub verfassungsaendernd: bool,
 
+    /// The type of this Vorgang
+    /// ontrack(-)
     pub typ: models::Vorgangstyp,
 
+    /// Tuple of (typ, id)
+    /// ontrack(-)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub ids: Vec<models::VgIdent>,
 
+    /// Links that are associated with the Full Vorgang
+    /// ontrack(refactor)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[schema(format = "uri")]
     #[serde(deserialize_with = "de_veclinks")]
     pub links: Vec<String>,
 
-    /// List of persons or organisations, which initiated the Vorgang.
+    /// List of persons or organisations, which initiated the Vorgang
+    /// ontrack(refactor)
     pub initiatoren: Vec<models::Autor>,
 
     /// List of stations, the core of what happens in one Proceeding
+    /// ontrack(-)
     pub stationen: Vec<models::Station>,
 
-    /// Lobby register annotations from Bundestag sources
+    /// Lobbyregister annotations from Bundestag sources
+    /// ontrack(refactor)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub lobbyregister: Vec<models::Lobbyregistereintrag>,
 
     /// Sachgebiet information
+    /// ontrack(at-least-one)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub sachgebiete: Vec<Sachgebiet>,
 
     /// General Vorgangs-Schlagworte
+    /// ontrack(at-least-one)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[serde(deserialize_with = "de_vecstring")]
     pub schlagworte: Vec<String>,
 
     /// Ressort. Skipped if None
+    /// ontrack(mandatory)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ressort: Option<Ressort>,
+
+    /// Summary of the whole Vorgang's idea
+    /// See parlamentszusammenfasser#55
+    /// ontrack(at-least-one)
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    pub zusammenfassung: Vec<Zusammenfassungstupel>,
 }
 
 impl<'de> Deserialize<'de> for Vorgang {
@@ -399,6 +426,7 @@ impl std::default::Default for Vorgang {
             lobbyregister: vec![],
             ressort: None,
             sachgebiete: vec![],
+            zusammenfassung: vec![],
         }
     }
 }

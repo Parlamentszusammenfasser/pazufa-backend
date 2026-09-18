@@ -137,6 +137,28 @@
       },
       {
         "ordinal": 12,
+        "name": "tiebreak_ordering",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "tiebreak_ordering"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "station",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
         "name": "parlv",
         "type_info": "Varchar",
         "origin": {
@@ -147,7 +169,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "stattyp",
         "type_info": "Varchar",
         "origin": {
@@ -175,6 +197,8 @@
       true,
       false,
       false,
+      false,
+      true,
       false,
       false,
       false

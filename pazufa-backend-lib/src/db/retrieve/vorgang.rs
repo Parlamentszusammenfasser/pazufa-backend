@@ -1,8 +1,8 @@
 use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
 use crate::error::{DataValidationError, PazufaError, Result};
-use crate::models;
 use crate::models::enumerations::{Ressort, Sachgebiet};
+use crate::models::{self, Zusammenfassungstupel};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -248,8 +248,7 @@ pub async fn vorgang_by_id(
     .fetch_all(&mut **executor)
     .await?;
 
-    let station_ids = sqlx::query!("SELECT id FROM station WHERE vg_id = $1", id)
-        .map(|row| row.id)
+    let station_ids: Vec<i32> = sqlx::query_scalar!("SELECT id FROM station WHERE vg_id = $1", id)
         .fetch_all(&mut **executor)
         .await?;
 
@@ -260,6 +259,28 @@ pub async fn vorgang_by_id(
     stationen.sort_by_key(|a| a.zp_start);
 
     let lobbyregister = lobbyreg_of_vorgang(id, executor).await?;
+
+    let recs: Vec<_> = sqlx::query!(
+        "
+    SELECT zf.value as inhalt, zft.value as typ 
+    FROM
+        zusammenf_typ zft,
+        vg_zusammenfassung zf
+    WHERE
+        zft.id = zf.zf_typ AND
+        zf.vg_id = $1
+        ",
+        id
+    )
+    .fetch_all(&mut **executor)
+    .await?;
+    let mut tuples = vec![];
+    for r in recs {
+        tuples.push(Zusammenfassungstupel {
+            inhalt: r.inhalt,
+            typ: r.typ,
+        });
+    }
 
     Ok(models::Vorgang {
         touched_by: vec![],
@@ -280,6 +301,7 @@ pub async fn vorgang_by_id(
         stationen,
         ressort,
         sachgebiete,
+        zusammenfassung: tuples,
     })
 }
 pub async fn station_by_id(

@@ -156,7 +156,7 @@ pub(crate) async fn execute_merge_dokument(
     // autoren::UNION
     let mut aids = vec![];
     for a in &model.autoren {
-        aids.push(insert_or_retrieve_autor(a, tx, srv).await?);
+        aids.push(insert_or_retrieve_autor(a, tx).await?);
     }
     sqlx::query!(
         "INSERT INTO rel_dok_autor(dok_id, aut_id)
@@ -282,7 +282,7 @@ pub(crate) async fn execute_merge_station(
         .fetch_one(&mut **tx)
         .await?;
     // pre-master updates
-    let gr_id = insert::insert_or_retrieve_gremium(&model.gremium, tx, srv).await?;
+    let gr_id = insert::insert_or_retrieve_gremium(&model.gremium, tx).await?;
     // master update
     sqlx::query!(
         "UPDATE station SET 
@@ -438,7 +438,7 @@ pub(crate) async fn execute_merge_vorgang(
     // initiatoren / initpersonen::UNION
     let mut aids = vec![];
     for a in &model.initiatoren {
-        aids.push(insert_or_retrieve_autor(a, tx, srv).await?);
+        aids.push(insert_or_retrieve_autor(a, tx).await?);
     }
     sqlx::query!(
         "INSERT INTO rel_vorgang_init (vg_id, in_id)
@@ -501,13 +501,17 @@ pub(crate) async fn execute_merge_vorgang(
             }
         }
     }
+    // merge Zusammenfassungen as insert
+    crate::db::insert::vorgang::insert_zusammenf_for_vorgang(db_id, &model.zusammenfassung, tx)
+        .await?;
+
     // lobbyregistereinträge are just replaced as-is, no merging
     sqlx::query!("DELETE FROM lobbyregistereintrag WHERE vg_id = $1", db_id)
         .execute(&mut **tx)
         .await?;
 
     for l in &model.lobbyregister {
-        let aid = insert_or_retrieve_autor(&l.organisation, tx, srv).await?;
+        let aid = insert_or_retrieve_autor(&l.organisation, tx).await?;
         let lrid: i32 = sqlx::query_scalar!(
             "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
             VALUES ($1, $2, $3, $4, $5)
@@ -811,6 +815,7 @@ mod scenariotest {
     }
     // one in, again one in, one out
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_idempotenz() {
         let vg = generate::default_vorgang();
         let scenario = Scenario::builder("idempotenz")
@@ -820,7 +825,7 @@ mod scenariotest {
             .build()
             .await;
         if let Err(e) = scenario.run().await {
-            panic!("Scenatio \"idempotenz\" failed with the following error: {e}")
+            panic!("Scenario \"idempotenz\" failed with the following error: {e}")
         }
     }
     #[tokio::test]

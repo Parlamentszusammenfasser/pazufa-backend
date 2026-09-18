@@ -104,6 +104,17 @@
       },
       {
         "ordinal": 9,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "vorgang",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "value",
         "type_info": "Varchar",
         "origin": {
@@ -128,6 +139,7 @@
       false,
       false,
       true,
+      false,
       false,
       false
     ]

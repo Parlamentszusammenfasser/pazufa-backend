@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vg_zusammenfassung(vg_id, zf_typ, value) \n\n        SELECT $1, tp.id, data \n        FROM    UNNEST($2::text[], $3::text[]) as i(data, typename)\n        JOIN zusammenf_typ tp ON tp.value = typename\n\n        ON CONFLICT (vg_id, zf_typ) DO UPDATE SET\n        value = EXCLUDED.value",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4d26e3820dcc545543444362a93dfa903a94b9d07391bb44e71400ea2799eb5d"
+}
