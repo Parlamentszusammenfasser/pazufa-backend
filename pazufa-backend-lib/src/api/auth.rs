@@ -312,17 +312,16 @@ pub async fn auth_post(
     body: &CreateApiKey,
 ) -> Result<String> {
     let mut tx = server.sqlx_db.begin().await?;
-    let key = db::auth::create_apikey(
+    let key: APIKey<Argon2KeyGenerator> = db::auth::create_apikey(
         claims.1,
         body.scope,
         body.expires_at,
         body.keytag_prefix.as_deref(),
-        HashAlgorithm::Argon2id,
         &mut tx,
     )
     .await?;
     tx.commit().await?;
-    Ok(key)
+    Ok(key.to_string())
 }
 /// Status information about the API key used in the current request
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -632,7 +631,9 @@ mod auth_test {
     use crate::LTZFServer;
     use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
-    use crate::models::auth::{APIKey, KEY_LENGTH, NoopKeyGenerator, check_crc};
+    use crate::models::auth::{
+        APIKey, Argon2KeyGenerator, KEY_LENGTH, NoopKeyGenerator, Sha256KeyGenerator, check_crc,
+    };
     use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
     use crate::utils::testing::{TestSetup, generate};
 
@@ -995,35 +996,23 @@ mod auth_test {
         let scenario = TestSetup::new("test_sha256_and_argon2_side_by_side_auth").await;
         let server = &scenario.server;
         let mut tx = server.sqlx_db.begin().await.expect("sdkf");
-        let key1 = crate::db::auth::create_apikey(
-            1,
-            APIScope::KeyAdder,
-            None,
-            None,
-            crate::models::auth::HashAlgorithm::Sha256,
-            &mut tx,
-        )
-        .await
-        .expect("failed key cr");
-        let key2 = crate::db::auth::create_apikey(
-            1,
-            APIScope::Collector,
-            None,
-            None,
-            crate::models::auth::HashAlgorithm::Argon2id,
-            &mut tx,
-        )
-        .await
-        .expect("failed key cr");
+        let key1: APIKey<Sha256KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &mut tx)
+                .await
+                .expect("failed key cr");
+        let key2: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::Collector, None, None, &mut tx)
+                .await
+                .expect("failed key cr");
         tx.commit().await.expect("commit failed");
 
         // authenticate
-        let claims = Claims::extract(server, params::XAPIKey(key1)).await;
+        let claims = Claims::extract(server, params::XAPIKey(key1.to_string())).await;
         assert!(
             matches!(claims, Ok(Claims(APIScope::KeyAdder, 2))),
             "{claims:?}"
         );
-        let claims = Claims::extract(server, params::XAPIKey(key2)).await;
+        let claims = Claims::extract(server, params::XAPIKey(key2.to_string())).await;
         assert!(
             matches!(claims, Ok(Claims(APIScope::Collector, 3))),
             "{claims:?}"

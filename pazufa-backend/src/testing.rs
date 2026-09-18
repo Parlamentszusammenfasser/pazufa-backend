@@ -3,9 +3,9 @@
     reason = "Database setup and taredown requires use of `sqlx::query` as those cannot be statically verified."
 )]
 use pazufa_backend_lib::api::auth::Claims;
-use pazufa_backend_lib::models::APIScope;
-use pazufa_backend_lib::models::auth::HashAlgorithm;
+use pazufa_backend_lib::models::auth::Sha256KeyGenerator;
 use pazufa_backend_lib::models::params::XAPIKey;
+use pazufa_backend_lib::models::{APIKey, APIScope};
 use pazufa_backend_lib::utils::tracing::Logging;
 use pazufa_backend_lib::{Configuration, LTZFServer};
 use sha256::digest;
@@ -131,36 +131,37 @@ pub async fn gen_all_keylevels(
 ) -> pazufa_backend_lib::Result<(String, String, String)> {
     use pazufa_backend_lib::db::auth as dbauth;
     let mut tx = server.sqlx_db.begin().await?;
-    let collector_key = dbauth::create_apikey(
+    let collector_key: APIKey<Sha256KeyGenerator> = dbauth::create_apikey(
         1,
         APIScope::Collector,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
         None,
-        HashAlgorithm::Sha256,
         &mut tx,
     )
     .await?;
-    let admin_key = dbauth::create_apikey(
+    let admin_key: APIKey<Sha256KeyGenerator> = dbauth::create_apikey(
         1,
         APIScope::Admin,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
         None,
-        HashAlgorithm::Sha256,
         &mut tx,
     )
     .await?;
-    let keyadder_key = dbauth::create_apikey(
+    let keyadder_key: APIKey<Sha256KeyGenerator> = dbauth::create_apikey(
         1,
         APIScope::KeyAdder,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
         None,
-        HashAlgorithm::Sha256,
         &mut tx,
     )
     .await?;
     tx.commit().await?;
 
-    Ok((collector_key, admin_key, keyadder_key))
+    Ok((
+        collector_key.to_string(),
+        admin_key.to_string(),
+        keyadder_key.to_string(),
+    ))
 }
 
 pub async fn authtesting<F, T>(
