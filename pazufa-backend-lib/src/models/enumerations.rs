@@ -70,6 +70,12 @@ pub enum Doktyp {
     /// Protocol of the talking points
     #[serde(rename = "redeprotokoll")]
     Redeprotokoll,
+    /// Protocol of what was decided
+    #[serde(rename = "beschlussprotokoll")]
+    Beschlussprotokoll,
+    /// Protocol of the meeting content
+    #[serde(rename = "inhaltsprotokoll")]
+    Inhaltsprotokoll,
     /// Agenda Items
     #[serde(rename = "tops")]
     Tops,
