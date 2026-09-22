@@ -5,7 +5,8 @@ use pazufa_backend_lib::api::auth::{
     self as libauth, ApiKeyStatus, Claims, CreateApiKey, KeytagListing,
 };
 use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
-use pazufa_backend_lib::models::{APIScope, KeyTag, params};
+use pazufa_backend_lib::models::auth::Argon2KeyGenerator;
+use pazufa_backend_lib::models::{APIKey, APIScope, KeyTag, params};
 use pazufa_backend_lib::utils::header_params::HeaderParams;
 use std::sync::Arc;
 use tracing::warn;
@@ -36,6 +37,8 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
         .routes(routes!(auth_listing_keytag,))
 }
 
+/// Entry point to create a new key with a given scope
+/// returns the key as plain string
 #[utoipa::path(
         post,
         path = "",
@@ -44,7 +47,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
         request_body=CreateApiKey,
         responses(libauth::AuthPostResponse)
     )]
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(claim=%scope))]
 async fn auth_post(
     Claims(scope, index): Claims,
     State(api_impl): State<Arc<LTZFServer>>,
@@ -54,8 +57,23 @@ async fn auth_post(
     if scope != APIScope::KeyAdder {
         return libauth::AuthPostResponse::Unauth;
     }
+    async fn inner_with_result(
+        server: &LTZFServer,
+        claims: &Claims,
+        body: &CreateApiKey,
+    ) -> pazufa_backend_lib::Result<String> {
+        let key: APIKey<Argon2KeyGenerator> = pazufa_backend_lib::db::auth::create_apikey(
+            claims.1,
+            body.scope,
+            body.expires_at,
+            body.keytag_prefix.as_deref(),
+            &server.sqlx_db,
+        )
+        .await?;
+        Ok(key.to_string())
+    }
 
-    match libauth::auth_post(api_impl.as_ref(), &Claims(APIScope::KeyAdder, index), &body).await {
+    match inner_with_result(api_impl.as_ref(), &Claims(APIScope::KeyAdder, index), &body).await {
         Ok(key) => libauth::AuthPostResponse::KeyCreated(key),
         Err(e) => {
             warn!("Error in auth_post: {e}");

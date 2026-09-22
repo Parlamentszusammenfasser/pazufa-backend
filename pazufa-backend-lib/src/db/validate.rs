@@ -129,6 +129,10 @@ pub async fn validate_vorgang(vg: &models::Vorgang, srv: &LTZFServer) -> Result<
             tracing::warn!("{reason}");
             validation_errors.push(reason);
         } else if matched && consumed < p_substr.len() {
+            #[allow(
+                clippy::arithmetic_side_effects,
+                reason = "consumed is bounded to be less than length"
+            )]
             let reason = format!(
                 "Some stations have been matched and are in valid order, but there are stations left over that cannot be assigned to a track: {:?}",
                 &p_substr[p_substr.len() - consumed + 1..]

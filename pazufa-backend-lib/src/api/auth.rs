@@ -1,5 +1,4 @@
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
-use crate::db;
 use crate::models::APIScope;
 use crate::models::auth::{
     APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
@@ -300,29 +299,6 @@ impl Serialize for CreateApiKey {
     }
 }
 
-/// Entry point to create a new key with a given scope
-/// returns the key as plain string
-///
-/// # Errors
-/// Can fail if the database operations fail
-#[instrument(skip_all, fields(claim=%claims.0))]
-pub async fn auth_post(
-    server: &LTZFServer,
-    claims: &Claims,
-    body: &CreateApiKey,
-) -> Result<String> {
-    let mut tx = server.sqlx_db.begin().await?;
-    let key: APIKey<Argon2KeyGenerator> = db::auth::create_apikey(
-        claims.1,
-        body.scope,
-        body.expires_at,
-        body.keytag_prefix.as_deref(),
-        &mut tx,
-    )
-    .await?;
-    tx.commit().await?;
-    Ok(key.to_string())
-}
 /// Status information about the API key used in the current request
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ApiKeyStatus {
@@ -624,30 +600,22 @@ pub async fn auth_listing_keytag(
 
 #[cfg(test)]
 mod auth_test {
-    use super::{APIScope, ApiKeyStatus, Claims, CreateApiKey, KeytagListing};
-    use super::{
-        auth_delete, auth_listing, auth_listing_keytag, auth_post, auth_rotate, auth_status,
-    };
+    use super::{APIScope, ApiKeyStatus, Claims, KeytagListing};
+    use super::{auth_delete, auth_listing, auth_listing_keytag, auth_rotate, auth_status};
     use crate::LTZFServer;
     use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
-    use crate::models::auth::{
-        APIKey, Argon2KeyGenerator, KEY_LENGTH, NoopKeyGenerator, Sha256KeyGenerator, check_crc,
-    };
+    use crate::models::auth::{APIKey, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator};
     use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
     use crate::utils::testing::{TestSetup, generate};
+    use sqlx::PgExecutor;
 
-    fn keytag_of(key: &str) -> String {
-        APIKey::<NoopKeyGenerator>::try_from(key.to_string())
-            .expect("key format invalid")
-            .keytag()
-            .to_string()
-    }
-    async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
-        fetch_key_row(server, keytag).await.id
+    async fn fetch_key_index<'e, E: PgExecutor<'e>>(keytag: &str, ex: E) -> i32 {
+        fetch_key_row(keytag, ex).await.id
     }
 
     #[allow(unused, reason = "We want to model structs close to database model")]
+    #[derive(sqlx::Type)]
     struct KeyRow {
         id: i32,
         created_by: i32,
@@ -657,38 +625,17 @@ mod auth_test {
         expires_at: chrono::DateTime<chrono::Utc>,
         last_used: Option<chrono::DateTime<chrono::Utc>>,
         scope: i32,
+        algo: i32,
         rotated_for: Option<i32>,
         salt: Vec<u8>,
         keytag: String,
     }
 
-    async fn fetch_key_row(server: &LTZFServer, keytag: String) -> KeyRow {
-        let mut tx = server
-            .sqlx_db
-            .begin()
+    async fn fetch_key_row<'e, E: PgExecutor<'e>>(keytag: &str, ex: E) -> KeyRow {
+        sqlx::query_as!(KeyRow, "SELECT * FROM api_keys WHERE keytag = $1", keytag)
+            .fetch_one(ex)
             .await
-            .expect("Failed to start transaction for fetching key row.");
-        let index = sqlx::query!("SELECT * FROM api_keys WHERE keytag = $1", keytag)
-            .map(|r| KeyRow {
-                id: r.id,
-                created_by: r.created_by,
-                deleted_by: r.deleted_by,
-                key_hash: r.key_hash,
-                created_at: r.created_at,
-                expires_at: r.expires_at,
-                last_used: r.last_used,
-                scope: r.scope,
-                rotated_for: r.rotated_for,
-                salt: r.salt,
-                keytag: r.keytag,
-            })
-            .fetch_one(&mut *tx)
-            .await
-            .expect("Failed to get key row.");
-        tx.commit()
-            .await
-            .expect("Failed to commit transaction for fetching key row.");
-        index
+            .expect("Failed to get key row.")
     }
     #[tokio::test]
     async fn test_extract_claims_crcfail() {
@@ -707,19 +654,17 @@ mod auth_test {
         let scenario = TestSetup::new("test_auth_status").await;
         let server = &scenario.server;
         let expiry_date = chrono::Utc::now() + chrono::Duration::days(2);
-        let original_key = auth_post(
-            server,
-            &Claims(APIScope::KeyAdder, 1), // one is the default keyadder key
-            &CreateApiKey {
-                expires_at: Some(expiry_date),
-                scope: APIScope::KeyAdder,
-                keytag_prefix: None,
-            },
+        let original_key: APIKey<Argon2KeyGenerator> = crate::db::auth::create_apikey(
+            1,
+            APIScope::KeyAdder,
+            Some(expiry_date),
+            None,
+            &server.sqlx_db,
         )
         .await
-        .expect("Server could not return key.");
+        .expect("");
 
-        let original_key_idx = fetch_key_index(server, keytag_of(&original_key)).await;
+        let original_key_idx = fetch_key_index(original_key.keytag(), &server.sqlx_db).await;
 
         let resp = auth_status(server, &Claims(APIScope::KeyAdder, original_key_idx)).await;
 
@@ -736,7 +681,8 @@ mod auth_test {
             panic!()
         };
 
-        let fresh_key_index = fetch_key_index(server, keytag_of(&new_api_key)).await;
+        let new_api_key: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
+        let fresh_key_index = fetch_key_index(new_api_key.keytag(), &server.sqlx_db).await;
         let fresh_key_status = fetch_key_status(server, fresh_key_index).await;
         assert!(!fresh_key_status.is_being_rotated && fresh_key_status.scope == "keyadder");
 
@@ -759,92 +705,35 @@ mod auth_test {
             .expect("Failed to get auth status.")
     }
 
-    // POST /auth
-    #[tokio::test]
-    async fn test_generate_key() {
-        let scenario = TestSetup::new("test_generate_key").await;
-        let server = &scenario.server;
-
-        // generate a key with proper permission
-        let resp = auth_post(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &CreateApiKey {
-                scope: APIScope::KeyAdder,
-                expires_at: None,
-                keytag_prefix: None,
-            },
-        )
-        .await;
-        let Ok(key) = resp else {
-            panic!("Error generating Key")
-        };
-        assert_eq!(key.len(), KEY_LENGTH);
-        assert!(key.starts_with("pazufa-"));
-        assert!(check_crc(&key));
-
-        scenario.teardown().await;
-    }
-
     // GET /auth/keys
     #[tokio::test]
     async fn test_list_keys() {
         let scenario = TestSetup::new("test_list_keys").await;
         let server = &scenario.server;
         let mut keys = vec![];
-        keys.push(
-            auth_post(
-                server,
-                &Claims(APIScope::KeyAdder, 1),
-                &CreateApiKey {
-                    scope: APIScope::KeyAdder,
-                    expires_at: None,
-                    keytag_prefix: None,
-                },
-            )
-            .await
-            .expect("Error creating keyadder-level key"),
-        );
 
-        keys.push(
-            auth_post(
-                server,
-                &Claims(APIScope::KeyAdder, 1),
-                &CreateApiKey {
-                    scope: APIScope::Collector,
-                    expires_at: None,
-                    keytag_prefix: None,
-                },
-            )
-            .await
-            .expect("Error generating collector-level key"),
-        );
-        keys.push(
-            auth_post(
-                server,
-                &Claims(APIScope::KeyAdder, 1),
-                &CreateApiKey {
-                    scope: APIScope::KeyAdder,
-                    expires_at: None,
-                    keytag_prefix: None,
-                },
-            )
-            .await
-            .expect("Error creating keyadder-level key"),
-        );
-        keys.push(
-            auth_post(
-                server,
-                &Claims(APIScope::KeyAdder, 1),
-                &CreateApiKey {
-                    scope: APIScope::Admin,
-                    expires_at: None,
-                    keytag_prefix: None,
-                },
-            )
-            .await
-            .expect("Error generating admin-level key"),
-        );
+        let kkey1: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+        let ckey: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::Collector, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+        let kkey2: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+
+        let akey: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::Admin, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+
+        keys.push(kkey1);
+        keys.push(ckey);
+        keys.push(kkey2);
+        keys.push(akey);
         // ------------------------------------------------------------------------------------------------------------
         let response = auth_listing(
             server,
@@ -872,7 +761,7 @@ mod auth_test {
                 bodykeys.sort_unstable();
                 let mut keys = keys
                     .iter()
-                    .map(|x| keytag_of(x))
+                    .map(|x| x.keytag().to_owned())
                     .chain(vec!["total-nutzlos".to_string()].drain(..))
                     .collect::<Vec<_>>();
                 keys.sort();
@@ -889,19 +778,12 @@ mod auth_test {
     async fn test_administer_key_details() {
         let scenario = TestSetup::new("test_administer_key_details").await;
         let server = &scenario.server;
-        let key = auth_post(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &CreateApiKey {
-                scope: APIScope::KeyAdder,
-                expires_at: None,
-                keytag_prefix: None,
-            },
-        )
-        .await
-        .expect("Failed to create key.");
+        let key: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
 
-        let key_idx = fetch_key_index(server, keytag_of(&key)).await;
+        let key_idx = fetch_key_index(key.keytag(), &server.sqlx_db).await;
 
         let _ = vorgang::vorgang_put(
             server,
@@ -915,7 +797,7 @@ mod auth_test {
         let rsp = auth_listing_keytag(
             server,
             &AuthListingKeytagPathParams {
-                keytag: keytag_of(&key),
+                keytag: key.keytag().to_owned(),
             },
         )
         .await;
@@ -942,49 +824,42 @@ mod auth_test {
     async fn test_revoke_key() {
         let scenario = TestSetup::new("test_revoke_key").await;
         let server = &scenario.server;
-        let key = auth_post(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &CreateApiKey {
-                scope: APIScope::KeyAdder,
-                expires_at: None,
-                keytag_prefix: None,
-            },
-        )
-        .await
-        .expect("Failed to create key.");
-        let tag = keytag_of(&key);
-        let row = fetch_key_row(server, tag.clone()).await;
+        let key: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+        let tag = key.keytag();
+        let row = fetch_key_row(tag, &server.sqlx_db).await;
         assert_eq!(row.deleted_by, None);
 
         // delete successfully
         auth_delete(
             server,
             &Claims(APIScope::KeyAdder, 1),
-            &params::ApiKeyDelete(tag.clone()),
+            &params::ApiKeyDelete(tag.to_owned()),
         )
         .await
         .expect("Failed to delete key.");
-        let row = fetch_key_row(server, tag.clone()).await;
+        let row = fetch_key_row(tag, &server.sqlx_db).await;
         assert_eq!(row.deleted_by, Some(1));
 
         // delete already deleted key
         auth_delete(
             server,
             &Claims(APIScope::KeyAdder, 1),
-            &params::ApiKeyDelete(tag.clone()),
+            &params::ApiKeyDelete(tag.to_owned()),
         )
         .await
         .expect("Failed to delete key.");
 
-        let row = fetch_key_row(server, tag.clone()).await;
+        let row = fetch_key_row(tag, &server.sqlx_db).await;
         assert_eq!(row.deleted_by, Some(1));
 
         // delete without permission
         auth_delete(
             server,
             &Claims(APIScope::Admin, 1),
-            &params::ApiKeyDelete(tag.clone()),
+            &params::ApiKeyDelete(tag.to_owned()),
         )
         .await
         .expect("Failed to delete key.");
@@ -997,11 +872,11 @@ mod auth_test {
         let server = &scenario.server;
         let mut tx = server.sqlx_db.begin().await.expect("sdkf");
         let key1: APIKey<Sha256KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &mut tx)
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &mut *tx)
                 .await
                 .expect("failed key cr");
         let key2: APIKey<Argon2KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::Collector, None, None, &mut tx)
+            crate::db::auth::create_apikey(1, APIScope::Collector, None, None, &mut *tx)
                 .await
                 .expect("failed key cr");
         tx.commit().await.expect("commit failed");
@@ -1026,18 +901,11 @@ mod auth_test {
     async fn test_rotate_own_key() {
         let scenario = TestSetup::new("test_rotate_own_key").await;
         let server = &scenario.server;
-        let key0 = auth_post(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &super::CreateApiKey {
-                scope: APIScope::KeyAdder,
-                expires_at: None,
-                keytag_prefix: None,
-            },
-        )
-        .await
-        .expect("Failed to create key.");
-        let key0_idx = fetch_key_index(server, keytag_of(&key0)).await;
+        let key0: APIKey<Argon2KeyGenerator> =
+            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+        let key0_idx = fetch_key_index(key0.keytag(), &server.sqlx_db).await;
 
         // first test: status of the key is not in rotation
         // then rotate: The key is in rotation at index 2
@@ -1050,13 +918,13 @@ mod auth_test {
         let AuthRotateResponse::Created { new_api_key, .. } = key1 else {
             panic!();
         };
-        let key1 = new_api_key;
+        let key1: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
         // state of the db:
         // 1. superadmin key
         // 2. key in rotation (1d)
         // 3. freshly generated key (1y)
 
-        let key1_idx = fetch_key_index(server, keytag_of(&key1)).await;
+        let key1_idx = fetch_key_index(key1.keytag(), &server.sqlx_db).await;
 
         // testing that the time limits work and a "standalone" rotation is possible
         let key0_status = fetch_key_status(server, key0_idx).await; // old key
@@ -1087,16 +955,16 @@ mod auth_test {
         let AuthRotateResponse::Created { new_api_key, .. } = key2 else {
             panic!()
         };
-        let key2 = new_api_key;
+        let key2: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
         // state of the db:
         // 1. superadmin key
         // key0: ~~key in rotation (1d)~~ -> invalidated key
         // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
         // key2: freshly generated key (1y)
-        let key2_idx = fetch_key_index(server, keytag_of(&key2)).await;
+        let key2_idx = fetch_key_index(key2.keytag(), &server.sqlx_db).await;
         let key2_status = fetch_key_status(server, key2_idx).await; // new key
         assert!(!key2_status.is_being_rotated);
-        let key0_row = fetch_key_row(server, keytag_of(&key0)).await;
+        let key0_row = fetch_key_row(key0.keytag(), &server.sqlx_db).await;
         assert_eq!(key0_row.deleted_by, Some(key0_idx));
         let key1_status = fetch_key_status(server, key1_idx).await;
         assert!(key1_status.is_being_rotated);
@@ -1109,7 +977,7 @@ mod auth_test {
         let AuthRotateResponse::Created { new_api_key, .. } = key3 else {
             panic!()
         };
-        let key3 = new_api_key;
+        let key3: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
         // state of the db:
         // 1. superadmin key
         // key0: ~~key in rotation (1d)~~ -> invalidated
@@ -1117,10 +985,10 @@ mod auth_test {
         // key2: ~~freshly generated key (1y)~~ -> invalidated
         // key3: freshly generated key (1y)
 
-        let key3_idx = fetch_key_index(server, keytag_of(&key3)).await;
+        let key3_idx = fetch_key_index(key3.keytag(), &server.sqlx_db).await;
         let key3_status = fetch_key_status(server, key3_idx).await;
         let key1_status_new = fetch_key_status(server, key1_idx).await;
-        let key2_row = fetch_key_row(server, keytag_of(&key2)).await;
+        let key2_row = fetch_key_row(key2.keytag(), &server.sqlx_db).await;
 
         assert_eq!(key1_status_new.expires_at, key1_status.expires_at);
         assert!(!key3_status.is_being_rotated);

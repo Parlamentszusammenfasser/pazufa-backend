@@ -136,7 +136,7 @@ pub async fn gen_all_keylevels(
         APIScope::Collector,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
         None,
-        &mut tx,
+        &mut *tx,
     )
     .await?;
     let admin_key: APIKey<Sha256KeyGenerator> = dbauth::create_apikey(
@@ -144,7 +144,7 @@ pub async fn gen_all_keylevels(
         APIScope::Admin,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
         None,
-        &mut tx,
+        &mut *tx,
     )
     .await?;
     let keyadder_key: APIKey<Sha256KeyGenerator> = dbauth::create_apikey(
@@ -152,7 +152,7 @@ pub async fn gen_all_keylevels(
         APIScope::KeyAdder,
         chrono::Utc::now().checked_add_days(chrono::Days::new(1)),
         None,
-        &mut tx,
+        &mut *tx,
     )
     .await?;
     tx.commit().await?;

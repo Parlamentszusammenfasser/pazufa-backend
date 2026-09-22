@@ -4,9 +4,11 @@ use axum::{
     response::{IntoResponse as _, Response},
 };
 use serde::de::DeserializeOwned;
+
 pub trait DeserializeFromHeaderName {
     fn header_name() -> &'static str;
 }
+
 #[derive(Debug)]
 pub struct HeaderParams<T: DeserializeFromHeaderName + DeserializeOwned + TryFrom<HeaderValue>>(
     pub T,
@@ -20,6 +22,10 @@ where
 {
     type Rejection = Response;
 
+    #[allow(
+        clippy::unused_async_trait_impl,
+        reason = "would make the code unnecessarily unreadable"
+    )]
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let inner = parts.headers.remove(T::header_name());
         let inner = inner.ok_or(

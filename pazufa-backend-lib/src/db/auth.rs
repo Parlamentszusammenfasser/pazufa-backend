@@ -1,16 +1,17 @@
 use crate::Result;
 use crate::models::auth::{APIKey, APIKeyGenerator, generate_keytag, generate_salt};
 use crate::models::enumerations::APIScope;
+use sqlx::PgExecutor;
 
 /// Creates an API Key with the specified parameters in the database
 /// # Errors
 /// Returns Error if the database operations fail
-pub async fn create_apikey<KeyGenerator: APIKeyGenerator>(
+pub async fn create_apikey<'e, KeyGenerator: APIKeyGenerator, E: PgExecutor<'e>>(
     creator_key: i32,
     with_scope: APIScope,
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
     keytag_prefix: Option<&str>,
-    tx: &mut sqlx::PgTransaction<'_>,
+    ex: E,
 ) -> Result<APIKey<KeyGenerator>> {
     let salt = generate_salt();
     let mut vec_data = vec![0; salt.len()];
@@ -33,7 +34,7 @@ pub async fn create_apikey<KeyGenerator: APIKeyGenerator>(
         key.keytag(),
         key.hash_algorithm().to_string()
     )
-    .execute(&mut **tx)
+    .execute(ex)
     .await?;
 
     tracing::info!(
