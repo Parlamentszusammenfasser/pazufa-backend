@@ -3,9 +3,11 @@ use axum::extract::{Path, Query, State};
 use axum::response::Json;
 use pazufa_backend_lib::api::auth::{self as libauth, Claims, KeytagListing};
 use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
+use pazufa_backend_lib::db::retrieve::auth::get_api_key_metadata;
 use pazufa_backend_lib::models::auth::{APIKeyCreate, Argon2KeyGenerator};
-use pazufa_backend_lib::models::{APIKey, APIKeyStatus, APIScope, KeyTag, params};
+use pazufa_backend_lib::models::{APIKey, APIScope, KeyTag, params};
 use pazufa_backend_lib::utils::header_params::HeaderParams;
+use sqlx::PgExecutor;
 use std::sync::Arc;
 use tracing::warn;
 use utoipa::OpenApi;
@@ -22,7 +24,7 @@ use utoipa_axum::routes;
         auth_listing,
         auth_listing_keytag
     ),
-    components(schemas(APIKeyStatus, KeytagListing))
+    components(schemas(KeytagListing))
 )]
 pub(super) struct AuthApi;
 
@@ -93,15 +95,23 @@ async fn auth_status(
     claims: Claims,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> libauth::AuthStatusResponse {
-    pazufa_backend_lib::db::retrieve::auth::auth_status(claims.1, &api_impl.sqlx_db)
+    async fn inner<'e, E: PgExecutor<'e>>(
+        key_idx: i32,
+        ex: E,
+    ) -> anyhow::Result<libauth::AuthStatusResponse> {
+        let metadata = get_api_key_metadata(key_idx, ex).await?;
+        Ok(libauth::AuthStatusResponse::Status {
+            expires_at: metadata.expires_at,
+            scope: metadata.scope,
+            is_being_rotated: metadata.is_being_rotated(),
+        })
+    }
+    inner(claims.1, &api_impl.sqlx_db)
         .await
-        .map_or_else(
-            |error| {
-                warn!("Could not retrieve Auth Status: {error}");
-                libauth::AuthStatusResponse::Error(error.to_string())
-            },
-            libauth::AuthStatusResponse::Status,
-        )
+        .unwrap_or_else(|error| {
+            warn!("Could not retrieve Auth Status: {error}");
+            libauth::AuthStatusResponse::Error(error.to_string())
+        })
 }
 
 /// `AuthRotate` - POST /api/v1/auth/rotate
@@ -234,10 +244,9 @@ mod test {
     use crate::testing::{TestSetup, authtesting};
     use pazufa_backend_lib::api::DeleteResponse;
     use pazufa_backend_lib::api::auth::{self as libauth, Claims};
-    use pazufa_backend_lib::models::APIKey;
-    use pazufa_backend_lib::models::auth::Argon2KeyGenerator;
+    use pazufa_backend_lib::models::auth::{Argon2KeyGenerator, NoopKeyGenerator};
     use pazufa_backend_lib::models::params::{self, ApiKeyDelete};
-    use pazufa_backend_lib::models::{APIScope, auth::APIKeyCreate};
+    use pazufa_backend_lib::models::{APIKey, APIScope, auth::APIKeyCreate};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
     use sqlx::PgExecutor;
     use std::sync::Arc;
@@ -340,7 +349,7 @@ mod test {
         scenario.teardown().await;
     }
     #[tokio::test]
-    async fn test_auth_status() {
+    async fn test_auth_status_auth_state() {
         let mut scenario = TestSetup::new("test_auth_status").await;
         let server = Arc::new(scenario.server.take().expect("Expected a server value"));
 
@@ -459,6 +468,76 @@ mod test {
         )
         .await;
         assert!(matches!(rsp, DeleteResponse::Success));
+
+        let mut server = Arc::into_inner(server);
+        scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    // GET /auth/status
+    #[tokio::test]
+    async fn test_auth_status_behaviour() {
+        let mut scenario = TestSetup::new("test_auth_status_behaviour").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let expiry_date = chrono::Utc::now() + chrono::Duration::days(2);
+        let original_key: APIKey<Argon2KeyGenerator> = pazufa_backend_lib::db::auth::create_apikey(
+            1,
+            APIScope::KeyAdder,
+            Some(expiry_date),
+            None,
+            &server.sqlx_db,
+        )
+        .await
+        .expect("");
+
+        let original_key_idx = fetch_key_row(original_key.keytag(), &server.sqlx_db)
+            .await
+            .id;
+
+        let resp = super::auth_status(
+            Claims(APIScope::KeyAdder, original_key_idx),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+
+        assert!(
+            matches!(&resp, libauth::AuthStatusResponse::Status{scope, expires_at, is_being_rotated}
+            if *expires_at - expiry_date < chrono::Duration::milliseconds(1) && *scope == APIScope::KeyAdder && !is_being_rotated),
+            "Expected Successful response, got {resp:?}"
+        );
+
+        let fresh_key = super::auth_rotate(
+            Claims(APIScope::KeyAdder, original_key_idx),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        let libauth::AuthRotateResponse::Created { new_api_key, .. } = fresh_key else {
+            panic!()
+        };
+
+        let new_api_key: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
+        let fresh_key_index = fetch_key_row(new_api_key.keytag(), &server.sqlx_db)
+            .await
+            .id;
+        let fresh_key_status = super::auth_status(
+            Claims(APIScope::KeyAdder, fresh_key_index),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(
+            matches!(fresh_key_status, libauth::AuthStatusResponse::Status { scope, is_being_rotated , ..} if !is_being_rotated && scope == APIScope::KeyAdder)
+        );
+
+        let key_status_rot = super::auth_status(
+            Claims(APIScope::KeyAdder, original_key_idx),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(
+            matches!(&key_status_rot, libauth::AuthStatusResponse::Status{scope, is_being_rotated, expires_at}
+                if (*expires_at - chrono::Utc::now()) - chrono::Duration::days(1) < chrono::Duration::seconds(1) && *scope == APIScope::KeyAdder && *is_being_rotated),
+            "Expected Successful response, got {key_status_rot:?}"
+        );
 
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();

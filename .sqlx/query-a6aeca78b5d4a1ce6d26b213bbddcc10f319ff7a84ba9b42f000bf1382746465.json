@@ -1,22 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT scope,value as named_scope, expires_at, created_at, rotated_for, keytag\n            FROM api_keys INNER JOIN api_scope ON scope=api_scope.id \n            WHERE api_keys.id = $1",
+  "query": "SELECT \n        value as \"scope!: APIScope\", \n        expires_at, created_at, rotated_for, keytag\n            FROM api_keys INNER JOIN api_scope ON scope=api_scope.id \n            WHERE api_keys.id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "scope",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "api_keys",
-            "name": "scope"
-          }
-        }
-      },
-      {
-        "ordinal": 1,
-        "name": "named_scope",
+        "name": "scope!: APIScope",
         "type_info": "Varchar",
         "origin": {
           "Table": {
@@ -26,7 +15,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 1,
         "name": "expires_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -37,7 +26,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 2,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -48,7 +37,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 3,
         "name": "rotated_for",
         "type_info": "Int4",
         "origin": {
@@ -59,7 +48,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "keytag",
         "type_info": "Varchar",
         "origin": {
@@ -79,10 +68,9 @@
       false,
       false,
       false,
-      false,
       true,
       false
     ]
   },
-  "hash": "82ac42dea1da3f5ba5ff05972f8851ada28b2e179b15caf526cee5c20a5cc1d4"
+  "hash": "a6aeca78b5d4a1ce6d26b213bbddcc10f319ff7a84ba9b42f000bf1382746465"
 }

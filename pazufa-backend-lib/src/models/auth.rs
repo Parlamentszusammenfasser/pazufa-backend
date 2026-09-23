@@ -24,20 +24,20 @@ pub const SLUG_LENGTH: usize = 6;
 pub const CRC_LENGTH: usize = 8;
 pub const KEY_MATERIAL_LENGTH: usize = KEY_LENGTH - KEYTAG_LENGTH - SLUG_LENGTH - CRC_LENGTH - 2;
 
-/// Status information about the API key used in the current request
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct APIKeyStatus {
-    /// Note: inline enums are not fully supported by openapi-generator
-    #[serde(rename = "scope")]
-    pub scope: String,
-
-    /// When this key will expire. If `is_being_rotated` is true, this is the date the rotation is complete.
-    #[serde(rename = "expires_at")]
+#[derive(sqlx::Type, Debug)]
+pub struct APIKeyMetadata {
+    pub scope: APIScope,
     pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub rotated_for: Option<i32>,
+    pub keytag: String,
+}
 
-    /// Whether this key is currently in a transition process
-    #[serde(rename = "is_being_rotated")]
-    pub is_being_rotated: bool,
+impl APIKeyMetadata {
+    #[must_use]
+    pub fn is_being_rotated(&self) -> bool {
+        self.rotated_for.is_some() && self.expires_at > chrono::Utc::now()
+    }
 }
 
 #[derive(sqlx::Type, Clone, Copy, Serialize)]

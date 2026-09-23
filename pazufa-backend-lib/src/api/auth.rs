@@ -1,7 +1,8 @@
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
+use crate::db::retrieve::auth::get_api_key_metadata;
 use crate::models::APIScope;
 use crate::models::auth::{
-    APIKey, APIKeyStatus, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
+    APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
 };
 use crate::models::params::{AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
 use crate::utils::as_option;
@@ -183,10 +184,20 @@ impl IntoResponse for AuthPostResponse {
     }
 }
 
-#[derive(IntoResponses, PartialEq, Debug)]
+#[derive(IntoResponses, PartialEq, Debug, Serialize)]
+#[serde(untagged)]
 pub enum AuthStatusResponse {
     #[response(status = 200, content_type = "application/json")]
-    Status(APIKeyStatus),
+    Status {
+        /// Note: inline enums are not fully supported by openapi-generator
+        scope: APIScope,
+
+        /// When this key will expire. If `is_being_rotated` is true, this is the date the rotation is complete.
+        expires_at: chrono::DateTime<chrono::Utc>,
+
+        /// Whether this key is currently in a transition process
+        is_being_rotated: bool,
+    },
     #[response(status = 401)]
     Unauth,
     #[response(status = 500)]
@@ -195,7 +206,7 @@ pub enum AuthStatusResponse {
 impl IntoResponse for AuthStatusResponse {
     fn into_response(self) -> Response {
         match self {
-            Self::Status(status) => (StatusCode::OK, Json(status)).into_response(),
+            Self::Status { .. } => (StatusCode::OK, Json(self)).into_response(),
             Self::Unauth => StatusCode::UNAUTHORIZED.into_response(),
             Self::Error(s) => (StatusCode::INTERNAL_SERVER_ERROR, s).into_response(),
         }
@@ -264,14 +275,7 @@ impl IntoResponse for AuthListingKeytagResponse {
 #[instrument(skip_all, fields(claim=%claims.0))]
 pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRotateResponse> {
     let mut tx = server.sqlx_db.begin().await?;
-    let old_key_entry = sqlx::query!(
-        "SELECT scope,value as named_scope, expires_at, created_at, rotated_for, keytag
-            FROM api_keys INNER JOIN api_scope ON scope=api_scope.id 
-            WHERE api_keys.id = $1",
-        claims.1
-    )
-    .fetch_one(&mut *tx)
-    .await?;
+    let old_key_entry = get_api_key_metadata(claims.1, &mut *tx).await?;
 
     // new key, replacing the old one
     let api_key = crate::models::auth::APIKey::<crate::models::auth::Argon2KeyGenerator>::default();
@@ -283,12 +287,14 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
     let new_id = sqlx::query!(
         "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag, algo)
             VALUES
-            ($1, $2, $3, $4,$5, $6, ( SELECT id FROM hash_algorithm WHERE value = $7 ))
+            ($1, $2, $3, 
+            (SELECT id FROM api_scope WHERE value = $4),
+            $5, $6, ( SELECT id FROM hash_algorithm WHERE value = $7 ))
             RETURNING id",
         new_hash,
         claims.1,
         chrono::Utc::now() + (old_key_entry.expires_at - old_key_entry.created_at),
-        old_key_entry.scope,
+        old_key_entry.scope.to_string(),
         salt_bytes,
         api_key.keytag(),
         HashAlgorithm::Argon2id.to_string()
@@ -336,7 +342,7 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
 
     info!(
         "Rotated API Key {} with Scope: {:?}",
-        old_key_entry.keytag, old_key_entry.named_scope
+        old_key_entry.keytag, old_key_entry.scope
     );
     Ok(AuthRotateResponse::Created {
         new_api_key: api_key.to_string(),
@@ -501,10 +507,8 @@ mod auth_test {
     use super::{auth_listing, auth_listing_keytag, auth_rotate};
     use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
-    use crate::db::retrieve::auth::auth_status;
-    use crate::models::auth::{
-        APIKey, APIKeyStatus, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator,
-    };
+    use crate::db::retrieve::auth::get_api_key_metadata;
+    use crate::models::auth::{APIKey, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator};
     use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
     use crate::utils::testing::{TestSetup, generate};
     use sqlx::PgExecutor;
@@ -546,56 +550,6 @@ mod auth_test {
         let key = "invalidbutofasufficientlengthtobecheckedforcyclicredundancyproblemsinthematerialandhopefullyfailthistestsincethisisitsresontobe.";
         let result = Claims::extract(&scenario.server, params::XAPIKey(key.to_owned())).await;
         assert!(result.is_err());
-    }
-
-    // GET /auth/status
-    #[tokio::test]
-    async fn test_auth_status() {
-        let scenario = TestSetup::new("test_auth_status").await;
-        let server = &scenario.server;
-        let expiry_date = chrono::Utc::now() + chrono::Duration::days(2);
-        let original_key: APIKey<Argon2KeyGenerator> = crate::db::auth::create_apikey(
-            1,
-            APIScope::KeyAdder,
-            Some(expiry_date),
-            None,
-            &server.sqlx_db,
-        )
-        .await
-        .expect("");
-
-        let original_key_idx = fetch_key_index(original_key.keytag(), &server.sqlx_db).await;
-
-        let resp = auth_status(original_key_idx, &server.sqlx_db).await;
-
-        assert!(
-            matches!(&resp, Ok(APIKeyStatus{scope, expires_at, is_being_rotated})
-            if *expires_at - expiry_date < chrono::Duration::milliseconds(1) && scope == "keyadder" && !is_being_rotated),
-            "Expected Successful response, got {resp:?}"
-        );
-
-        let fresh_key = auth_rotate(server, &Claims(APIScope::KeyAdder, original_key_idx))
-            .await
-            .expect("Failed to rotate key.");
-        let AuthRotateResponse::Created { new_api_key, .. } = fresh_key else {
-            panic!()
-        };
-
-        let new_api_key: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
-        let fresh_key_index = fetch_key_index(new_api_key.keytag(), &server.sqlx_db).await;
-        let fresh_key_status = auth_status(fresh_key_index, &server.sqlx_db).await.unwrap();
-        assert!(!fresh_key_status.is_being_rotated && fresh_key_status.scope == "keyadder");
-
-        let key_status_rot = auth_status(original_key_idx, &server.sqlx_db).await;
-        assert!(
-            matches!(&key_status_rot,
-                Ok(APIKeyStatus{scope, is_being_rotated, expires_at}) if (*expires_at - chrono::Utc::now()) - chrono::Duration::days(1)
-                < chrono::Duration::seconds(1) && scope == "keyadder" && *is_being_rotated
-            ),
-            "Expected Successful response, got {key_status_rot:?}"
-        );
-
-        scenario.teardown().await;
     }
 
     // GET /auth/keys
@@ -755,9 +709,9 @@ mod auth_test {
 
         // first test: status of the key is not in rotation
         // then rotate: The key is in rotation at index 2
-        let original_key_status = auth_status(2, &server.sqlx_db).await.unwrap();
-        assert!(!original_key_status.is_being_rotated);
-        assert_eq!(original_key_status.scope, "keyadder");
+        let original_key_status = get_api_key_metadata(2, &server.sqlx_db).await.unwrap();
+        assert!(!original_key_status.is_being_rotated());
+        assert_eq!(original_key_status.scope, APIScope::KeyAdder);
         let key1 = auth_rotate(server, &Claims(APIScope::KeyAdder, 2))
             .await
             .expect("Failed to rotate key.");
@@ -773,20 +727,24 @@ mod auth_test {
         let key1_idx = fetch_key_index(key1.keytag(), &server.sqlx_db).await;
 
         // testing that the time limits work and a "standalone" rotation is possible
-        let key0_status = auth_status(key0_idx, &server.sqlx_db).await.unwrap(); // old key
+        let key0_status = get_api_key_metadata(key0_idx, &server.sqlx_db)
+            .await
+            .unwrap(); // old key
         assert!(
-            key0_status.is_being_rotated
-                && key0_status.scope == "keyadder"
+            key0_status.is_being_rotated()
+                && key0_status.scope == APIScope::KeyAdder
                 && key0_status
                     .expires_at
                     .checked_sub_days(chrono::Days::new(1))
                     .expect("Failed to sub day from expiry datetime.")
                     <= chrono::Utc::now()
         );
-        let key1_status = auth_status(key1_idx, &server.sqlx_db).await.unwrap(); // new key
+        let key1_status = get_api_key_metadata(key1_idx, &server.sqlx_db)
+            .await
+            .unwrap(); // new key
         assert!(
-            !key1_status.is_being_rotated
-                && key1_status.scope == "keyadder"
+            !key1_status.is_being_rotated()
+                && key1_status.scope == APIScope::KeyAdder
                 && key1_status
                     .expires_at
                     .checked_sub_months(chrono::Months::new(11))
@@ -808,12 +766,16 @@ mod auth_test {
         // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
         // key2: freshly generated key (1y)
         let key2_idx = fetch_key_index(key2.keytag(), &server.sqlx_db).await;
-        let key2_status = auth_status(key2_idx, &server.sqlx_db).await.unwrap(); // new key
-        assert!(!key2_status.is_being_rotated);
+        let key2_status = get_api_key_metadata(key2_idx, &server.sqlx_db)
+            .await
+            .unwrap(); // new key
+        assert!(!key2_status.is_being_rotated());
         let key0_row = fetch_key_row(key0.keytag(), &server.sqlx_db).await;
         assert_eq!(key0_row.deleted_by, Some(key0_idx));
-        let key1_status = auth_status(key1_idx, &server.sqlx_db).await.unwrap();
-        assert!(key1_status.is_being_rotated);
+        let key1_status = get_api_key_metadata(key1_idx, &server.sqlx_db)
+            .await
+            .unwrap();
+        assert!(key1_status.is_being_rotated());
 
         // rotate the key in rotation again and expect the previously generated fresh key to be invalidated.
         // the old key's lifetime does not change from the first rotation (otherwise it could be extended -> secu risk)
@@ -832,12 +794,16 @@ mod auth_test {
         // key3: freshly generated key (1y)
 
         let key3_idx = fetch_key_index(key3.keytag(), &server.sqlx_db).await;
-        let key3_status = auth_status(key3_idx, &server.sqlx_db).await.unwrap();
-        let key1_status_new = auth_status(key1_idx, &server.sqlx_db).await.unwrap();
+        let key3_status = get_api_key_metadata(key3_idx, &server.sqlx_db)
+            .await
+            .unwrap();
+        let key1_status_new = get_api_key_metadata(key1_idx, &server.sqlx_db)
+            .await
+            .unwrap();
         let key2_row = fetch_key_row(key2.keytag(), &server.sqlx_db).await;
 
         assert_eq!(key1_status_new.expires_at, key1_status.expires_at);
-        assert!(!key3_status.is_being_rotated);
+        assert!(!key3_status.is_being_rotated());
         assert_eq!(key2_row.deleted_by, Some(key2_idx));
 
         scenario.teardown().await;

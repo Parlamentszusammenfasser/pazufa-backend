@@ -7,7 +7,7 @@ pub mod params;
 pub mod sitzung;
 pub mod vorgang;
 
-pub use auth::{APIKey, APIKeyStatus, HashAlgorithm, KeyTag};
+pub use auth::{APIKey, APIKeyGenerator, APIKeyMetadata, HashAlgorithm, KeyTag};
 pub use dokument::{
     Dokument, DokumentHash, DokumentOrApiId, FTMDokumentPages, HashWrapper, ZusammenfassungWrapper,
     Zusammenfassungstupel,
