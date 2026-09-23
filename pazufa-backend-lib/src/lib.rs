@@ -9,6 +9,10 @@
         reason = "all is fair in love, war and testing"
     )
 )]
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, reason = "all is fair in love, war and testing")
+)]
 pub mod api;
 pub mod db;
 pub mod error;

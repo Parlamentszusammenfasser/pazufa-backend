@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT expires_at, rotated_for, keytag, s.value as scope\n        FROM api_keys a\n        INNER JOIN api_scope s ON s.id = a.scope\n        WHERE a.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "rotated_for",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "rotated_for"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "keytag",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "keytag"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "scope",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "api_scope",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f63e6e26452233c20e0722a9827d8e8d29c0a8556e409167204d566ffdca4a53"
+}

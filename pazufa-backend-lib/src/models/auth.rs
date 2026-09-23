@@ -1,3 +1,4 @@
+use super::APIScope;
 use crate::error::DataValidationError;
 use crate::{LTZFError, Result};
 use argon2::PasswordHasher;
@@ -22,6 +23,22 @@ pub const SALT_LENGTH: usize = 16;
 pub const SLUG_LENGTH: usize = 6;
 pub const CRC_LENGTH: usize = 8;
 pub const KEY_MATERIAL_LENGTH: usize = KEY_LENGTH - KEYTAG_LENGTH - SLUG_LENGTH - CRC_LENGTH - 2;
+
+/// Status information about the API key used in the current request
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct APIKeyStatus {
+    /// Note: inline enums are not fully supported by openapi-generator
+    #[serde(rename = "scope")]
+    pub scope: String,
+
+    /// When this key will expire. If `is_being_rotated` is true, this is the date the rotation is complete.
+    #[serde(rename = "expires_at")]
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+
+    /// Whether this key is currently in a transition process
+    #[serde(rename = "is_being_rotated")]
+    pub is_being_rotated: bool,
+}
 
 #[derive(sqlx::Type, Clone, Copy, Serialize)]
 #[sqlx(type_name = "\"HashAlgorithm\"")]
@@ -373,6 +390,49 @@ impl APIKeyGenerator for Argon2KeyGenerator {
     }
     fn hash_algorithm() -> HashAlgorithm {
         HashAlgorithm::Argon2id
+    }
+}
+
+/// Requests a new API key. The key will be saved as hash in the database and only produced once in clear text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(remote = "Self")]
+pub struct APIKeyCreate {
+    /// Note: inline enums are not fully supported by openapi-generator
+    pub scope: APIScope,
+
+    /// The expiration date of the API Key
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// Keytag name, maximal length is 10 Characters, the rest of the keytag will be filled with
+    /// random data. It is recommended to use this to later identify the keys more easily
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keytag_prefix: Option<String>,
+}
+impl<'de> Deserialize<'de> for APIKeyCreate {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let unchecked = Self::deserialize(deserializer)?;
+        // check that the max length of the keytag name is <= 10
+        if let Some(kt) = &unchecked.keytag_prefix
+            && kt.len() > 10
+        {
+            return Err(serde::de::Error::custom(
+                "Error: Supplied Keytag is too long (>10 ascii characters)",
+            ));
+        }
+        Ok(unchecked)
+    }
+}
+
+impl Serialize for APIKeyCreate {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        Self::serialize(self, serializer)
     }
 }
 

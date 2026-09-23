@@ -1,7 +1,7 @@
 use crate::api::{AuthListingGetResponse, PaginationResponsePart};
 use crate::models::APIScope;
 use crate::models::auth::{
-    APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
+    APIKey, APIKeyStatus, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
 };
 use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
 use crate::utils::as_option;
@@ -186,7 +186,7 @@ impl IntoResponse for AuthPostResponse {
 #[derive(IntoResponses, PartialEq, Debug)]
 pub enum AuthStatusResponse {
     #[response(status = 200, content_type = "application/json")]
-    Status(ApiKeyStatus),
+    Status(APIKeyStatus),
     #[response(status = 401)]
     Unauth,
     #[response(status = 500)]
@@ -255,88 +255,6 @@ impl IntoResponse for AuthListingKeytagResponse {
             Self::KeytagListing(body) => (StatusCode::OK, Json(body)).into_response(),
         }
     }
-}
-/// Requests a new API key. The key will be saved as hash in the database and only produced once in clear text.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(remote = "Self")]
-pub struct CreateApiKey {
-    /// Note: inline enums are not fully supported by openapi-generator
-    pub scope: APIScope,
-
-    /// The expiration date of the API Key
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
-
-    /// Keytag name, maximal length is 10 Characters, the rest of the keytag will be filled with
-    /// random data. It is recommended to use this to later identify the keys more easily
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keytag_prefix: Option<String>,
-}
-impl<'de> Deserialize<'de> for CreateApiKey {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // check that the max length of the keytag name is <= 10
-        if let Some(kt) = &unchecked.keytag_prefix
-            && kt.len() > 10
-        {
-            return Err(serde::de::Error::custom(
-                "Error: Supplied Keytag is too long (>10 ascii characters)",
-            ));
-        }
-        Ok(unchecked)
-    }
-}
-
-impl Serialize for CreateApiKey {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
-}
-
-/// Status information about the API key used in the current request
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct ApiKeyStatus {
-    /// Note: inline enums are not fully supported by openapi-generator
-    #[serde(rename = "scope")]
-    pub scope: String,
-
-    /// When this key will expire. If `is_being_rotated` is true, this is the date the rotation is complete.
-    #[serde(rename = "expires_at")]
-    pub expires_at: chrono::DateTime<chrono::Utc>,
-
-    /// Whether this key is currently in a transition process
-    #[serde(rename = "is_being_rotated")]
-    pub is_being_rotated: bool,
-}
-
-/// Retrieves Information about one's own key.
-/// For example, how long it is still valid, what the scope is, and if it is authenticated as
-/// intended.
-/// Can also be used as testing endpoint to check if the key you supplied works
-/// # Errors
-/// Can fail if the database operations fail
-#[instrument(skip_all, fields(claim=%claims.0))]
-pub async fn auth_status(server: &LTZFServer, claims: &Claims) -> Result<ApiKeyStatus> {
-    let db_row = sqlx::query!(
-        "SELECT * FROM 
-            api_keys WHERE id = $1",
-        claims.1
-    )
-    .fetch_one(&server.sqlx_db)
-    .await?;
-    let rotation_is_active = db_row.rotated_for.is_some() && db_row.expires_at > chrono::Utc::now();
-    debug!("Key {} ({}) requested auth status", db_row.keytag, claims.0);
-    Ok(ApiKeyStatus {
-        expires_at: db_row.expires_at,
-        scope: claims.0.to_string(),
-        is_being_rotated: rotation_is_active,
-    })
 }
 
 /// Function that rotates a key for a fresh one, keeping track so that only ever two keys are active
@@ -600,12 +518,14 @@ pub async fn auth_listing_keytag(
 
 #[cfg(test)]
 mod auth_test {
-    use super::{APIScope, ApiKeyStatus, Claims, KeytagListing};
-    use super::{auth_delete, auth_listing, auth_listing_keytag, auth_rotate, auth_status};
-    use crate::LTZFServer;
+    use super::{APIScope, Claims, KeytagListing};
+    use super::{auth_delete, auth_listing, auth_listing_keytag, auth_rotate};
     use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
-    use crate::models::auth::{APIKey, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator};
+    use crate::db::retrieve::auth::auth_status;
+    use crate::models::auth::{
+        APIKey, APIKeyStatus, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator,
+    };
     use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
     use crate::utils::testing::{TestSetup, generate};
     use sqlx::PgExecutor;
@@ -637,6 +557,7 @@ mod auth_test {
             .await
             .expect("Failed to get key row.")
     }
+
     #[tokio::test]
     async fn test_extract_claims_crcfail() {
         let scenario = TestSetup::new("test_extract_claims_crc").await;
@@ -666,10 +587,10 @@ mod auth_test {
 
         let original_key_idx = fetch_key_index(original_key.keytag(), &server.sqlx_db).await;
 
-        let resp = auth_status(server, &Claims(APIScope::KeyAdder, original_key_idx)).await;
+        let resp = auth_status(original_key_idx, &server.sqlx_db).await;
 
         assert!(
-            matches!(&resp, Ok(ApiKeyStatus{scope, expires_at, is_being_rotated})
+            matches!(&resp, Ok(APIKeyStatus{scope, expires_at, is_being_rotated})
             if *expires_at - expiry_date < chrono::Duration::milliseconds(1) && scope == "keyadder" && !is_being_rotated),
             "Expected Successful response, got {resp:?}"
         );
@@ -683,26 +604,19 @@ mod auth_test {
 
         let new_api_key: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
         let fresh_key_index = fetch_key_index(new_api_key.keytag(), &server.sqlx_db).await;
-        let fresh_key_status = fetch_key_status(server, fresh_key_index).await;
+        let fresh_key_status = auth_status(fresh_key_index, &server.sqlx_db).await.unwrap();
         assert!(!fresh_key_status.is_being_rotated && fresh_key_status.scope == "keyadder");
 
-        let key_status_rot =
-            auth_status(server, &Claims(APIScope::KeyAdder, original_key_idx)).await;
+        let key_status_rot = auth_status(original_key_idx, &server.sqlx_db).await;
         assert!(
             matches!(&key_status_rot,
-                Ok(ApiKeyStatus{scope, is_being_rotated, expires_at}) if (*expires_at - chrono::Utc::now()) - chrono::Duration::days(1)
+                Ok(APIKeyStatus{scope, is_being_rotated, expires_at}) if (*expires_at - chrono::Utc::now()) - chrono::Duration::days(1)
                 < chrono::Duration::seconds(1) && scope == "keyadder" && *is_being_rotated
             ),
             "Expected Successful response, got {key_status_rot:?}"
         );
 
         scenario.teardown().await;
-    }
-
-    async fn fetch_key_status(server: &LTZFServer, index: i32) -> ApiKeyStatus {
-        auth_status(server, &Claims(APIScope::KeyAdder, index))
-            .await
-            .expect("Failed to get auth status.")
     }
 
     // GET /auth/keys
@@ -909,7 +823,7 @@ mod auth_test {
 
         // first test: status of the key is not in rotation
         // then rotate: The key is in rotation at index 2
-        let original_key_status = fetch_key_status(server, 2).await;
+        let original_key_status = auth_status(2, &server.sqlx_db).await.unwrap();
         assert!(!original_key_status.is_being_rotated);
         assert_eq!(original_key_status.scope, "keyadder");
         let key1 = auth_rotate(server, &Claims(APIScope::KeyAdder, 2))
@@ -918,7 +832,7 @@ mod auth_test {
         let AuthRotateResponse::Created { new_api_key, .. } = key1 else {
             panic!();
         };
-        let key1: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).expect("");
+        let key1: APIKey<NoopKeyGenerator> = APIKey::try_from(new_api_key).unwrap();
         // state of the db:
         // 1. superadmin key
         // 2. key in rotation (1d)
@@ -927,7 +841,7 @@ mod auth_test {
         let key1_idx = fetch_key_index(key1.keytag(), &server.sqlx_db).await;
 
         // testing that the time limits work and a "standalone" rotation is possible
-        let key0_status = fetch_key_status(server, key0_idx).await; // old key
+        let key0_status = auth_status(key0_idx, &server.sqlx_db).await.unwrap(); // old key
         assert!(
             key0_status.is_being_rotated
                 && key0_status.scope == "keyadder"
@@ -937,7 +851,7 @@ mod auth_test {
                     .expect("Failed to sub day from expiry datetime.")
                     <= chrono::Utc::now()
         );
-        let key1_status = fetch_key_status(server, key1_idx).await; // new key
+        let key1_status = auth_status(key1_idx, &server.sqlx_db).await.unwrap(); // new key
         assert!(
             !key1_status.is_being_rotated
                 && key1_status.scope == "keyadder"
@@ -962,11 +876,11 @@ mod auth_test {
         // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
         // key2: freshly generated key (1y)
         let key2_idx = fetch_key_index(key2.keytag(), &server.sqlx_db).await;
-        let key2_status = fetch_key_status(server, key2_idx).await; // new key
+        let key2_status = auth_status(key2_idx, &server.sqlx_db).await.unwrap(); // new key
         assert!(!key2_status.is_being_rotated);
         let key0_row = fetch_key_row(key0.keytag(), &server.sqlx_db).await;
         assert_eq!(key0_row.deleted_by, Some(key0_idx));
-        let key1_status = fetch_key_status(server, key1_idx).await;
+        let key1_status = auth_status(key1_idx, &server.sqlx_db).await.unwrap();
         assert!(key1_status.is_being_rotated);
 
         // rotate the key in rotation again and expect the previously generated fresh key to be invalidated.
@@ -986,8 +900,8 @@ mod auth_test {
         // key3: freshly generated key (1y)
 
         let key3_idx = fetch_key_index(key3.keytag(), &server.sqlx_db).await;
-        let key3_status = fetch_key_status(server, key3_idx).await;
-        let key1_status_new = fetch_key_status(server, key1_idx).await;
+        let key3_status = auth_status(key3_idx, &server.sqlx_db).await.unwrap();
+        let key1_status_new = auth_status(key1_idx, &server.sqlx_db).await.unwrap();
         let key2_row = fetch_key_row(key2.keytag(), &server.sqlx_db).await;
 
         assert_eq!(key1_status_new.expires_at, key1_status.expires_at);

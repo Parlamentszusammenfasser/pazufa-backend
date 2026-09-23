@@ -1,12 +1,10 @@
 use crate::LTZFServer;
 use axum::extract::{Path, Query, State};
 use axum::response::Json;
-use pazufa_backend_lib::api::auth::{
-    self as libauth, ApiKeyStatus, Claims, CreateApiKey, KeytagListing,
-};
+use pazufa_backend_lib::api::auth::{self as libauth, Claims, KeytagListing};
 use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
-use pazufa_backend_lib::models::auth::Argon2KeyGenerator;
-use pazufa_backend_lib::models::{APIKey, APIScope, KeyTag, params};
+use pazufa_backend_lib::models::auth::{APIKeyCreate, Argon2KeyGenerator};
+use pazufa_backend_lib::models::{APIKey, APIKeyStatus, APIScope, KeyTag, params};
 use pazufa_backend_lib::utils::header_params::HeaderParams;
 use std::sync::Arc;
 use tracing::warn;
@@ -24,7 +22,7 @@ use utoipa_axum::routes;
         auth_listing,
         auth_listing_keytag
     ),
-    components(schemas(ApiKeyStatus, KeytagListing))
+    components(schemas(APIKeyStatus, KeytagListing))
 )]
 pub(super) struct AuthApi;
 
@@ -44,14 +42,14 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
         path = "",
         tag = "Authentifizierung",
         security(("apiKey" = ["keyadder"])),
-        request_body=CreateApiKey,
+        request_body=APIKeyCreate,
         responses(libauth::AuthPostResponse)
     )]
 #[tracing::instrument(skip_all, fields(claim=%scope))]
 async fn auth_post(
     Claims(scope, index): Claims,
     State(api_impl): State<Arc<LTZFServer>>,
-    Json(body): Json<CreateApiKey>,
+    Json(body): Json<APIKeyCreate>,
 ) -> libauth::AuthPostResponse {
     // Authentication
     if scope != APIScope::KeyAdder {
@@ -60,7 +58,7 @@ async fn auth_post(
     async fn inner_with_result(
         server: &LTZFServer,
         claims: &Claims,
-        body: &CreateApiKey,
+        body: &APIKeyCreate,
     ) -> pazufa_backend_lib::Result<String> {
         let key: APIKey<Argon2KeyGenerator> = pazufa_backend_lib::db::auth::create_apikey(
             claims.1,
@@ -95,7 +93,7 @@ async fn auth_status(
     claims: Claims,
     State(api_impl): State<Arc<LTZFServer>>,
 ) -> libauth::AuthStatusResponse {
-    libauth::auth_status(api_impl.as_ref(), &claims)
+    pazufa_backend_lib::db::retrieve::auth::auth_status(claims.1, &api_impl.sqlx_db)
         .await
         .map_or_else(
             |error| {
@@ -231,8 +229,8 @@ async fn auth_listing_keytag(
 mod test {
     use crate::testing::{TestSetup, authtesting};
     use pazufa_backend_lib::api::auth::{self as libauth, Claims};
-    use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::params::{self, ApiKeyDelete};
+    use pazufa_backend_lib::models::{APIScope, auth::APIKeyCreate};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
     use std::sync::Arc;
     use tracing_test::traced_test;
@@ -361,7 +359,7 @@ mod test {
             super::auth_post(
                 hm,
                 axum::extract::State(server),
-                axum::Json(libauth::CreateApiKey {
+                axum::Json(APIKeyCreate {
                     expires_at: None,
                     scope: APIScope::Collector,
                     keytag_prefix: None,

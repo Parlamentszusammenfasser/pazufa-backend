@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod dokument;
 pub mod sitzung;
 pub mod vorgang;
