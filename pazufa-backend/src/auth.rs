@@ -158,16 +158,19 @@ async fn auth_delete(
     if claims.0 != APIScope::KeyAdder {
         return DeleteResponse::Unauth;
     }
-
-    libauth::auth_delete(api_impl.as_ref(), &claims, &api_key_delete)
-        .await
-        .map_or_else(
-            |e| {
-                warn!("Error: unable to delete key: {e}");
-                DeleteResponse::Error(e.to_string())
-            },
-            |()| DeleteResponse::Success,
-        )
+    pazufa_backend_lib::db::delete::delete_apikey_by_keytag(
+        claims.1,
+        &api_key_delete.0,
+        &api_impl.sqlx_db,
+    )
+    .await
+    .map_or_else(
+        |e| {
+            warn!("Error: unable to delete key: {e}");
+            DeleteResponse::Error(e.to_string())
+        },
+        |()| DeleteResponse::Success,
+    )
 }
 
 #[utoipa::path(
@@ -227,11 +230,16 @@ async fn auth_listing_keytag(
 
 #[cfg(test)]
 mod test {
+    use super::auth_delete;
     use crate::testing::{TestSetup, authtesting};
+    use pazufa_backend_lib::api::DeleteResponse;
     use pazufa_backend_lib::api::auth::{self as libauth, Claims};
+    use pazufa_backend_lib::models::APIKey;
+    use pazufa_backend_lib::models::auth::Argon2KeyGenerator;
     use pazufa_backend_lib::models::params::{self, ApiKeyDelete};
     use pazufa_backend_lib::models::{APIScope, auth::APIKeyCreate};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
+    use sqlx::PgExecutor;
     use std::sync::Arc;
     use tracing_test::traced_test;
 
@@ -374,6 +382,83 @@ mod test {
             libauth::AuthPostResponse::Unauth,
         )
         .await;
+
+        let mut server = Arc::into_inner(server);
+        scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    #[allow(unused, reason = "We want to model structs close to database model")]
+    #[derive(sqlx::Type)]
+    struct KeyRow {
+        id: i32,
+        created_by: i32,
+        deleted_by: Option<i32>,
+        key_hash: String,
+        created_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+        last_used: Option<chrono::DateTime<chrono::Utc>>,
+        scope: i32,
+        algo: i32,
+        rotated_for: Option<i32>,
+        salt: Vec<u8>,
+        keytag: String,
+    }
+
+    async fn fetch_key_row<'e, E: PgExecutor<'e>>(keytag: &str, ex: E) -> KeyRow {
+        sqlx::query_as!(KeyRow, "SELECT * FROM api_keys WHERE keytag = $1", keytag)
+            .fetch_one(ex)
+            .await
+            .expect("Failed to get key row.")
+    }
+    // DELETE /auth
+    #[tokio::test]
+    async fn test_revoke_key() {
+        let mut scenario = TestSetup::new("test_revoke_key").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let key: APIKey<Argon2KeyGenerator> = pazufa_backend_lib::db::auth::create_apikey(
+            1,
+            APIScope::KeyAdder,
+            None,
+            None,
+            &server.sqlx_db,
+        )
+        .await
+        .expect("");
+        let tag = key.keytag();
+        let row = fetch_key_row(tag, &server.sqlx_db).await;
+        assert_eq!(row.deleted_by, None);
+
+        // delete successfully
+        let rsp = auth_delete(
+            HeaderParams(params::ApiKeyDelete(tag.to_owned())),
+            Claims(APIScope::KeyAdder, 1),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(matches!(rsp, DeleteResponse::Success));
+        let row = fetch_key_row(tag, &server.sqlx_db).await;
+        assert_eq!(row.deleted_by, Some(1));
+
+        // delete already deleted key
+        auth_delete(
+            HeaderParams(params::ApiKeyDelete(tag.to_owned())),
+            Claims(APIScope::KeyAdder, 1),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(matches!(rsp, DeleteResponse::Success));
+        let row = fetch_key_row(tag, &server.sqlx_db).await;
+        assert_eq!(row.deleted_by, Some(1));
+
+        // delete without permission
+        auth_delete(
+            HeaderParams(params::ApiKeyDelete(tag.to_owned())),
+            Claims(APIScope::Admin, 1),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(matches!(rsp, DeleteResponse::Success));
 
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();

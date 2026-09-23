@@ -1,6 +1,28 @@
 use crate::Result;
 use sqlx::PgExecutor;
+use tracing::{debug, instrument};
 use uuid::Uuid;
+
+/// Deletes a Key with a given keytag
+/// # Errors
+/// Can fail if the database operations fail
+#[instrument(skip_all, fields(deleted_by=%deleted_by, keytag=%delete_tag))]
+pub async fn delete_apikey_by_keytag<'e, E: PgExecutor<'e>>(
+    deleted_by: i32,
+    delete_tag: &str,
+    ex: E,
+) -> Result<()> {
+    sqlx::query!(
+        "UPDATE api_keys SET deleted_by=$1 WHERE keytag=$2",
+        deleted_by,
+        delete_tag
+    )
+    .execute(ex)
+    .await?;
+
+    debug!("Successfully deleted keys");
+    Ok(())
+}
 
 /// removes the specified vorgang from the database
 /// # Errors

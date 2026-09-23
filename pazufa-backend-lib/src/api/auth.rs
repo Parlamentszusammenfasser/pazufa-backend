@@ -3,7 +3,7 @@ use crate::models::APIScope;
 use crate::models::auth::{
     APIKey, APIKeyStatus, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
 };
-use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
+use crate::models::params::{AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
 use crate::utils::as_option;
 use crate::utils::header_params::HeaderParams;
 use crate::{LTZFServer, Result, error::LTZFError, models};
@@ -344,27 +344,6 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
     })
 }
 
-/// Deletes a Key with a given keytag
-/// # Errors
-/// Can fail if the database operations fail
-#[instrument(skip_all, fields(claim=%claims.0, keytag=%delete_tag.0))]
-pub async fn auth_delete(
-    server: &LTZFServer,
-    claims: &Claims,
-    delete_tag: &params::ApiKeyDelete,
-) -> Result<()> {
-    sqlx::query!(
-        "UPDATE api_keys SET deleted_by=$1 WHERE keytag=$2",
-        claims.1,
-        delete_tag.0
-    )
-    .execute(&server.sqlx_db)
-    .await?;
-
-    info!("Successfully deleted keys");
-    Ok(())
-}
-
 /// Lists keytags that exist within the database. A keyadder-only feature.
 ///
 /// # Errors
@@ -519,7 +498,7 @@ pub async fn auth_listing_keytag(
 #[cfg(test)]
 mod auth_test {
     use super::{APIScope, Claims, KeytagListing};
-    use super::{auth_delete, auth_listing, auth_listing_keytag, auth_rotate};
+    use super::{auth_listing, auth_listing_keytag, auth_rotate};
     use crate::api::auth::AuthRotateResponse;
     use crate::api::{AuthListingGetResponse, vorgang};
     use crate::db::retrieve::auth::auth_status;
@@ -733,53 +712,6 @@ mod auth_test {
         scenario.teardown().await;
     }
 
-    // DELETE /auth
-    #[tokio::test]
-    async fn test_revoke_key() {
-        let scenario = TestSetup::new("test_revoke_key").await;
-        let server = &scenario.server;
-        let key: APIKey<Argon2KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
-                .await
-                .expect("");
-        let tag = key.keytag();
-        let row = fetch_key_row(tag, &server.sqlx_db).await;
-        assert_eq!(row.deleted_by, None);
-
-        // delete successfully
-        auth_delete(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &params::ApiKeyDelete(tag.to_owned()),
-        )
-        .await
-        .expect("Failed to delete key.");
-        let row = fetch_key_row(tag, &server.sqlx_db).await;
-        assert_eq!(row.deleted_by, Some(1));
-
-        // delete already deleted key
-        auth_delete(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &params::ApiKeyDelete(tag.to_owned()),
-        )
-        .await
-        .expect("Failed to delete key.");
-
-        let row = fetch_key_row(tag, &server.sqlx_db).await;
-        assert_eq!(row.deleted_by, Some(1));
-
-        // delete without permission
-        auth_delete(
-            server,
-            &Claims(APIScope::Admin, 1),
-            &params::ApiKeyDelete(tag.to_owned()),
-        )
-        .await
-        .expect("Failed to delete key.");
-
-        scenario.teardown().await;
-    }
     #[tokio::test]
     async fn sha256_and_argon2_side_by_side_auth() {
         let scenario = TestSetup::new("test_sha256_and_argon2_side_by_side_auth").await;
