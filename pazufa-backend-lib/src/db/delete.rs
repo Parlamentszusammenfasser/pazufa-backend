@@ -1,6 +1,6 @@
 use crate::Result;
 use sqlx::PgExecutor;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 use uuid::Uuid;
 
 /// Deletes a Key with a given keytag
@@ -35,6 +35,7 @@ pub async fn delete_vorgang_by_api_id<'e, E: PgExecutor<'e>>(
         .execute(executor)
         .await?;
 
+    info!(target: "obj", "Deleted Vorgang {api_id}");
     Ok(())
 }
 
@@ -51,10 +52,11 @@ pub async fn bulk_delete_vorgang<'e, E: PgExecutor<'e>>(
     )
     .execute(executor)
     .await?;
+    info!(target: "obj", "Deleted Vorgänge {database_ids:?}");
     Ok(())
 }
 
-/// removes the specified sitzungfrom the database
+/// removes the specified sitzung from the database
 /// # Errors
 /// Can fail due to database errors
 pub async fn delete_sitzung_by_api_id<'e, E: PgExecutor<'e>>(
@@ -64,5 +66,21 @@ pub async fn delete_sitzung_by_api_id<'e, E: PgExecutor<'e>>(
     sqlx::query!("DELETE FROM sitzung WHERE api_id = $1", api_id)
         .execute(executor)
         .await?;
+    info!(target: "obj", "Deleted Sitzung {api_id}");
+    Ok(())
+}
+
+/// removes the specified document from the database
+/// # Errors
+/// Can fail due to database errors
+#[instrument(skip_all, fields(dok=%api_id))]
+pub async fn delete_dokument_by_api_id<'e, E: PgExecutor<'e>>(
+    api_id: Uuid,
+    executor: E,
+) -> Result<()> {
+    sqlx::query!("DELETE FROM dokument WHERE api_id = $1", api_id)
+        .execute(executor)
+        .await?;
+    info!(target: "obj", "Deleted Dokument {api_id}");
     Ok(())
 }

@@ -54,12 +54,15 @@ async fn dokument_delete_id(
         return DeleteResponse::Unauth;
     }
 
-    libmisca::dokument_delete_id(api_impl.as_ref(), &path_params)
+    pazufa_backend_lib::db::delete::delete_dokument_by_api_id(path_params.api_id, &api_impl.sqlx_db)
         .await
-        .unwrap_or_else(|e| {
-            warn!("{e}");
-            DeleteResponse::Error(e.to_string())
-        })
+        .map_or_else(
+            |e| {
+                warn!("{e}");
+                DeleteResponse::Error(e.to_string())
+            },
+            |()| DeleteResponse::Success,
+        )
 }
 #[utoipa::path(
     put,

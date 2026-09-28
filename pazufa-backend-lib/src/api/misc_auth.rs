@@ -1,5 +1,4 @@
-use super::RoundTimestamp;
-use super::{DeleteResponse, PutResponse};
+use super::{PutResponse, RoundTimestamp};
 use crate::models::params;
 use crate::{PazufaError, PazufaServer, Result, models};
 use sqlx::PgTransaction;
@@ -815,23 +814,6 @@ pub async fn enum_put(
     Ok(thingy)
 }
 
-/// Deletes a document by its supplied `api_id`
-/// # Errors
-/// Can fail due to database errors
-#[instrument(skip_all, fields(dok=%path_params.api_id))]
-pub async fn dokument_delete_id(
-    server: &PazufaServer,
-    path_params: &params::ApiIdPathParam,
-) -> Result<DeleteResponse> {
-    let mut tx = server.sqlx_db.begin().await?;
-    sqlx::query!("DELETE FROM dokument WHERE api_id = $1", path_params.api_id)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    info!(target: "obj", "Deleted Dokument {}", path_params.api_id);
-    info!("Success");
-    return Ok(DeleteResponse::Success);
-}
 /// Inserts a document by its supplied `api_id`
 /// only for administrative purposes, can create dangling references
 /// # Errors
