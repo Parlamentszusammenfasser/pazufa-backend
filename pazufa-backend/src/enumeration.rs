@@ -1,5 +1,5 @@
 use axum::extract::{Json, Path, Query, State};
-use pazufa_backend_lib::LTZFServer;
+use pazufa_backend_lib::PazufaServer;
 use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, ListingGetResponse, PutResponse, misc as libmisc, misc_auth as libmisca,
@@ -19,7 +19,7 @@ use utoipa_axum::routes;
 )]
 pub(super) struct EnumApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new().routes(routes!(enum_delete, enum_put, enum_get))
 }
 
@@ -35,7 +35,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
 async fn enum_delete(
     claims: Claims,
     Path(path_params): Path<params::EnumDeletePathParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> DeleteResponse {
     // Authentication
     if !matches!(claims.0, APIScope::KeyAdder | APIScope::Admin) {
@@ -68,7 +68,7 @@ async fn enum_delete(
 async fn enum_put(
     claims: Claims,
     Path(path_params): Path<params::EnumPathParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<models::ReplacementPutRequest<String>>,
 ) -> PutResponse {
     // Authentication
@@ -101,7 +101,7 @@ async fn enum_put(
 async fn enum_get(
     Path(path_params): Path<params::EnumPathParams>,
     Query(query_params): Query<params::EnumGetQueryParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> ListingGetResponse<String> {
     libmisc::enum_get(api_impl.as_ref(), &path_params, &query_params)
         .await

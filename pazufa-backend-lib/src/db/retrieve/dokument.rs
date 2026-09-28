@@ -1,5 +1,5 @@
 use crate::api::PaginationResponsePart;
-use crate::error::{DataValidationError, LTZFError, Result};
+use crate::error::{DataValidationError, PazufaError, Result};
 use crate::models;
 use crate::models::dokument::{
     DokumentHash, HashWrapper, ZusammenfassungWrapper, Zusammenfassungstupel,
@@ -47,7 +47,7 @@ pub async fn hashes_of_dok(id: i32, executor: &mut sqlx::PgTransaction<'_>) -> R
     for r in recs {
         let strat = HashStrategy::from_str(&r.strat)
             .map_err(|e| crate::error::DataValidationError::InvalidEnumValue { msg: e.clone() })?;
-        let mime = Mime::from_str(&r.mime).map_err(|e| LTZFError::Other {
+        let mime = Mime::from_str(&r.mime).map_err(|e| PazufaError::Other {
             message: format!(
                 "Error querying mime from the database: 
                 Unable to convert {} into Mime Enumeration: {e}",
@@ -167,7 +167,7 @@ pub async fn dokument_by_id(
     .fetch_all(&mut **executor)
     .await?;
     let subdoc_id = if let Some(i) = rec.subdoc_id {
-        Some(u16::try_from(i).map_err(|e| LTZFError::Other {
+        Some(u16::try_from(i).map_err(|e| PazufaError::Other {
             message: format!("failed converting into u16 out of the database: {e}"),
         })?)
     } else {
@@ -192,7 +192,7 @@ pub async fn dokument_by_id(
         meinung: rec
             .meinung
             .map(|x| {
-                u8::try_from(x).map_err(|e| LTZFError::Other {
+                u8::try_from(x).map_err(|e| PazufaError::Other {
                     message: format!("Failed to convert meinung to u8: {e}"),
                 })
             })
@@ -229,7 +229,7 @@ pub async fn get_dokument_by_parameter(
     .await?;
 
     let prp = PaginationResponsePart::new(
-        u32::try_from(dokument_count).map_err(|e| LTZFError::Other {
+        u32::try_from(dokument_count).map_err(|e| PazufaError::Other {
             message: format!(
                 "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
             ),

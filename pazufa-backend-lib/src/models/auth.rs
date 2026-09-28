@@ -1,6 +1,6 @@
 use super::APIScope;
 use crate::error::DataValidationError;
-use crate::{LTZFError, Result};
+use crate::{PazufaError, Result};
 use argon2::PasswordHasher;
 use argon2::password_hash::{Salt, SaltString};
 use base64::prelude::*;
@@ -182,7 +182,7 @@ pub fn check_crc(key: &str) -> bool {
 }
 
 impl<T: APIKeyGenerator> TryFrom<String> for APIKey<T> {
-    type Error = LTZFError;
+    type Error = PazufaError;
     fn try_from(thing: String) -> Result<APIKey<T>> {
         let key = APIKey(thing, PhantomData);
         if key.is_format_valid() {

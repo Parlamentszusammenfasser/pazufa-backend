@@ -19,8 +19,8 @@ pub mod error;
 pub mod models;
 pub mod utils;
 
-pub use crate::api::{LTZFArc, LTZFServer};
-pub use crate::error::{LTZFError, Result};
+pub use crate::api::{LTZFArc, PazufaServer};
+pub use crate::error::{PazufaError, Result};
 use clap::Parser;
 use lettre::message::Mailbox;
 use lettre::message::header::ContentType;
@@ -160,7 +160,7 @@ impl Configuration {
             &self.mail_recipient,
         )
         else {
-            return Err(LTZFError::Infrastructure {
+            return Err(PazufaError::Infrastructure {
                 source: Box::new(error::InfrastructureError::Configuration {
                     message: "Mail Configuration is incomplete".into(),
                     config: Box::new(self.clone()),
@@ -170,28 +170,31 @@ impl Configuration {
 
         let sender = lettre::message::Mailbox::new(
             Some("PaZuFa".to_owned()),
-            mail_sender.parse().map_err(|e| LTZFError::Infrastructure {
-                source: Box::new(error::InfrastructureError::Configuration {
-                    message: format!("Parsing mail sender to valid mail address failed: {e}"),
-                    config: Box::new(self.clone()),
-                }),
-            })?,
+            mail_sender
+                .parse()
+                .map_err(|e| PazufaError::Infrastructure {
+                    source: Box::new(error::InfrastructureError::Configuration {
+                        message: format!("Parsing mail sender to valid mail address failed: {e}"),
+                        config: Box::new(self.clone()),
+                    }),
+                })?,
         );
 
-        let recipient: Mailbox = mail_recipient
-            .parse()
-            .map_err(|e| LTZFError::Infrastructure {
-                source: Box::new(error::InfrastructureError::Configuration {
-                    message: format!("Parsing mail recipient to valid mailbox failed: {e}"),
-                    config: Box::new(self.clone()),
-                }),
-            })?;
+        let recipient: Mailbox =
+            mail_recipient
+                .parse()
+                .map_err(|e| PazufaError::Infrastructure {
+                    source: Box::new(error::InfrastructureError::Configuration {
+                        message: format!("Parsing mail recipient to valid mailbox failed: {e}"),
+                        config: Box::new(self.clone()),
+                    }),
+                })?;
 
         let mailer = SmtpTransport::relay(mail_server)?
             .credentials(Credentials::new(mail_user.clone(), mail_password.clone()))
             .build();
         if !mailer.test_connection()? {
-            return Err(LTZFError::Infrastructure {
+            return Err(PazufaError::Infrastructure {
                 source: Box::new(error::InfrastructureError::Configuration {
                     message:
                         "Connection to SMTP server failed. Probably invalid authentication data."
@@ -216,7 +219,7 @@ impl Configuration {
 
         mailer
             .send(&message)
-            .map_err(|e| LTZFError::Infrastructure {
+            .map_err(|e| PazufaError::Infrastructure {
                 source: Box::new(error::InfrastructureError::Configuration {
                     message: format!("Failed to send testmail using configuration: {e}"),
                     config: Box::new(self.clone()),

@@ -6,7 +6,7 @@ use crate::models::auth::{
 use crate::models::params::{AuthListingKeytagPathParams, XAPIKey};
 use crate::utils::as_option;
 use crate::utils::header_params::HeaderParams;
-use crate::{LTZFServer, Result, error::LTZFError};
+use crate::{PazufaServer, Result, error::PazufaError};
 use argon2::password_hash::SaltString;
 use axum::extract::FromRequestParts;
 use axum::http::{StatusCode, request::Parts};
@@ -45,7 +45,7 @@ impl Claims {
     /// - there is no key in the header map
     /// - there is a key in the header map, but it cannot be matched with a key from the database
     /// - there is both of those but database errors say no
-    pub async fn extract(server: &LTZFServer, XAPIKey(key): XAPIKey) -> Result<Self> {
+    pub async fn extract(server: &PazufaServer, XAPIKey(key): XAPIKey) -> Result<Self> {
         #[derive(FromRow)]
         struct Response {
             pub id: i32,
@@ -101,7 +101,7 @@ impl Claims {
                         .fetch_one(&server.sqlx_db)
                         .await?;
                     warn!("Key was deleted by {delkeytag}");
-                    Err(LTZFError::Validation {
+                    Err(PazufaError::Validation {
                         source: Box::new(crate::error::DataValidationError::Unauthorized {
                             reason: format!(
                                 "API Key was valid but is deleted. Tag: {}\nAdministrator Key: {delkeytag}", api_key.keytag()
@@ -114,7 +114,7 @@ impl Claims {
                     .execute(&server.sqlx_db)
                     .await?;
                 warn!("Key was valid but has expired since last use");
-                Err(LTZFError::Validation {
+                Err(PazufaError::Validation {
                     source: Box::new(crate::error::DataValidationError::Unauthorized {
                         reason: format!("API Key was valid but has expired. Tag: {}", api_key.keytag()),
                     }),
@@ -133,7 +133,7 @@ impl Claims {
             }
         } else {
             warn!("Key was not found in the database");
-            Err(LTZFError::Validation {
+            Err(PazufaError::Validation {
                 source: Box::new(crate::error::DataValidationError::Unauthorized {
                     reason: "API Key was not found in the Database".to_string(),
                 }),
@@ -142,12 +142,12 @@ impl Claims {
     }
 }
 
-impl FromRequestParts<Arc<LTZFServer>> for Claims {
+impl FromRequestParts<Arc<PazufaServer>> for Claims {
     type Rejection = Response;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &Arc<LTZFServer>,
+        state: &Arc<PazufaServer>,
     ) -> std::result::Result<Self, Self::Rejection> {
         let HeaderParams(key) = HeaderParams::<XAPIKey>::from_request_parts(parts, state)
             .await
@@ -271,7 +271,7 @@ impl IntoResponse for AuthListingKeytagResponse {
 /// # Errors
 /// Can fail if the database operations fail
 #[instrument(skip_all, fields(claim=%claims.0))]
-pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRotateResponse> {
+pub async fn auth_rotate(server: &PazufaServer, claims: &Claims) -> Result<AuthRotateResponse> {
     let mut tx = server.sqlx_db.begin().await?;
     let old_key_entry = get_api_key_metadata(claims.1, &mut *tx).await?;
 
@@ -371,7 +371,7 @@ pub struct KeytagListing {
 /// # Errors
 /// Can fail if the database operations fail
 pub async fn auth_listing_keytag(
-    server: &LTZFServer,
+    server: &PazufaServer,
     path_params: &AuthListingKeytagPathParams,
 ) -> Result<KeytagListing> {
     let dings = sqlx::query!(

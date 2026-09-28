@@ -1,7 +1,7 @@
 use super::RoundTimestamp;
 use super::{DeleteResponse, PutResponse};
 use crate::models::params;
-use crate::{LTZFError, LTZFServer, Result, models};
+use crate::{PazufaError, PazufaServer, Result, models};
 use sqlx::PgTransaction;
 use sqlx::SqlSafeStr;
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,7 +72,7 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$i
 /// Can fail if database operations fail.
 #[instrument(skip_all, fields(query=?query_params))]
 pub async fn autoren_delete_by_param(
-    server: &LTZFServer,
+    server: &PazufaServer,
     query_params: &params::AutorenDeleteByParamQueryParams,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -103,7 +103,7 @@ pub async fn autoren_delete_by_param(
 /// Can fail if database operations fail.
 #[instrument(skip_all, fields(query=?query_params))]
 pub async fn gremien_delete_by_param(
-    server: &LTZFServer,
+    server: &PazufaServer,
     query_params: &params::GremienDeleteByParamQueryParams,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -134,7 +134,7 @@ pub async fn gremien_delete_by_param(
 /// Can fail if database operations fail.
 #[instrument(skip_all, fields(name=?path_params.name))]
 pub async fn enum_delete(
-    server: &LTZFServer,
+    server: &PazufaServer,
     path_params: &params::EnumDeletePathParams,
 ) -> Result<()> {
     use models::EnumerationNames;
@@ -211,7 +211,7 @@ async fn count_existing_authors(
     .fetch_one(&mut **tx)
     .await?
     .unwrap_or_default();
-    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
+    usize::try_from(existing_obj_cnt).map_err(|e| PazufaError::Other {
         message: format!("Failed to convert object count to usize: {e}"),
     })
 }
@@ -241,7 +241,7 @@ async fn count_existing_gremien(
         ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
         .fetch_one(&mut **tx).await?.unwrap_or_default();
 
-    usize::try_from(existing_obj_cnt).map_err(|e| LTZFError::Other {
+    usize::try_from(existing_obj_cnt).map_err(|e| PazufaError::Other {
         message: format!("Failed to convert object count to usize: {e}"),
     })
 }
@@ -341,7 +341,7 @@ async fn resolve_conflicts(
 /// - Validation Errors of the replacement logic
 #[instrument(skip_all)]
 pub async fn autoren_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     body: &models::ReplacementPutRequest<models::Autor>,
 ) -> Result<PutResponse> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -456,7 +456,7 @@ pub async fn autoren_put(
 /// - Validation Errors of the replacement logic
 #[instrument(skip_all)]
 pub async fn gremien_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     body: &models::ReplacementPutRequest<models::Gremium>,
 ) -> Result<PutResponse> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -583,7 +583,7 @@ async fn enum_put_preliminary_checks(
     .bind(&body.objects[..])
     .fetch_one(&mut **tx)
     .await?;
-    let present = usize::try_from(present).map_err(|e| LTZFError::Other {
+    let present = usize::try_from(present).map_err(|e| PazufaError::Other {
         message: format!("Error converting expected object count: {e}"),
     })?;
 
@@ -753,7 +753,7 @@ async fn enum_put_conflict_cleanup(
 /// - Validation Errors of the replacement logic
 #[instrument(skip_all, fields(name=%path_params.name))]
 pub async fn enum_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     path_params: &params::EnumPathParams,
     body: &models::ReplacementPutRequest<String>,
 ) -> Result<PutResponse> {
@@ -820,7 +820,7 @@ pub async fn enum_put(
 /// Can fail due to database errors
 #[instrument(skip_all, fields(dok=%path_params.api_id))]
 pub async fn dokument_delete_id(
-    server: &LTZFServer,
+    server: &PazufaServer,
     path_params: &params::ApiIdPathParam,
 ) -> Result<DeleteResponse> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -838,7 +838,7 @@ pub async fn dokument_delete_id(
 /// Can fail due to database errors
 #[instrument(skip_all, fields(dok=%path_params.api_id))]
 pub async fn dokument_put_id(
-    server: &LTZFServer,
+    server: &PazufaServer,
     creator_keyidx: i32,
     path_params: &params::ApiIdPathParam,
     body: &models::Dokument,
@@ -876,7 +876,7 @@ pub async fn dokument_put_id(
 
 #[cfg(test)]
 mod test_authorisierte_sonstige {
-    use super::super::{LTZFServer, PutResponse};
+    use super::super::{PazufaServer, PutResponse};
     use super::{autoren_delete_by_param, enum_delete, gremien_delete_by_param};
     use crate::api::vorgang;
     use crate::api::{ListingGetResponse, misc};
@@ -885,7 +885,7 @@ mod test_authorisierte_sonstige {
     use crate::utils::testing::{TestSetup, generate};
     use tracing_test::traced_test;
 
-    async fn insert_default_vorgang(server: &LTZFServer) {
+    async fn insert_default_vorgang(server: &PazufaServer) {
         let vorgang = generate::default_vorgang();
         vorgang::vorgang_id_put(
             server,
@@ -898,7 +898,7 @@ mod test_authorisierte_sonstige {
         .await
         .expect("Failed to create Vorgang.");
     }
-    async fn fetch_all_authors(server: &LTZFServer) -> Vec<models::Autor> {
+    async fn fetch_all_authors(server: &PazufaServer) -> Vec<models::Autor> {
         let autoren = misc::autoren_get(
             server,
             &params::AutorenGetQueryParams {
@@ -917,7 +917,7 @@ mod test_authorisierte_sonstige {
             _ => panic!("Error"),
         }
     }
-    async fn fetch_all_gremien(server: &LTZFServer) -> Vec<models::Gremium> {
+    async fn fetch_all_gremien(server: &PazufaServer) -> Vec<models::Gremium> {
         let gremien = misc::gremien_get(
             server,
             &params::GremienGetQueryParams {
@@ -936,7 +936,7 @@ mod test_authorisierte_sonstige {
             _ => panic!("Error"),
         }
     }
-    async fn fetch_all_enumvars(server: &LTZFServer, name: EnumerationNames) -> Vec<String> {
+    async fn fetch_all_enumvars(server: &PazufaServer, name: EnumerationNames) -> Vec<String> {
         let entries = misc::enum_get(
             server,
             &params::EnumPathParams { name },
@@ -991,7 +991,7 @@ mod test_authorisierte_sonstige {
     }
 
     async fn enum_delete_with(
-        server: &LTZFServer,
+        server: &PazufaServer,
         pp: &params::EnumDeletePathParams,
     ) -> crate::Result<()> {
         enum_delete(server, pp).await
@@ -1342,7 +1342,7 @@ mod test_authorisierte_sonstige {
     }
 
     async fn ep_with(
-        server: &LTZFServer,
+        server: &PazufaServer,
         tp: models::EnumerationNames,
         body: &models::ReplacementPutRequest<String>,
     ) -> crate::Result<PutResponse> {

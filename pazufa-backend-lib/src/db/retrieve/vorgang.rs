@@ -1,6 +1,6 @@
 use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
-use crate::error::{DataValidationError, LTZFError, Result};
+use crate::error::{DataValidationError, PazufaError, Result};
 use crate::models;
 use crate::models::enumerations::{Ressort, Sachgebiet};
 use std::str::FromStr;
@@ -181,7 +181,7 @@ pub async fn vorgang_by_id(
         .fetch_optional(&mut **executor)
         .await?;
     let ressort = if let Some(ressort) = ressort {
-        Some(ressort.map_err(|e| LTZFError::Other {
+        Some(ressort.map_err(|e| PazufaError::Other {
             message: format!("unknown ressort value from the database: {e}"),
         })?)
     } else {
@@ -267,7 +267,7 @@ pub async fn vorgang_by_id(
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
-        wahlperiode: u16::try_from(pre_vg.wahlperiode).map_err(|e| LTZFError::Other {
+        wahlperiode: u16::try_from(pre_vg.wahlperiode).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert vorgang wahlperiode as it is negative: {e}"),
         })?,
         schlagworte,
@@ -373,10 +373,10 @@ pub async fn station_by_id(
     .map(|x| {
         Result::<models::Gremium>::Ok(models::Gremium {
             name: x.name,
-            wahlperiode: u16::try_from(x.wp).map_err(|e| LTZFError::Other {
+            wahlperiode: u16::try_from(x.wp).map_err(|e| PazufaError::Other {
                 message: format!("Failed to convert gremium wahlperiode as it is negative: {e}"),
             })?,
-            parlament: models::Parlament::from_str(&x.value).map_err(|_e| LTZFError::Other {
+            parlament: models::Parlament::from_str(&x.value).map_err(|_e| PazufaError::Other {
                 message: format!("Invalid parliament in database: {}", x.value),
             })?,
             link: x.link,
@@ -398,7 +398,7 @@ pub async fn station_by_id(
         trojanergefahr: temp_stat
             .trojanergefahr
             .map(|x| {
-                u8::try_from(x).map_err(|e| LTZFError::Other {
+                u8::try_from(x).map_err(|e| PazufaError::Other {
                     message: format!("Failed to convert station trojanergefahr to u8: {e}"),
                 })
             })
@@ -426,7 +426,7 @@ pub async fn vorgang_by_parameter(
 ) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
     let mut vg_list = vorgang_fetch_dbids(params, &mut **executor).await?;
     let prp = PaginationResponsePart::new(
-        u32::try_from(vg_list.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(vg_list.len()).map_err(|e| PazufaError::Other {
             message: format!(
                 "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
             ),

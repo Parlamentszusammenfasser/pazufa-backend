@@ -1,6 +1,6 @@
 use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
-use crate::error::{LTZFError, Result};
+use crate::error::{PazufaError, Result};
 use crate::models;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -73,7 +73,7 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
     .await?;
 
     Ok(models::Top {
-        nummer: u32::try_from(scaffold.nummer).map_err(|e| LTZFError::Other {
+        nummer: u32::try_from(scaffold.nummer).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert top number to u32 as it is negative: {e}"),
         })?,
         titel: scaffold.titel,
@@ -167,7 +167,7 @@ pub async fn sitzung_by_id(
     Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
         touched_by: vec![],
-        nummer: u32::try_from(scaffold.nummer).map_err(|e| LTZFError::Other {
+        nummer: u32::try_from(scaffold.nummer).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert sitzung number to u32 as it is negative: {e}"),
         })?,
         titel: scaffold.titel,
@@ -176,13 +176,13 @@ pub async fn sitzung_by_id(
         gremium: models::Gremium {
             name: scaffold.grname,
             link: scaffold.gr_link,
-            wahlperiode: u16::try_from(scaffold.wp).map_err(|e| LTZFError::Other {
+            wahlperiode: u16::try_from(scaffold.wp).map_err(|e| PazufaError::Other {
                 message: format!(
                     "Failed to convert gremium wahlperiode to u32 as it is negative: {e}"
                 ),
             })?,
             parlament: models::Parlament::from_str(&scaffold.plm).map_err(|_e| {
-                LTZFError::Other {
+                PazufaError::Other {
                     message: format!("Invalid parliament in database: {}", scaffold.plm),
                 }
             })?,
@@ -242,7 +242,7 @@ WHERE
 ($7::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($7, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC",
         params.parlament.map(|p| p.to_string()),
-        params.wp.map(|x| i32::try_from(x).map_err(|e| LTZFError::Other {
+        params.wp.map(|x| i32::try_from(x).map_err(|e| PazufaError::Other {
             message: format!(
                 "Failed to convert sitzung wahlperiode as it exceeds i32::MAX: {e}"
             )
@@ -257,7 +257,7 @@ ORDER BY pre_table.lastmod ASC",
     .fetch_all(&mut **tx)
     .await?;
     let prp = PaginationResponsePart::new(
-        u32::try_from(as_list.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(as_list.len()).map_err(|e| PazufaError::Other {
             message: format!(
                 "Result length cannot be converted to i32, as it exceed i32::MAX: {e}"
             ),

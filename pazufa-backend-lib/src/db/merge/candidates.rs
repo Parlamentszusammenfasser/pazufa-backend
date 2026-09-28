@@ -1,9 +1,9 @@
-use crate::LTZFServer;
+use crate::PazufaServer;
 use crate::Result;
 use crate::db::merge::MatchState;
 use crate::db::retrieve;
 use crate::error::DataValidationError;
-use crate::error::LTZFError;
+use crate::error::PazufaError;
 use crate::models;
 use crate::models::enumerations::HashStrategy;
 #[cfg(feature = "track-validation")]
@@ -21,7 +21,7 @@ use uuid::Uuid;
 pub(crate) async fn vorgang_merge_candidates(
     model: &models::Vorgang,
     executor: impl sqlx::PgExecutor<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<MatchState<i32>> {
     let obj = "merged Vorgang";
     let (mut ident_list, mut identtyp_list) = (vec![], vec![]);
@@ -95,9 +95,9 @@ pub(crate) async fn vorgang_merge_candidates(
 	    )
     );",
     model.api_id, &ident_list[..], &identtyp_list[..],
-    i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other {message: format!("value was unable to be converted to i32: {e}")})?,
+    i32::try_from(model.wahlperiode).map_err(|e| PazufaError::Other {message: format!("value was unable to be converted to i32: {e}")})?,
     srv.guard_ts(&model.typ, model.api_id, obj), &parls[..],
-    i32::try_from(model.stationen.len()).map_err(|e|LTZFError::Other {message: format!("value was unable to be converted to i32: {e}")})?)
+    i32::try_from(model.stationen.len()).map_err(|e|PazufaError::Other {message: format!("value was unable to be converted to i32: {e}")})?)
     .fetch_all(executor).await?;
 
     tracing::debug!(
@@ -130,7 +130,7 @@ pub(crate) async fn station_merge_candidates(
     model: &models::Station,
     vorgang: i32,
     executor: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<MatchState<i32>> {
     let obj = "merged station";
     let api_id = model.api_id.unwrap_or(uuid::Uuid::now_v7());
@@ -245,7 +245,7 @@ pub(crate) async fn station_merge_candidates(
 pub(crate) async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<MatchState<i32>> {
     let mut hash_values: Vec<String> = vec![];
     let mut hash_types: Vec<String> = vec![];
@@ -479,7 +479,7 @@ mod candid_test {
 
         let conflicting_match = station_merge_candidates(&stat, 2, &mut tx, srv).await;
         assert!(match conflicting_match {
-            Err(crate::error::LTZFError::Validation { source }) =>
+            Err(crate::error::PazufaError::Validation { source }) =>
                 matches!(*source, DataValidationError::Conflict { .. }),
             _ => false,
         });

@@ -3,10 +3,10 @@ use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, PutResponse, auth::Claims};
 use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_parameter, sitzung_dbid};
 use crate::db::{delete, insert, retrieve};
-use crate::error::LTZFError;
+use crate::error::PazufaError;
 use crate::models::params::XScraperId;
 use crate::models::{APIScope, params};
-use crate::{LTZFServer, Result, models};
+use crate::{PazufaServer, Result, models};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::Datelike;
@@ -103,7 +103,7 @@ impl IntoResponse for SitzungListingResponse {
 /// Can fail due to database errors
 #[instrument(skip_all, fields(sid=%path_params.api_id))]
 pub async fn sitzung_delete(
-    server: &LTZFServer,
+    server: &PazufaServer,
     path_params: &params::ApiIdPathParam,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -122,7 +122,7 @@ pub async fn sitzung_delete(
 /// Can fail due to database errors or date constraints
 #[instrument(skip_all, fields(claim=%claims.0, date=%path_params.datum))]
 pub async fn kal_date_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     claims: &Claims,
     scraper_id: &XScraperId,
     path_params: &params::KalDatePutPathParams,
@@ -131,7 +131,7 @@ pub async fn kal_date_put(
     let last_upd_day = chrono::Utc::now()
         .date_naive()
         .checked_sub_days(chrono::Days::new(1))
-        .ok_or_else(|| LTZFError::Other {
+        .ok_or_else(|| PazufaError::Other {
             message: "Date::now() out of bounds.".to_string(),
         })?;
     if claims.0 == APIScope::Collector && path_params.datum < last_upd_day {
@@ -170,7 +170,7 @@ pub async fn kal_date_put(
     let dt_end = path_params
         .datum
         .checked_add_days(chrono::Days::new(1))
-        .ok_or_else(|| LTZFError::Other {
+        .ok_or_else(|| PazufaError::Other {
             message: "Parameter `datum` out of bounds.".to_string(),
         })?
         .and_time(chrono::NaiveTime::default())
@@ -209,7 +209,7 @@ pub async fn kal_date_put(
 #[doc = "`SidPut` - PUT /api/v2/sitzung/{sid}"]
 #[instrument(skip_all, fields(claim=%claims.0, sid=%path_params.api_id))]
 pub async fn sid_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     claims: &Claims,
     path_params: &params::ApiIdPathParam,
     body: &models::Sitzung,
@@ -249,7 +249,7 @@ pub async fn sid_put(
 /// Can fail due to database errors or date constraints
 #[instrument(skip_all, fields(date=%path_params.datum))]
 pub async fn kal_date_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     path_params: &params::KalDateGetPathParams,
     query_params: &params::KalDateGetQueryParams,
@@ -320,7 +320,7 @@ pub async fn kal_date_get(
 #[doc = "`KalGet` - GET /api/v2/kalender"]
 #[instrument(skip_all)]
 pub async fn kal_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     query_params: &params::KalGetQueryParams,
     expand: bool,
@@ -389,7 +389,7 @@ pub async fn kal_get(
 /// Can fail due to database errors
 #[instrument(skip_all, fields(sid=%path_params.api_id))]
 pub async fn s_get_by_id(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     path_params: &params::ApiIdPathParam,
     expand: bool,
@@ -440,7 +440,7 @@ pub async fn s_get_by_id(
 /// - Filter constraints
 #[instrument(skip_all)]
 pub async fn s_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     query_params: &params::SGetQueryParams,
     expand: bool,
@@ -764,7 +764,7 @@ mod sitzung_test {
         // Cleanup
         setup.teardown().await;
     }
-    async fn insert_default_session(server: &crate::LTZFServer) {
+    async fn insert_default_session(server: &crate::PazufaServer) {
         let session = generate::default_sitzung();
         let response = super::sid_put(
             server,

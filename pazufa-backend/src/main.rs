@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use axum::{extract::DefaultBodyLimit, http::Method, routing::get};
 use clap::Parser;
 use pazufa_backend_lib::Configuration;
-use pazufa_backend_lib::api::LTZFServer;
+use pazufa_backend_lib::api::PazufaServer;
 use pazufa_backend_lib::models::auth::{APIKey, Argon2KeyGenerator, generate_salt};
 use pazufa_backend_lib::utils::{notify::MailBundle, shutdown_signal, tracing::Logging};
 use sqlx::{PgTransaction, SqlSafeStr};
@@ -242,7 +242,7 @@ async fn initialize_readonly_user(pass: String, tx: &mut PgTransaction<'_>) -> R
     Ok(())
 }
 
-fn initialize_router(state: &Arc<LTZFServer>) -> axum::Router {
+fn initialize_router(state: &Arc<PazufaServer>) -> axum::Router {
     let (iv, cnt) = (
         u64::from(state.config.req_limit_interval),
         state.config.req_limit_count,
@@ -397,7 +397,7 @@ async fn main() -> Result<()> {
     let mailbundle = MailBundle::new(&config)?;
     tracing::debug!("Mail Bundle Constructed");
 
-    let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle, logging));
+    let state = Arc::new(PazufaServer::new(sqlx_db, config, mailbundle, logging));
     tracing::debug!("Server State Constructed");
 
     // Init Axum router

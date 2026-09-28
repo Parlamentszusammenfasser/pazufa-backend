@@ -1,4 +1,4 @@
-use crate::LTZFServer;
+use crate::PazufaServer;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -10,7 +10,7 @@ use utoipa::{IntoResponses, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
         .routes(routes!(ping))
         .routes(routes!(status))
@@ -63,7 +63,7 @@ impl IntoResponse for PingResponse {
 )]
 async fn ping(
     Query(query_params): Query<PingQueryParams>,
-    State(_api_impl): State<Arc<LTZFServer>>,
+    State(_api_impl): State<Arc<PazufaServer>>,
 ) -> PingResponse {
     if let Some(t) = query_params.t
         && let Ok(current_time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -99,7 +99,7 @@ async fn ping(
         (status = 500, description = "API is not running")
     )
 )]
-async fn status(State(api_impl): State<Arc<LTZFServer>>) -> Response {
+async fn status(State(api_impl): State<Arc<PazufaServer>>) -> Response {
     (
         StatusCode::OK,
         axum::Json(api_impl.statistics.output().await),

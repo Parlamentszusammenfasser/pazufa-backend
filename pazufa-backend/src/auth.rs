@@ -1,4 +1,4 @@
-use crate::LTZFServer;
+use crate::PazufaServer;
 use axum::extract::{Path, Query, State};
 use axum::response::Json;
 use pazufa_backend_lib::api::auth::{self as libauth, Claims, KeytagListing};
@@ -28,7 +28,7 @@ use utoipa_axum::routes;
 )]
 pub(super) struct AuthApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
         .routes(routes!(auth_post, auth_delete))
         .routes(routes!(auth_status,))
@@ -50,7 +50,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
 #[tracing::instrument(skip_all, fields(claim=%scope))]
 async fn auth_post(
     Claims(scope, index): Claims,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<APIKeyCreate>,
 ) -> libauth::AuthPostResponse {
     // Authentication
@@ -58,7 +58,7 @@ async fn auth_post(
         return libauth::AuthPostResponse::Unauth;
     }
     async fn inner_with_result(
-        server: &LTZFServer,
+        server: &PazufaServer,
         claims: &Claims,
         body: &APIKeyCreate,
     ) -> pazufa_backend_lib::Result<String> {
@@ -93,7 +93,7 @@ async fn auth_post(
 #[tracing::instrument(skip_all)]
 async fn auth_status(
     claims: Claims,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> libauth::AuthStatusResponse {
     async fn inner<'e, E: PgExecutor<'e>>(
         key_idx: i32,
@@ -139,7 +139,7 @@ async fn auth_status(
 )]
 async fn auth_rotate(
     claims: Claims,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> libauth::AuthRotateResponse {
     libauth::auth_rotate(Arc::clone(&api_impl).as_ref(), &claims)
         .await
@@ -162,7 +162,7 @@ async fn auth_rotate(
 async fn auth_delete(
     HeaderParams(api_key_delete): HeaderParams<params::ApiKeyDelete>,
     claims: Claims,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> DeleteResponse {
     // Authentication
     if claims.0 != APIScope::KeyAdder {
@@ -196,7 +196,7 @@ async fn auth_delete(
 async fn auth_listing(
     claims: Claims,
     Query(query_params): Query<params::ListingQueryParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> AuthListingGetResponse<KeyTag> {
     // Authentication
     if claims.0 != APIScope::KeyAdder {
@@ -205,7 +205,7 @@ async fn auth_listing(
 
     async fn inner(
         qp: params::ListingQueryParams,
-        srv: Arc<LTZFServer>,
+        srv: Arc<PazufaServer>,
     ) -> anyhow::Result<AuthListingGetResponse<KeyTag>> {
         let mut tx = srv.sqlx_db.begin().await?;
         let (prp, body) = pazufa_backend_lib::db::retrieve::auth::get_paginated_keytags(
@@ -243,7 +243,7 @@ async fn auth_listing(
 async fn auth_listing_keytag(
     claims: Claims,
     Path(path_params): Path<params::AuthListingKeytagPathParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> libauth::AuthListingKeytagResponse {
     // Authentication
     if claims.0 != APIScope::KeyAdder {

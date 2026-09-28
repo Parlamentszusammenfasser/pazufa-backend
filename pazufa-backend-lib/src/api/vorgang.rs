@@ -3,9 +3,9 @@ use super::find_applicable_date_range;
 use crate::api::{GetSingleResponse, ListingGetResponse, RoundTimestamp};
 use crate::db::retrieve::vorgang_dbid;
 use crate::db::{delete, insert, merge, retrieve};
-use crate::error::{DataValidationError, LTZFError};
+use crate::error::{DataValidationError, PazufaError};
 use crate::models::{APIScope, params};
-use crate::{LTZFServer, Result, models};
+use crate::{PazufaServer, Result, models};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// Can fail due to database errors
 #[instrument(skip_all, fields( vg_id=%path_params.api_id))]
 pub async fn vorgang_id_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     creator_index: i32,
     path_params: &params::ApiIdPathParam,
     body: &models::Vorgang,
@@ -46,7 +46,7 @@ pub async fn vorgang_id_put(
             Ok(PutResponse::Success)
         }
         Err(e) => match &e {
-            LTZFError::Validation { source } => match &(**source) {
+            PazufaError::Validation { source } => match &(**source) {
                 DataValidationError::MalformedVorgang { reason } => {
                     tx.rollback().await?;
                     Ok(PutResponse::BadReq(reason.clone()))
@@ -67,7 +67,7 @@ pub async fn vorgang_id_put(
 /// - Errors in the merge process
 #[instrument(skip_all, fields( scraper=%header_params.0))]
 pub async fn vorgang_put(
-    server: &LTZFServer,
+    server: &PazufaServer,
     creator_index: i32,
     header_params: &params::XScraperId,
     body: &models::Vorgang,
@@ -81,7 +81,7 @@ pub async fn vorgang_put(
         Err(e) => {
             warn!("Unsuccessful Integration Attempt: {e}");
             match &e {
-                LTZFError::Validation { source } => match &(**source) {
+                PazufaError::Validation { source } => match &(**source) {
                     DataValidationError::Conflict { .. }
                     | DataValidationError::AmbiguousMatch { .. } => Ok(PutResponse::Conflict),
                     DataValidationError::MalformedVorgang { reason } => {
@@ -103,7 +103,7 @@ pub async fn vorgang_put(
 /// Can fail due to database errors
 #[instrument(skip_all, fields(vg=%path_params.api_id))]
 pub async fn vorgang_get_by_id(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     path_params: &params::ApiIdPathParam,
     expand: bool,
@@ -155,7 +155,7 @@ pub async fn vorgang_get_by_id(
 /// Can fail due to database errors or invalid filter constraints
 #[instrument(skip_all)]
 pub async fn vorgang_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     query_params: &params::VorgangGetQueryParams,
     expand: bool,

@@ -1,6 +1,6 @@
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
-use pazufa_backend_lib::LTZFServer;
+use pazufa_backend_lib::PazufaServer;
 use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, ListingGetResponse, PutResponse, vorgang as libvg,
@@ -25,7 +25,7 @@ use utoipa_axum::routes;
 ))]
 pub(super) struct VorgangApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
         .routes(routes!(vorgang_put, vorgang_get))
         .routes(routes!(vorgang_bulk_delete))
@@ -46,7 +46,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
 async fn vorgang_put(
     claims: Claims,
     HeaderParams(scraper_id): HeaderParams<XScraperId>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<models::Vorgang>,
 ) -> PutResponse {
     // Authentication
@@ -83,7 +83,7 @@ async fn vorgang_get(
     headers: HeaderMap,
     Query(query_params): Query<params::VorgangGetQueryParams>,
     Query(expand): Query<params::ExpandQueryParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> ListingGetResponse<models::Vorgang> {
     // Header parameters
     let ims = match IfModSince::try_from(headers.get(HeaderName::from_static("if-modified-since")))
@@ -125,7 +125,7 @@ async fn vorgang_get_by_id(
     headers: HeaderMap,
     Path(path_params): Path<params::ApiIdPathParam>,
     Query(expand): Query<params::ExpandQueryParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> GetSingleResponse<models::Vorgang> {
     // Header parameters
     let ims = match IfModSince::try_from(headers.get(HeaderName::from_static("if-modified-since")))
@@ -163,7 +163,7 @@ async fn vorgang_get_by_id(
 async fn vorgang_bulk_delete(
     claims: Claims,
     Query(qparams): Query<VorgangGetQueryParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> PutResponse {
     use pazufa_backend_lib::db;
     if !matches!(claims.0, APIScope::Admin | APIScope::KeyAdder) {
@@ -237,7 +237,7 @@ async fn vorgang_bulk_delete(
 async fn vorgang_delete(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> DeleteResponse {
     // Authentication
     if !matches!(claims.0, APIScope::Admin | APIScope::KeyAdder) {
@@ -275,7 +275,7 @@ async fn vorgang_delete(
 async fn vorgang_id_put(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<models::Vorgang>,
 ) -> PutResponse {
     // Authentication
@@ -294,7 +294,7 @@ async fn vorgang_id_put(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::LTZFServer;
+    use pazufa_backend_lib::PazufaServer;
     use pazufa_backend_lib::api::auth::Claims;
     use pazufa_backend_lib::api::{GetSingleResponse, PutResponse, vorgang as libvg};
     use pazufa_backend_lib::models;
@@ -432,7 +432,7 @@ mod test {
         }
     }
 
-    async fn put_vorgang(server: &LTZFServer, vorgang: &models::Vorgang) {
+    async fn put_vorgang(server: &PazufaServer, vorgang: &models::Vorgang) {
         let response = libvg::vorgang_id_put(
             server,
             1,
@@ -446,7 +446,7 @@ mod test {
         assert_eq!(response, PutResponse::Success);
     }
 
-    async fn vorgang_exists(server: &LTZFServer, api_id: uuid::Uuid) -> bool {
+    async fn vorgang_exists(server: &PazufaServer, api_id: uuid::Uuid) -> bool {
         let response = libvg::vorgang_get_by_id(
             server,
             &params::IfModSince::default(),
@@ -462,7 +462,7 @@ mod test {
     }
 
     async fn bulk_delete(
-        server: &Arc<LTZFServer>,
+        server: &Arc<PazufaServer>,
         scope: APIScope,
         qparams: params::VorgangGetQueryParams,
     ) -> PutResponse {

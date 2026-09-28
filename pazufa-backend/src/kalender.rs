@@ -1,4 +1,4 @@
-use crate::LTZFServer;
+use crate::PazufaServer;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
@@ -19,7 +19,7 @@ use utoipa_axum::routes;
 #[openapi(paths(kal_date_put, kal_date_get, kal_get))]
 pub(super) struct KalenderApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
         .routes(routes!(kal_date_put, kal_date_get))
         .routes(routes!(kal_get))
@@ -43,7 +43,7 @@ async fn kal_date_put(
     claims: Claims,
     HeaderParams(scraper_id): HeaderParams<XScraperId>,
     Path(path_params): Path<params::KalDatePutPathParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<Vec<models::Sitzung>>,
 ) -> PutResponse {
     // Authentication
@@ -83,7 +83,7 @@ async fn kal_date_get(
     Path(path_params): Path<params::KalDateGetPathParams>,
     Query(query_params): Query<params::KalDateGetQueryParams>,
     Query(expand): Query<params::ExpandQueryParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> SitzungListingResponse {
     // Header parameters
     let Ok(ims) =
@@ -124,7 +124,7 @@ async fn kal_get(
     headers: HeaderMap,
     Query(query_params): Query<params::KalGetQueryParams>,
     Query(expand): Query<params::ExpandQueryParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> SitzungListingResponse {
     // Header parameters
     let Ok(ims) =

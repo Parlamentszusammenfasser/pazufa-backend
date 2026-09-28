@@ -18,10 +18,10 @@ use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
 #[cfg(feature = "track-validation")]
 use crate::db::validate;
-use crate::error::{DataValidationError, LTZFError};
+use crate::error::{DataValidationError, PazufaError};
 use crate::models::enumerations::{HashStrategy, Mime};
 use crate::utils::notify::notify_ambiguous_match;
-use crate::{LTZFServer, Result, models};
+use crate::{PazufaServer, Result, models};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -118,7 +118,7 @@ pub(crate) async fn execute_merge_dokument(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<()> {
     let db_id = candidate;
     let original_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
@@ -213,7 +213,7 @@ pub(crate) async fn insert_or_merge_dok(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<Option<i32>> {
     match dok {
         models::DokumentOrApiId::ApiId(uuid) => {
@@ -271,7 +271,7 @@ pub(crate) async fn execute_merge_station(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<()> {
     let db_id = candidate;
     let obj = "merge station";
@@ -396,7 +396,7 @@ pub(crate) async fn execute_merge_vorgang(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<()> {
     let db_id = candidate;
     let obj = "Vorgang";
@@ -413,7 +413,7 @@ pub(crate) async fn execute_merge_vorgang(
         model.titel,
         model.kurztitel,
         model.verfassungsaendernd,
-        i32::try_from(model.wahlperiode).map_err(|e| LTZFError::Other {
+        i32::try_from(model.wahlperiode).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert wahlperiode as it exceeds i32::MAX: {e}")
         })?,
         srv.guard_ts(&model.typ, vapi, obj),
@@ -567,7 +567,7 @@ pub(crate) async fn run_integration(
     model: &models::Vorgang,
     scraper_id: Uuid,
     collector_key: KeyIndex,
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
     debug!(
@@ -633,7 +633,7 @@ mod scenariotest {
     use crate::api::SortArrays;
     use crate::models::{self, DokumentOrApiId};
     use crate::utils::testing::{TestSetup, generate};
-    use crate::{LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
+    use crate::{PazufaServer, Result, api::PaginationResponsePart, db::retrieve};
     use uuid::Uuid;
 
     struct Scenario {
@@ -704,17 +704,17 @@ mod scenariotest {
             Ok(())
         }
 
-        async fn build_context(&self, server: &LTZFServer) -> Result<()> {
+        async fn build_context(&self, server: &PazufaServer) -> Result<()> {
             for obj in &self.context {
                 super::run_integration(obj, Uuid::nil(), 1, server).await?;
             }
             Ok(())
         }
-        async fn place_object(&self, server: &LTZFServer) -> Result<()> {
+        async fn place_object(&self, server: &PazufaServer) -> Result<()> {
             super::run_integration(&self.object, Uuid::nil(), 1, server).await?;
             Ok(())
         }
-        async fn check_result(&self, server: &LTZFServer) -> Result<()> {
+        async fn check_result(&self, server: &PazufaServer) -> Result<()> {
             let paramock = retrieve::VGGetParameters::default();
             let mut tx = server
                 .sqlx_db
@@ -771,7 +771,7 @@ mod scenariotest {
                     format!("{{\n\"expected\": [{exp_content}],\n\"actual\": [{dbv_content}]}}"),
                 )
                 .expect("Failed to write to file.");
-                return Err(crate::error::LTZFError::Other {
+                return Err(crate::error::PazufaError::Other {
                     message: format!(
                         "Expected and Actual Contents were not equal. Dump: tests/{}_dump.json",
                         self.test_setup.name
@@ -779,7 +779,7 @@ mod scenariotest {
                 });
             }
             if equality && self.shouldfail {
-                return Err(crate::error::LTZFError::Other {
+                return Err(crate::error::PazufaError::Other {
                     message: "Expected Case to fail, but actual output was equal to expectation"
                         .to_owned(),
                 });

@@ -3,11 +3,11 @@ use crate::db::gen_identifier;
 use crate::db::merge::candidates::dokument_merge_candidates;
 #[cfg(feature = "track-validation")]
 use crate::db::validate;
-use crate::error::{DataValidationError, LTZFError};
+use crate::error::{DataValidationError, PazufaError};
 use crate::models;
 use crate::models::enumerations::{HashStrategy, Mime};
 use crate::{
-    LTZFServer, Result,
+    PazufaServer, Result,
     utils::{self, notify::notify_new_enum_entry},
 };
 use sqlx::PgTransaction;
@@ -57,7 +57,7 @@ async fn insert_stations_for_vg(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) -> Result<()> {
     let mut stat_ids = vec![];
     for stat in stationen {
@@ -101,7 +101,7 @@ async fn insert_lobbyregister_for_vg(
     vg_id: i32,
     lre: &Vec<models::Lobbyregistereintrag>,
     tx: &mut sqlx::PgTransaction<'_>,
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) -> Result<()> {
     for l in lre {
         let aid = insert_or_retrieve_autor(&l.organisation, tx, server).await?;
@@ -166,7 +166,7 @@ pub(crate) async fn insert_vorgang(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) -> Result<i32> {
     tracing::info!("Inserting Complete Vorgang into the database");
     #[cfg(feature = "track-validation")]
@@ -184,7 +184,7 @@ pub(crate) async fn insert_vorgang(
         vg.titel,
         vg.kurztitel,
         vg.verfassungsaendernd,
-        i32::try_from(vg.wahlperiode).map_err(|e| LTZFError::Other {
+        i32::try_from(vg.wahlperiode).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert vorgang wahlperiode as it exceeds i32::MAX: {e}")
         })?,
         server.guard_ts(&vg.typ, vg.api_id, obj),
@@ -274,7 +274,7 @@ pub(crate) async fn insert_station(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     // master insert
     let sapi = stat.api_id.unwrap_or(gen_identifier(scraper_id));
@@ -444,7 +444,7 @@ pub(crate) async fn insert_dokument(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     let dapi = dok.api_id.unwrap_or(gen_identifier(scraper_id));
     match dokument_merge_candidates(dok, &mut **tx, srv).await? {
@@ -545,7 +545,7 @@ pub(crate) async fn insert_sitzung(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     let api_id = ass.api_id.unwrap_or(gen_identifier(scraper_id));
 
@@ -561,7 +561,7 @@ pub(crate) async fn insert_sitzung(
         ass.public,
         gr_id,
         ass.link,
-        i32::try_from(ass.nummer).map_err(|e| LTZFError::Other {
+        i32::try_from(ass.nummer).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert sitzung number as it exceeds i32::MAX: {e}")
         })?,
         ass.titel
@@ -646,13 +646,13 @@ pub(crate) async fn insert_top(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     // master insert
     let tid = sqlx::query!(
         "INSERT INTO top(titel, nummer, sid) VALUES($1, $2, $3) RETURNING id;",
         top.titel,
-        i32::try_from(top.nummer).map_err(|e| LTZFError::Other {
+        i32::try_from(top.nummer).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert top number as it exceeds i32::MAX: {e}")
         })?,
         sid
@@ -681,7 +681,7 @@ pub(crate) async fn insert_top(
 pub(crate) async fn insert_or_retrieve_gremium(
     gr: &models::Gremium,
     tx: &mut PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     let gid = sqlx::query!(
         "SELECT g.id FROM gremium g, parlament p WHERE
@@ -690,7 +690,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
         AND g.wp = $3",
         gr.name,
         gr.parlament.to_string(),
-        i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
+        i32::try_from(gr.wahlperiode).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}"),
         })?,
     )
@@ -715,7 +715,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
             models::Gremium {
                 link: r.link,
                 parlament: gr.parlament,
-                wahlperiode: u16::try_from(r.wp).map_err(|e| LTZFError::Other {
+                wahlperiode: u16::try_from(r.wp).map_err(|e| PazufaError::Other {
                     message: format!(
                         "Failed to convert wahlperiode to u32 as the value is negative: {e}"
                     ),
@@ -735,7 +735,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
         RETURNING gremium.id",
         gr.name,
         gr.parlament.to_string(),
-        i32::try_from(gr.wahlperiode).map_err(|e| LTZFError::Other {
+        i32::try_from(gr.wahlperiode).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}")
         })?,
         gr.link
@@ -749,7 +749,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
 pub(crate) async fn insert_or_retrieve_autor(
     at: &models::Autor,
     tx: &mut PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     let eid = sqlx::query!(
         "SELECT a.id FROM autor a WHERE 
@@ -825,7 +825,7 @@ pub(crate) async fn insert_or_retrieve_dok(
     scraper_id: Uuid,
     collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
-    srv: &LTZFServer,
+    srv: &PazufaServer,
 ) -> Result<i32> {
     match dr {
         models::DokumentOrApiId::Dokument(dok) => {

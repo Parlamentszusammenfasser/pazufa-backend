@@ -1,4 +1,4 @@
-use crate::LTZFServer;
+use crate::PazufaServer;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
@@ -18,7 +18,7 @@ use utoipa_axum::routes;
 #[openapi(paths(sitzung_delete, sid_put, s_get, s_get_by_id))]
 pub(super) struct SitzungApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
         .routes(routes!(sitzung_delete))
         .routes(routes!(sid_put))
@@ -39,7 +39,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
 async fn sitzung_delete(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> DeleteResponse {
     // Authentication
     if !matches!(claims.0, APIScope::Admin | APIScope::KeyAdder) {
@@ -69,7 +69,7 @@ async fn sitzung_delete(
 async fn sid_put(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<models::Sitzung>,
 ) -> PutResponse {
     // Authentication
@@ -102,7 +102,7 @@ async fn s_get(
     headers: HeaderMap,
     Query(query_params): Query<params::SGetQueryParams>,
     Query(expand): Query<params::ExpandQueryParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> SitzungListingResponse {
     // Header parameters
     let ims = match params::IfModSince::try_from(
@@ -145,7 +145,7 @@ async fn s_get_by_id(
     headers: HeaderMap,
     Query(expand): Query<params::ExpandQueryParam>,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> GetSingleResponse<models::Sitzung> {
     let ims = match params::IfModSince::try_from(
         headers.get(HeaderName::from_static("if-modified-since")),

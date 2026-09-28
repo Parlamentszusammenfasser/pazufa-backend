@@ -1,6 +1,6 @@
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
-use pazufa_backend_lib::LTZFServer;
+use pazufa_backend_lib::PazufaServer;
 use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, ListingGetResponse, PazufaOrFtmListingResponse, PutResponse,
@@ -22,7 +22,7 @@ use utoipa_axum::routes;
 )]
 pub(super) struct DokumentApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
         .routes(routes!(
             dokument_delete_id,
@@ -45,7 +45,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
 async fn dokument_delete_id(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> DeleteResponse {
     // Authentication
 
@@ -75,7 +75,7 @@ async fn dokument_delete_id(
 async fn dokument_put_id(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<models::Dokument>,
 ) -> PutResponse {
     // Authentication
@@ -110,7 +110,7 @@ async fn dokumente_get(
     headers: HeaderMap,
     Query(format_param): Query<params::DocumentFormatParams>,
     Query(listing_params): Query<params::ListingQueryParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> PazufaOrFtmListingResponse {
     let fmt = format_param.format.unwrap_or(DokumentFormat::Pazufa);
     if fmt == DokumentFormat::FTM {
@@ -171,7 +171,7 @@ async fn dokument_get_by_id(
     headers: HeaderMap,
     Path(path_params): Path<params::ApiIdPathParam>,
     Query(q_params): Query<params::DocumentFormatParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> GetSingleResponse<models::Dokument> {
     if let Some(fmt) = q_params.format
         && fmt == DokumentFormat::FTM

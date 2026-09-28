@@ -2,7 +2,7 @@ use std::fmt::{Display, Write};
 
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-use crate::{LTZFServer, Result, error::DataValidationError};
+use crate::{PazufaServer, Result, error::DataValidationError};
 use lettre::{
     Message, SmtpTransport, Transport,
     message::{MessageBuilder, header::ContentType},
@@ -159,7 +159,7 @@ impl MailBundle {
     }
 }
 
-impl LTZFServer {
+impl PazufaServer {
     /// guarded to String conversion
     pub fn guard_ts<T: ToString>(&self, input: &T, api_id: Uuid, object: &str) -> String {
         let temp = input.to_string();
@@ -173,7 +173,7 @@ impl LTZFServer {
 pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     new_entry: &T,
     similarity: &[(f32, T)],
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) {
     let Some(mailbundle) = &server.mailbundle else {
         return;
@@ -202,7 +202,7 @@ pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
     api_ids: &[Uuid],
     object: &T,
     during_operation: &str,
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) -> Result<()> {
     let Some(mailbundle) = &server.mailbundle else {
         return Ok(());
@@ -226,7 +226,7 @@ pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
     Ok(())
 }
 
-pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str, server: &LTZFServer) {
+pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str, server: &PazufaServer) {
     let Some(mailbundle) = &server.mailbundle else {
         return;
     };

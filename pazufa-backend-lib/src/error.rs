@@ -1,10 +1,10 @@
 use snafu::prelude::*;
 use uuid::Uuid;
 
-pub type Result<T> = std::result::Result<T, LTZFError>;
+pub type Result<T> = std::result::Result<T, PazufaError>;
 macro_rules! error_from {
     ($from:ty, $to:ident, $suberr:ident, $variant:ident) => {
-        impl From<$from> for LTZFError {
+        impl From<$from> for PazufaError {
             fn from(source: $from) -> Self {
                 Self::$to {
                     source: Box::new($suberr::$variant { source }),
@@ -162,7 +162,7 @@ error_from!(
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
-pub enum LTZFError {
+pub enum PazufaError {
     #[snafu(display("Validation error: {source}"))]
     Validation { source: Box<DataValidationError> },
 
@@ -179,28 +179,28 @@ pub enum LTZFError {
     #[snafu(display("{message}"))]
     Other { message: String },
 }
-impl From<DataValidationError> for LTZFError {
+impl From<DataValidationError> for PazufaError {
     fn from(source: DataValidationError) -> Self {
         Self::Validation {
             source: Box::new(source),
         }
     }
 }
-impl From<DatabaseError> for LTZFError {
+impl From<DatabaseError> for PazufaError {
     fn from(source: DatabaseError) -> Self {
         Self::Database {
             source: Box::new(source),
         }
     }
 }
-impl From<InfrastructureError> for LTZFError {
+impl From<InfrastructureError> for PazufaError {
     fn from(source: InfrastructureError) -> Self {
         Self::Infrastructure {
             source: Box::new(source),
         }
     }
 }
-impl From<axum::http::header::ToStrError> for LTZFError {
+impl From<axum::http::header::ToStrError> for PazufaError {
     fn from(source: axum::http::header::ToStrError) -> Self {
         Self::HeaderConversion {
             source: Box::new(source),
@@ -209,9 +209,9 @@ impl From<axum::http::header::ToStrError> for LTZFError {
 }
 
 // Helper methods for creating errors
-impl LTZFError {
+impl PazufaError {
     pub fn other<T: Into<String>>(message: T) -> Self {
-        LTZFError::Other {
+        PazufaError::Other {
             message: message.into(),
         }
     }

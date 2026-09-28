@@ -3,7 +3,7 @@ use crate::api::{GetSingleResponse, ListingGetResponse};
 use crate::db::retrieve;
 use crate::models::enumerations::DokumentFormat;
 use crate::models::params::{self, ListingQueryParams};
-use crate::{LTZFError, LTZFServer, Result, models};
+use crate::{PazufaError, PazufaServer, Result, models};
 use sqlx::Row;
 use sqlx::SqlSafeStr;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ use tracing::{info, instrument};
 /// # Errors
 /// Can fail due to database errors or Pagination errors
 pub async fn dokumente_get_by_params(
-    server: &LTZFServer,
+    server: &PazufaServer,
     _format: DokumentFormat,
     lp: ListingQueryParams,
     ims: Option<chrono::DateTime<chrono::Utc>>,
@@ -54,7 +54,7 @@ pub async fn dokumente_get_by_params(
 /// Can fail due to database errors or Pagination errors
 #[instrument(skip_all, fields(query=?query_params))]
 pub async fn autoren_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     query_params: &params::AutorenGetQueryParams,
 ) -> Result<ListingGetResponse<models::Autor>> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -72,7 +72,7 @@ pub async fn autoren_get(
     .await?;
 
     let prp = PaginationResponsePart::new(
-        u32::try_from(result.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(result.len()).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert result length: {e}"),
         })?,
         query_params.page,
@@ -119,7 +119,7 @@ pub async fn autoren_get(
 /// Can fail due to database errors or Pagination errors
 #[instrument(skip_all, fields(query=?query_params))]
 pub async fn gremien_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     query_params: &params::GremienGetQueryParams,
 ) -> Result<ListingGetResponse<models::Gremium>> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -141,7 +141,7 @@ pub async fn gremien_get(
         return Ok(ListingGetResponse::NoContent);
     }
     let prp = PaginationResponsePart::new(
-        u32::try_from(result.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(result.len()).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert result length: {e}"),
         })?,
         query_params.page,
@@ -170,8 +170,8 @@ pub async fn gremien_get(
             link: r.link,
             name: r.name,
             parlament: models::Parlament::from_str(&r.parl)
-                .map_err(|e| LTZFError::Other { message: e })?,
-            wahlperiode: u16::try_from(r.wp).map_err(|e| LTZFError::Other {
+                .map_err(|e| PazufaError::Other { message: e })?,
+            wahlperiode: u16::try_from(r.wp).map_err(|e| PazufaError::Other {
                 message: format!("Failed to convert wahlperiode: {e}"),
             })?,
         })
@@ -190,7 +190,7 @@ pub async fn gremien_get(
 /// Can fail due to database errors or Pagination errors
 #[instrument(skip_all, fields(enum=%path_params.name, contains=?query_params.contains, page=?query_params.page, per_page=?query_params.per_page))]
 pub async fn enum_get(
-    server: &LTZFServer,
+    server: &PazufaServer,
     path_params: &params::EnumPathParams,
     query_params: &params::EnumGetQueryParams,
 ) -> Result<ListingGetResponse<String>> {
@@ -233,7 +233,7 @@ pub async fn enum_get(
     .await?;
 
     let prp = PaginationResponsePart::new(
-        u32::try_from(filtered_ids.len()).map_err(|e| LTZFError::Other {
+        u32::try_from(filtered_ids.len()).map_err(|e| PazufaError::Other {
             message: format!("Failed to convert result length: {e}"),
         })?,
         query_params.page,
@@ -284,7 +284,7 @@ pub async fn enum_get(
 /// Can fail due to database errors
 #[instrument(skip_all, fields(dok=%path_params.api_id))]
 pub async fn dokument_get_by_id(
-    server: &LTZFServer,
+    server: &PazufaServer,
     header_params: &params::IfModSince,
     path_params: &params::ApiIdPathParam,
 ) -> Result<GetSingleResponse<models::Dokument>> {

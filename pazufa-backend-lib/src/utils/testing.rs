@@ -7,7 +7,7 @@
     reason = "just a testing mod will largely be replaced with arbitrary anyways at some point"
 )]
 use crate::utils::tracing::Logging;
-use crate::{Configuration, LTZFServer};
+use crate::{Configuration, PazufaServer};
 use sha256::digest;
 use sqlx::SqlSafeStr;
 use std::sync::LazyLock;
@@ -19,7 +19,7 @@ static MASTER_URL: LazyLock<String> = LazyLock::new(|| {
 
 pub(crate) struct TestSetup {
     pub(crate) name: &'static str,
-    pub(crate) server: LTZFServer,
+    pub(crate) server: PazufaServer,
     create_pool: sqlx::PgPool,
 }
 impl TestSetup {
@@ -97,7 +97,7 @@ impl TestSetup {
         Self {
             name: dbname,
             create_pool,
-            server: LTZFServer::new(
+            server: PazufaServer::new(
                 pool,
                 Configuration {
                     per_object_scraper_log_size: 5,

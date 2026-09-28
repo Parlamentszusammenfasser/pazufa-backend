@@ -1,5 +1,5 @@
 use axum::extract::{Json, Query, State};
-use pazufa_backend_lib::LTZFServer;
+use pazufa_backend_lib::PazufaServer;
 use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, ListingGetResponse, PutResponse, misc as libmisc, misc_auth as libmisca,
@@ -17,7 +17,7 @@ use utoipa_axum::routes;
 #[openapi(paths(autoren_delete_by_param, autoren_put, autoren_get,))]
 pub(super) struct AutorenApi;
 
-pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
+pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new().routes(routes!(autoren_delete_by_param, autoren_put, autoren_get))
 }
 
@@ -33,7 +33,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<LTZFServer>> {
 async fn autoren_delete_by_param(
     claims: Claims,
     Query(query_params): Query<params::AutorenDeleteByParamQueryParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> DeleteResponse {
     // Authentication
     if !matches!(claims.0, APIScope::KeyAdder | APIScope::Admin) {
@@ -73,7 +73,7 @@ async fn autoren_delete_by_param(
 )]
 async fn autoren_put(
     claims: Claims,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
     Json(body): Json<models::ReplacementPutRequest<models::Autor>>,
 ) -> PutResponse {
     // Authentication
@@ -102,7 +102,7 @@ async fn autoren_put(
 )]
 pub async fn autoren_get(
     Query(query_params): Query<params::AutorenGetQueryParams>,
-    State(api_impl): State<Arc<LTZFServer>>,
+    State(api_impl): State<Arc<PazufaServer>>,
 ) -> ListingGetResponse<models::Autor> {
     libmisc::autoren_get(api_impl.as_ref(), &query_params)
         .await

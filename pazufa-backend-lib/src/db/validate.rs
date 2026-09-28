@@ -1,5 +1,5 @@
 use crate::models;
-use crate::{LTZFServer, Result, error::DataValidationError};
+use crate::{PazufaServer, Result, error::DataValidationError};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -55,7 +55,7 @@ impl Tracks {
 /// in the tracks file.
 /// # Errors
 /// Can error due to database errors or due to a violation of the trackfile specifications
-pub async fn validate_vorgang(vg: &models::Vorgang, srv: &LTZFServer) -> Result<()> {
+pub async fn validate_vorgang(vg: &models::Vorgang, srv: &PazufaServer) -> Result<()> {
     let mut stations = vg.stationen.clone();
     stations.sort_by_key(|s| s.zp_start);
     let parls: BTreeSet<models::Parlament> = stations.iter().map(|s| s.gremium.parlament).collect();
@@ -176,7 +176,7 @@ mod test_regex {
         let res = validate_vorgang(&vg, &scenario.server).await;
         assert!(matches!(
             res,
-            Err(crate::error::LTZFError::Validation { .. })
+            Err(crate::error::PazufaError::Validation { .. })
         ));
         scenario.teardown().await;
     }
@@ -217,7 +217,7 @@ mod test_regex {
         let res = validate_vorgang(&catastrophe, &scenario.server).await;
         assert!(matches!(
             res,
-            Err(crate::error::LTZFError::Validation { .. })
+            Err(crate::error::PazufaError::Validation { .. })
         ));
         scenario.teardown().await;
     }
@@ -248,7 +248,7 @@ mod test_regex {
         let result = validate_vorgang(&vorgang, &scenario.server).await;
         assert!(
             match result {
-                Err(crate::error::LTZFError::Validation { ref source }) =>
+                Err(crate::error::PazufaError::Validation { ref source }) =>
                     matches!(**source, DataValidationError::MalformedVorgang { .. }),
                 _ => false,
             },

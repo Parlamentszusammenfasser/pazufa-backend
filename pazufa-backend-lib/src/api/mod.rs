@@ -437,7 +437,7 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResp
 }
 
 #[derive(Clone)]
-pub struct LTZFServer {
+pub struct PazufaServer {
     pub sqlx_db: sqlx::PgPool,
     pub mailbundle: Option<Arc<notify::MailBundle>>,
     pub config: Configuration,
@@ -446,8 +446,8 @@ pub struct LTZFServer {
     #[cfg(feature = "track-validation")]
     pub tracks: Arc<Tracks>,
 }
-pub type LTZFArc = std::sync::Arc<LTZFServer>;
-impl LTZFServer {
+pub type LTZFArc = std::sync::Arc<PazufaServer>;
+impl PazufaServer {
     pub fn new(
         sqlx_db: sqlx::PgPool,
         config: Configuration,

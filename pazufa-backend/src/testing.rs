@@ -7,7 +7,7 @@ use pazufa_backend_lib::models::auth::Sha256KeyGenerator;
 use pazufa_backend_lib::models::params::XAPIKey;
 use pazufa_backend_lib::models::{APIKey, APIScope};
 use pazufa_backend_lib::utils::tracing::Logging;
-use pazufa_backend_lib::{Configuration, LTZFServer};
+use pazufa_backend_lib::{Configuration, PazufaServer};
 use sha256::digest;
 use sqlx::SqlSafeStr;
 use std::fmt::Debug;
@@ -20,7 +20,7 @@ static MASTER_URL: LazyLock<String> = LazyLock::new(|| {
 
 pub(crate) struct TestSetup {
     pub(crate) name: &'static str,
-    pub(crate) server: Option<LTZFServer>,
+    pub(crate) server: Option<PazufaServer>,
     create_pool: sqlx::PgPool,
 }
 impl TestSetup {
@@ -99,7 +99,7 @@ impl TestSetup {
         Self {
             name: dbname,
             create_pool,
-            server: Some(LTZFServer::new(
+            server: Some(PazufaServer::new(
                 pool,
                 Configuration {
                     per_object_scraper_log_size: 5,
@@ -127,7 +127,7 @@ impl TestSetup {
 /// # Errors
 /// Can fail if any of the key gens fail
 pub async fn gen_all_keylevels(
-    server: &LTZFServer,
+    server: &PazufaServer,
 ) -> pazufa_backend_lib::Result<(String, String, String)> {
     use pazufa_backend_lib::db::auth as dbauth;
     let mut tx = server.sqlx_db.begin().await?;
@@ -165,12 +165,12 @@ pub async fn gen_all_keylevels(
 }
 
 pub async fn authtesting<F, T>(
-    server: Arc<pazufa_backend_lib::LTZFServer>,
+    server: Arc<pazufa_backend_lib::PazufaServer>,
     allowed_levels: &[APIScope],
     testing_function: F,
     failure: T,
 ) where
-    F: AsyncFn(Claims, Arc<pazufa_backend_lib::LTZFServer>) -> T,
+    F: AsyncFn(Claims, Arc<pazufa_backend_lib::PazufaServer>) -> T,
     T: Sized + PartialEq + Debug,
 {
     let (coll, adm, keya) = gen_all_keylevels(server.as_ref())
