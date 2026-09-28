@@ -183,6 +183,7 @@ async fn auth_delete(
     )
 }
 
+/// Lists keytags that exist within the database. A keyadder-only feature.
 #[utoipa::path(
     get,
     path = "/keys",
@@ -191,7 +192,7 @@ async fn auth_delete(
     params(params::ListingQueryParams),
     responses(AuthListingGetResponse<KeyTag>)
 )]
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(claim=%claims.0))]
 async fn auth_listing(
     claims: Claims,
     Query(query_params): Query<params::ListingQueryParams>,
@@ -202,7 +203,26 @@ async fn auth_listing(
         return AuthListingGetResponse::Unauth;
     }
 
-    libauth::auth_listing(api_impl.as_ref(), &claims, &query_params)
+    async fn inner(
+        qp: params::ListingQueryParams,
+        srv: Arc<LTZFServer>,
+    ) -> anyhow::Result<AuthListingGetResponse<KeyTag>> {
+        let mut tx = srv.sqlx_db.begin().await?;
+        let (prp, body) = pazufa_backend_lib::db::retrieve::auth::get_paginated_keytags(
+            qp.page,
+            qp.per_page,
+            &mut tx,
+        )
+        .await?;
+        tracing::info!("Listing {} keys", &body.len());
+        tx.commit().await?;
+        Ok(AuthListingGetResponse::Success {
+            body,
+            prp,
+            path_prefix: "/api/v2/auth/keys",
+        })
+    }
+    inner(query_params, Arc::clone(&api_impl))
         .await
         .unwrap_or_else(|e| {
             warn!("Error during auth_listing: {e}");
@@ -210,6 +230,7 @@ async fn auth_listing(
         })
 }
 
+/// Lists which objects were touched by the supplied keytag
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     get,
@@ -242,10 +263,11 @@ async fn auth_listing_keytag(
 mod test {
     use super::auth_delete;
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::api::DeleteResponse;
     use pazufa_backend_lib::api::auth::{self as libauth, Claims};
+    use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
+    use pazufa_backend_lib::db::auth::create_apikey;
     use pazufa_backend_lib::models::auth::{Argon2KeyGenerator, NoopKeyGenerator};
-    use pazufa_backend_lib::models::params::{self, ApiKeyDelete};
+    use pazufa_backend_lib::models::params::{self, ApiKeyDelete, ListingQueryParams};
     use pazufa_backend_lib::models::{APIKey, APIScope, auth::APIKeyCreate};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
     use sqlx::PgExecutor;
@@ -538,6 +560,76 @@ mod test {
                 if (*expires_at - chrono::Utc::now()) - chrono::Duration::days(1) < chrono::Duration::seconds(1) && *scope == APIScope::KeyAdder && *is_being_rotated),
             "Expected Successful response, got {key_status_rot:?}"
         );
+
+        let mut server = Arc::into_inner(server);
+        scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    // GET /auth/keys
+    #[tokio::test]
+    async fn test_list_keys() {
+        let mut scenario = TestSetup::new("test_list_keys").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let mut keys = vec![];
+
+        let kkey1: APIKey<Argon2KeyGenerator> =
+            create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+        let ckey: APIKey<Argon2KeyGenerator> =
+            create_apikey(1, APIScope::Collector, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+        let kkey2: APIKey<Argon2KeyGenerator> =
+            create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+
+        let akey: APIKey<Argon2KeyGenerator> =
+            create_apikey(1, APIScope::Admin, None, None, &server.sqlx_db)
+                .await
+                .expect("");
+
+        keys.push(kkey1);
+        keys.push(ckey);
+        keys.push(kkey2);
+        keys.push(akey);
+        // ------------------------------------------------------------------------------------------------------------
+        let response = super::auth_listing(
+            Claims(APIScope::KeyAdder, 1),
+            axum::extract::Query(ListingQueryParams {
+                page: None,
+                per_page: None,
+                since: None,
+                until: None,
+            }),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        match response {
+            AuthListingGetResponse::Success { body, .. } => {
+                let mut bodykeys: Vec<_> = body
+                    .iter()
+                    .map(|x| {
+                        x.as_str()
+                            .strip_prefix("\"")
+                            .unwrap_or(x.as_str())
+                            .strip_suffix("\"")
+                            .unwrap_or(x.as_str())
+                    })
+                    .collect();
+                bodykeys.sort_unstable();
+                let mut keys = keys
+                    .iter()
+                    .map(|x| x.keytag().to_owned())
+                    .chain(vec!["total-nutzlos".to_string()].drain(..))
+                    .collect::<Vec<_>>();
+                keys.sort();
+                assert_eq!(keys, bodykeys);
+            }
+            _ => unreachable!("unreachable"),
+        }
 
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();

@@ -1,19 +1,17 @@
-use crate::api::{AuthListingGetResponse, PaginationResponsePart};
 use crate::db::retrieve::auth::get_api_key_metadata;
 use crate::models::APIScope;
 use crate::models::auth::{
     APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
 };
-use crate::models::params::{AuthListingKeytagPathParams, ListingQueryParams, XAPIKey};
+use crate::models::params::{AuthListingKeytagPathParams, XAPIKey};
 use crate::utils::as_option;
 use crate::utils::header_params::HeaderParams;
-use crate::{LTZFServer, Result, error::LTZFError, models};
+use crate::{LTZFServer, Result, error::LTZFError};
 use argon2::password_hash::SaltString;
 use axum::extract::FromRequestParts;
 use axum::http::{StatusCode, request::Parts};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use models::KeyTag;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::sync::Arc;
@@ -350,46 +348,6 @@ pub async fn auth_rotate(server: &LTZFServer, claims: &Claims) -> Result<AuthRot
     })
 }
 
-/// Lists keytags that exist within the database. A keyadder-only feature.
-///
-/// # Errors
-/// Can fail if the database operations fail, or if there is a pagination error
-#[instrument(skip_all, fields(claim=%claims.0))]
-pub async fn auth_listing(
-    server: &LTZFServer,
-    claims: &Claims,
-    query_params: &ListingQueryParams,
-) -> Result<AuthListingGetResponse<KeyTag>> {
-    let mut tx = server.sqlx_db.begin().await?;
-    let total_count = sqlx::query_scalar!(
-        "SELECT COUNT(1) FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW()"
-    )
-    .fetch_one(&mut *tx)
-    .await?
-    .unwrap_or_default();
-    let prp = PaginationResponsePart::new(
-        u32::try_from(total_count).map_err(|e| LTZFError::Other {
-            message: format!("Error during integer conversion: {e}"),
-        })?,
-        query_params.page,
-        query_params.per_page,
-    );
-    let body = sqlx::query!(
-            "SELECT keytag FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW() ORDER BY expires_at DESC
-            OFFSET $1
-            LIMIT $2", prp.offset(), prp.limit())
-        .map(|r| models::KeyTag::from(r.keytag))
-        .fetch_all(&mut *tx).await?;
-
-    tx.commit().await?;
-    info!("Listing {} keys", &body.len());
-    Ok(AuthListingGetResponse::Success {
-        body,
-        prp,
-        path_prefix: "/api/v2/auth/keys",
-    })
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct KeytagListing {
     #[serde(rename = "dokumente")]
@@ -504,12 +462,12 @@ pub async fn auth_listing_keytag(
 #[cfg(test)]
 mod auth_test {
     use super::{APIScope, Claims, KeytagListing};
-    use super::{auth_listing, auth_listing_keytag, auth_rotate};
+    use super::{auth_listing_keytag, auth_rotate};
     use crate::api::auth::AuthRotateResponse;
-    use crate::api::{AuthListingGetResponse, vorgang};
+    use crate::api::vorgang;
     use crate::db::retrieve::auth::get_api_key_metadata;
     use crate::models::auth::{APIKey, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator};
-    use crate::models::params::{self, AuthListingKeytagPathParams, ListingQueryParams};
+    use crate::models::params::{self, AuthListingKeytagPathParams};
     use crate::utils::testing::{TestSetup, generate};
     use sqlx::PgExecutor;
 
@@ -550,74 +508,6 @@ mod auth_test {
         let key = "invalidbutofasufficientlengthtobecheckedforcyclicredundancyproblemsinthematerialandhopefullyfailthistestsincethisisitsresontobe.";
         let result = Claims::extract(&scenario.server, params::XAPIKey(key.to_owned())).await;
         assert!(result.is_err());
-    }
-
-    // GET /auth/keys
-    #[tokio::test]
-    async fn test_list_keys() {
-        let scenario = TestSetup::new("test_list_keys").await;
-        let server = &scenario.server;
-        let mut keys = vec![];
-
-        let kkey1: APIKey<Argon2KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
-                .await
-                .expect("");
-        let ckey: APIKey<Argon2KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::Collector, None, None, &server.sqlx_db)
-                .await
-                .expect("");
-        let kkey2: APIKey<Argon2KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::KeyAdder, None, None, &server.sqlx_db)
-                .await
-                .expect("");
-
-        let akey: APIKey<Argon2KeyGenerator> =
-            crate::db::auth::create_apikey(1, APIScope::Admin, None, None, &server.sqlx_db)
-                .await
-                .expect("");
-
-        keys.push(kkey1);
-        keys.push(ckey);
-        keys.push(kkey2);
-        keys.push(akey);
-        // ------------------------------------------------------------------------------------------------------------
-        let response = auth_listing(
-            server,
-            &Claims(APIScope::KeyAdder, 1),
-            &ListingQueryParams {
-                page: None,
-                per_page: None,
-                since: None,
-                until: None,
-            },
-        )
-        .await;
-        match response {
-            Ok(AuthListingGetResponse::Success { body, .. }) => {
-                let mut bodykeys: Vec<_> = body
-                    .iter()
-                    .map(|x| {
-                        x.as_str()
-                            .strip_prefix("\"")
-                            .unwrap_or(x.as_str())
-                            .strip_suffix("\"")
-                            .unwrap_or(x.as_str())
-                    })
-                    .collect();
-                bodykeys.sort_unstable();
-                let mut keys = keys
-                    .iter()
-                    .map(|x| x.keytag().to_owned())
-                    .chain(vec!["total-nutzlos".to_string()].drain(..))
-                    .collect::<Vec<_>>();
-                keys.sort();
-                assert_eq!(keys, bodykeys);
-            }
-            _ => unreachable!("unreachable"),
-        }
-
-        scenario.teardown().await;
     }
 
     // GET /auth/keys/{key_tag}
