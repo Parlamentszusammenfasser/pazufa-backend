@@ -98,21 +98,6 @@ impl IntoResponse for SitzungListingResponse {
     }
 }
 
-/// Deletes a session by it's api id
-/// # Errors
-/// Can fail due to database errors
-#[instrument(skip_all, fields(sid=%path_params.api_id))]
-pub async fn sitzung_delete(
-    server: &PazufaServer,
-    path_params: &params::ApiIdPathParam,
-) -> Result<()> {
-    let mut tx = server.sqlx_db.begin().await?;
-    delete::delete_sitzung_by_api_id(path_params.api_id, &mut *tx).await?;
-    info!(target: "obj", "Deleted Sitzung {}", path_params.api_id);
-    info!("Success");
-    Ok(())
-}
-
 /// Inserts a day's worth of sessions into the database.
 /// This replaces the whole day (of this parliament), and does not merge objects
 /// Only Admin level users may insert into any day, collectors are only allowed to update a day into
@@ -1108,52 +1093,6 @@ mod sitzung_test {
         assert!(matches!(response, PutResponse::Success));
 
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-    }
-    #[tokio::test]
-    async fn test_session_delete() {
-        let scenario = TestSetup::new("test_session_delete").await;
-        let server = &scenario.server;
-        let sitzung = generate::random::sitzung(12);
-
-        // Test case: Input non-existing session
-        let response = super::sid_put(
-            server,
-            &Claims(APIScope::Admin, 1),
-            &params::ApiIdPathParam {
-                api_id: sitzung.api_id.expect("Failed"),
-            },
-            &sitzung,
-        )
-        .await
-        .expect("Failed to create non-existing session");
-        assert!(matches!(response, PutResponse::Success));
-
-        // Test cases for sitzung_delete:
-        // Test case: Delete existing session with proper permissions
-        {
-            super::sitzung_delete(
-                server,
-                &params::ApiIdPathParam {
-                    api_id: sitzung.api_id.expect("Failed"),
-                },
-            )
-            .await
-            .expect("Failed to delete existing session");
-        }
-
-        // Test case: Delete non-existent session
-        {
-            super::sitzung_delete(
-                server,
-                &params::ApiIdPathParam {
-                    api_id: sitzung.api_id.expect("Failed"),
-                },
-            )
-            .await
-            .expect("Failed to attempt to delete non-existent session");
-        }
-
-        scenario.teardown().await;
     }
 
     #[tokio::test]

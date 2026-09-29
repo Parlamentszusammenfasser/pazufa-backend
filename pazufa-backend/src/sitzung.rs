@@ -26,7 +26,6 @@ pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
         .routes(routes!(s_get_by_id))
 }
 
-#[tracing::instrument(skip_all)]
 #[utoipa::path(
     delete,
     path = "/{api_id}",
@@ -36,6 +35,7 @@ pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     params(params::ApiIdPathParam),
     responses(DeleteResponse)
 )]
+#[tracing::instrument(skip_all, fields(sid=%path_params.api_id))]
 async fn sitzung_delete(
     claims: Claims,
     Path(path_params): Path<params::ApiIdPathParam>,
@@ -46,7 +46,12 @@ async fn sitzung_delete(
         return DeleteResponse::Unauth;
     }
 
-    match libsitz::sitzung_delete(api_impl.as_ref(), &path_params).await {
+    match pazufa_backend_lib::db::delete::delete_sitzung_by_api_id(
+        path_params.api_id,
+        &api_impl.sqlx_db,
+    )
+    .await
+    {
         Ok(()) => DeleteResponse::Success,
         Err(e) => {
             warn!("Delete unsuccessful: {e}");
@@ -176,6 +181,7 @@ mod test {
     use pazufa_backend_lib::models::APIScope;
     use pazufa_backend_lib::models::params::{self};
 
+    use pazufa_backend_lib::api::PutResponse;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -229,6 +235,61 @@ mod test {
             pazufa_backend_lib::api::DeleteResponse::Unauth,
         )
         .await;
+
+        let mut server = Arc::into_inner(server);
+        scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_session_delete() {
+        let mut scenario = TestSetup::new("test_session_delete").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let sitzung = pazufa_backend_lib::models::Sitzung {
+            api_id: Some(uuid::uuid!("6142b111-f691-404d-aeff-521a7a530134")),
+            ..pazufa_backend_lib::models::Sitzung::default()
+        };
+
+        // Test case: Input non-existing session
+        let response = super::sid_put(
+            pazufa_backend_lib::api::auth::Claims(APIScope::Admin, 1),
+            axum::extract::Path(params::ApiIdPathParam {
+                api_id: sitzung.api_id.expect("Failed"),
+            }),
+            axum::extract::State(Arc::clone(&server)),
+            axum::Json(sitzung.clone()),
+        )
+        .await;
+        assert!(matches!(response, PutResponse::Success));
+
+        // Test cases for sitzung_delete:
+        // Test case: Delete existing session with proper permissions
+        let r = super::sitzung_delete(
+            pazufa_backend_lib::api::auth::Claims(APIScope::Admin, 1),
+            axum::extract::Path(params::ApiIdPathParam {
+                api_id: sitzung.api_id.expect("Failed"),
+            }),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(matches!(
+            r,
+            pazufa_backend_lib::api::DeleteResponse::Success
+        ));
+
+        // Test case: Delete non-existent session
+        let r = super::sitzung_delete(
+            pazufa_backend_lib::api::auth::Claims(APIScope::Admin, 1),
+            axum::extract::Path(params::ApiIdPathParam {
+                api_id: sitzung.api_id.expect("Failed"),
+            }),
+            axum::extract::State(Arc::clone(&server)),
+        )
+        .await;
+        assert!(matches!(
+            r,
+            pazufa_backend_lib::api::DeleteResponse::Success
+        ));
 
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();

@@ -249,6 +249,10 @@ enum PutReplaceValidation {
     BadReq(String),
     Fine,
 }
+// Validates whether the PUT Request is valid, i.e.:
+// - no circular references
+// - no invalid references
+// in the "replacing" body
 async fn putreplacing_validation<F, T: utoipa::ToSchema + Clone + PartialEq + Ord>(
     tx: &mut PgTransaction<'_>,
     body: &models::ReplacementPutRequest<T>,
@@ -290,6 +294,10 @@ where
     }
     Ok(PutReplaceValidation::Fine)
 }
+
+// wrangles the database to restore a sane state
+// this means preemtively removing relation entries in a table with a uniqueness constraint that
+// are to be made one. For an example see the conflict resolution query explanatory comment
 async fn resolve_conflicts(
     rep_old: &[i32],
     rep_new: &[i32],
