@@ -3,11 +3,15 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName};
 use axum::response::Json;
 use pazufa_backend_lib::api::auth::Claims;
-use pazufa_backend_lib::api::sitzung::{self as libsitz, SitzungListingResponse};
-use pazufa_backend_lib::api::{DeleteResponse, GetSingleResponse, PutResponse};
+use pazufa_backend_lib::api::sitzung::{
+    self as libsitz, SitzungListingResponse, get_sitzung_by_parameter,
+};
+use pazufa_backend_lib::api::{
+    DeleteResponse, GetSingleResponse, PutResponse, find_applicable_date_range,
+};
+use pazufa_backend_lib::db::retrieve;
 use pazufa_backend_lib::models;
-use pazufa_backend_lib::models::APIScope;
-use pazufa_backend_lib::models::params;
+use pazufa_backend_lib::models::{APIScope, params};
 use std::sync::Arc;
 use tracing::warn;
 use utoipa::OpenApi;
@@ -90,6 +94,7 @@ async fn sid_put(
         })
 }
 
+/// Get Sitzung objects by filters
 #[tracing::instrument(skip_all)]
 #[utoipa::path(
     get,
@@ -109,6 +114,42 @@ async fn s_get(
     Query(expand): Query<params::ExpandQueryParam>,
     State(api_impl): State<Arc<PazufaServer>>,
 ) -> SitzungListingResponse {
+    async fn inner(
+        server: &PazufaServer,
+        header_params: &params::IfModSince,
+        query_params: &params::SGetQueryParams,
+        expand: bool,
+    ) -> anyhow::Result<SitzungListingResponse> {
+        #[rustfmt::skip]
+        let Some(range) = find_applicable_date_range(None, None, None, 
+            query_params.since, query_params.until, None,
+        ) else {
+            warn!(
+                "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
+                query_params, header_params.if_modified_since
+            );
+            return Ok(SitzungListingResponse::BadReq);
+        };
+        let params = retrieve::SitzungFilterParameters {
+            gremium_like: query_params.gr.clone(),
+            parlament: query_params.p,
+            if_mod_since: header_params.if_modified_since,
+            wp: query_params.wp,
+            since: range.since,
+            until: range.until,
+            vgid: query_params.vgid,
+        };
+        let mut tx = server.sqlx_db.begin().await?;
+        Ok(get_sitzung_by_parameter(
+            params,
+            query_params.page,
+            query_params.per_page,
+            expand,
+            "/api/v2/sitzung",
+            &mut tx,
+        )
+        .await?)
+    }
     // Header parameters
     let ims = match params::IfModSince::try_from(
         headers.get(HeaderName::from_static("if-modified-since")),
@@ -120,7 +161,7 @@ async fn s_get(
         }
     };
 
-    libsitz::s_get(
+    inner(
         api_impl.as_ref(),
         &ims,
         &query_params,
@@ -177,12 +218,16 @@ async fn s_get_by_id(
 
 #[cfg(test)]
 mod test {
-    use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::models::APIScope;
+    use crate::testing::{
+        TestClient, TestSetup, authtesting, rfc3339, seed_sitzungen, test_sitzung, tomorrow,
+        yesterday,
+    };
     use pazufa_backend_lib::models::params::{self};
+    use pazufa_backend_lib::models::{self, APIScope};
 
     use pazufa_backend_lib::api::PutResponse;
     use std::sync::Arc;
+    use tracing_test::traced_test;
 
     #[tokio::test]
     async fn test_auth_sid_put() {
@@ -293,6 +338,158 @@ mod test {
 
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_s_get() {
+        let mut scenario = TestSetup::new("test_s_get").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let client = TestClient::new(Arc::clone(&server)).await;
+
+        let now = chrono::Utc::now();
+        let sessions = [test_sitzung(now, 1), test_sitzung(now, 2)];
+        seed_sitzungen(&client, &server, &sessions).await;
+
+        // no filters
+        let rsp = client.get("/api/v2/sitzung", &[]).await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        assert_eq!(rsp.header("x-total-count"), Some("2"), "{rsp:?}");
+        assert!(rsp.header("link").is_some(), "{rsp:?}");
+        let mut body = rsp.json::<Vec<models::Sitzung>>();
+        body.sort_by_key(|s| s.nummer);
+        assert_eq!(
+            body.iter().map(|s| s.titel.clone()).collect::<Vec<_>>(),
+            sessions.iter().map(|s| s.titel.clone()).collect::<Vec<_>>()
+        );
+        assert!(body.iter().all(|s| s.gremium == sessions[0].gremium));
+
+        // expand does not change what is found
+        let rsp = client.get("/api/v2/sitzung?expand=true", &[]).await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        assert_eq!(rsp.json::<Vec<models::Sitzung>>().len(), 2);
+
+        // parliament and electoral period
+        let rsp = client.get("/api/v2/sitzung?p=BT&wp=20", &[]).await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        assert_eq!(rsp.json::<Vec<models::Sitzung>>().len(), 2);
+        let rsp = client.get("/api/v2/sitzung?p=BT&wp=19", &[]).await;
+        assert_eq!(rsp.status, 204, "{rsp:?}");
+        let rsp = client.get("/api/v2/sitzung?p=BR", &[]).await;
+        assert_eq!(rsp.status, 204, "{rsp:?}");
+
+        // committee name is matched as a case insensitive substring
+        let rsp = client.get("/api/v2/sitzung?gr=tests", &[]).await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        assert_eq!(rsp.json::<Vec<models::Sitzung>>().len(), 2);
+        let rsp = client.get("/api/v2/sitzung?gr=gibtsnicht", &[]).await;
+        assert_eq!(rsp.status, 204, "{rsp:?}");
+
+        // unknown vorgang
+        let rsp = client
+            .get(&format!("/api/v2/sitzung?vgid={}", uuid::Uuid::nil()), &[])
+            .await;
+        assert_eq!(rsp.status, 204, "{rsp:?}");
+
+        // date range
+        let since = yesterday(now);
+        let until = tomorrow(now);
+        let rsp = client
+            .get(
+                &format!(
+                    "/api/v2/sitzung?since={}&until={}",
+                    rfc3339(since),
+                    rfc3339(until)
+                ),
+                &[],
+            )
+            .await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        let body = rsp.json::<Vec<models::Sitzung>>();
+        assert_eq!(body.len(), 2);
+        for s in body {
+            assert!(
+                s.termin >= since && s.termin <= until,
+                "Found session outside requested date range: {s:?}"
+            );
+        }
+
+        // since after until is unsatisfiable
+        let rsp = client
+            .get(
+                &format!(
+                    "/api/v2/sitzung?since={}&until={}",
+                    rfc3339(until),
+                    rfc3339(since)
+                ),
+                &[],
+            )
+            .await;
+        assert_eq!(rsp.status, 400, "{rsp:?}");
+
+        // since in the future
+        let rsp = client
+            .get(&format!("/api/v2/sitzung?since={}", rfc3339(until)), &[])
+            .await;
+        assert_eq!(rsp.status, 204, "{rsp:?}");
+
+        drop(client);
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_s_get_paging_and_headers() {
+        let mut scenario = TestSetup::new("test_s_get_paging_and_headers").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let client = TestClient::new(Arc::clone(&server)).await;
+
+        let now = chrono::Utc::now();
+        let sessions = [test_sitzung(now, 1), test_sitzung(now, 2)];
+        seed_sitzungen(&client, &server, &sessions).await;
+        let since = yesterday(now);
+        let until = tomorrow(now);
+
+        // pagination
+        let rsp = client.get("/api/v2/sitzung?per_page=1", &[]).await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        assert_eq!(rsp.header("x-total-count"), Some("2"), "{rsp:?}");
+        assert_eq!(rsp.header("x-per-page"), Some("1"), "{rsp:?}");
+        let first = rsp.json::<Vec<models::Sitzung>>();
+        assert_eq!(first.len(), 1);
+        let rsp = client.get("/api/v2/sitzung?per_page=1&page=2", &[]).await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        let second = rsp.json::<Vec<models::Sitzung>>();
+        assert_eq!(second.len(), 1);
+        assert_ne!(first[0].nummer, second[0].nummer);
+
+        // if-modified-since in the future
+        let rsp = client
+            .get("/api/v2/sitzung", &[("if-modified-since", &rfc3339(until))])
+            .await;
+        assert_eq!(rsp.status, 304, "{rsp:?}");
+
+        // if-modified-since in the past
+        let rsp = client
+            .get("/api/v2/sitzung", &[("if-modified-since", &rfc3339(since))])
+            .await;
+        assert_eq!(rsp.status, 200, "{rsp:?}");
+        assert_eq!(rsp.json::<Vec<models::Sitzung>>().len(), 2);
+
+        // malformed if-modified-since
+        let rsp = client
+            .get("/api/v2/sitzung", &[("if-modified-since", "gestern")])
+            .await;
+        assert_eq!(rsp.status, 400, "{rsp:?}");
+
+        // malformed query parameters
+        let rsp = client.get("/api/v2/sitzung?p=XX", &[]).await;
+        assert_eq!(rsp.status, 400, "{rsp:?}");
+        let rsp = client.get("/api/v2/sitzung?vgid=keine-uuid", &[]).await;
+        assert_eq!(rsp.status, 400, "{rsp:?}");
+
+        drop(client);
         scenario.teardown().await;
     }
 }
