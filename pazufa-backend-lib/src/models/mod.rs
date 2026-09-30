@@ -60,15 +60,14 @@ fn is_valid_string<E: serde::de::Error>(s: &str) -> Result<(), E> {
         Err(de::Error::custom(
             "Strings must not be empty. please fill them with TODO markers, with a sensible default or with processed content",
         ))
+    } else if s.chars().any(|c| c == '\0') {
+        Err(de::Error::custom(
+            "This text contains '\\0', which is rejected due to being the C-String terminator",
+        ))
     } else if ammonia::is_html(s) {
         Err(de::Error::custom(
             "String was recognized to contain html structure. 
                 This might indicate cross-site scripting",
-        ))
-    } else if s.chars().any(|c| c == '\0') {
-        Err(de::Error::custom(
-            "This text contains '\\0', which is rejected due to being a C-String delimiter. 
-If you believe, that the null char must be in your text, please file an issue",
         ))
     } else {
         Ok(())
@@ -104,6 +103,7 @@ fn de_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Erro
 fn de_link<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
     let s = String::deserialize(deserializer)?;
     is_valid_string(&s)?;
+    is_valid_link(&s)?;
     Ok(s)
 }
 

@@ -564,11 +564,9 @@ pub(crate) mod test_failed_irl_scenarios {
         let mut records = vec![];
         let mut lines = buf_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            records.push(
-                serde_json::from_str(&line).unwrap_or_else(|_| {
-                    panic!("Failed to deserialize JSON line in file: {path:?}")
-                }),
-            );
+            records.push(serde_json::from_str(&line).unwrap_or_else(|e| {
+                panic!("Failed to deserialize JSON line in file: {path:?} With Error {e}")
+            }));
         }
         records
     }
@@ -583,7 +581,7 @@ pub(crate) mod test_failed_irl_scenarios {
                     TestSetup::new(&concat!("scenario_test_", stringify!($name))).await;
                 let objects = read_jsonl(&path).await;
                 for obj in &objects {
-                    tracing::trace!("next to be inserted: {}", obj.api_id);
+                    tracing::trace!("next to be inserted: {obj:?}");
                     let response = super::vorgang_put(
                         &test_setup.server,
                         1,

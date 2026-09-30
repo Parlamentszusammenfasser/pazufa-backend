@@ -122,7 +122,7 @@ pub struct Station {
 
     /// DEPRECATED: This has been moved to the Vorgang level.
     /// Please do not submit any data here, it will be merged as Vorgangs-Schlagworte
-    /// For details, see https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues/54
+    /// For details, see <https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues/54>
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[serde(deserialize_with = "de_vecstring")]
     pub schlagworte: Vec<String>,

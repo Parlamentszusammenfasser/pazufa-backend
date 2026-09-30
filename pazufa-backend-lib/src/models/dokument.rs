@@ -430,6 +430,7 @@ impl<'de> Deserialize<'de> for ZusammenfassungWrapper {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         if let Ok(summ) = String::deserialize(value.clone()) {
+            is_valid_string(&summ)?;
             return Ok(Self::Legacy(summ));
         }
 
@@ -463,7 +464,7 @@ mod dokument_deserialize {
         let s: super::Dokument =
             serde_json::from_str(include_str!("./../../tests/serialization/dokument.json"))
                 .expect("Expected flawless serialization");
-        assert_eq!(s.link, "string");
+        assert_eq!(s.link, "https://string.com");
     }
     #[test]
     fn deserialize_dokument_invar_fail() {
@@ -529,6 +530,20 @@ mod dokument_deserialize {
       "autoren": []
     }"#;
         let deser: Result<super::Dokument, _> = serde_json::from_str(dokument);
+        deser.expect_err("Success");
+    }
+    #[test]
+    fn issue200_nullbyte_in_legacy_summary() {
+        let stellungnahme = r#"
+                {"autoren": [{"organisation": "Verein der Bayerischen Chemischen Industrie e.V."}], 
+                "hash": [{"mime": "application/pdf", "strategy": "sha256+bytes", "value": "1c67904782b4b19e0ae2117d3d232b6269e80ee90a329ff74180c4df7becaa4f"}], 
+                "link": "https://www.bayern.landtag.de/www/ElanTextAblage_WP19/Gesetzesmaterial/0000003318/0000000148.pdf", 
+                "meinung": 4, "schlagworte": [], "titel": "Ohne Titel", "typ": "stellungnahme", 
+                "volltext": "++++", 
+                "zp_modifiziert": "2026-08-14T05:46:12.625968+00:00", "zp_referenz": "2024-10-08T12:00:00+00:00", 
+                "zusammenfassung": "\u0000"}
+            "#;
+        let deser: Result<super::Dokument, _> = serde_json::from_str(stellungnahme);
         deser.expect_err("Success");
     }
 }

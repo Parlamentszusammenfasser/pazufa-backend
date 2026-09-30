@@ -11,7 +11,7 @@
   "drucksnr": "string",
   "hash": "string",
   "kurztitel": "string",
-  "link": "string",
+  "link": "ftp://string.example",
   "meinung": 10,
   "schlagworte": [
     "string"
