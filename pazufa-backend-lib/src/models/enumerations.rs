@@ -169,6 +169,8 @@ pub enum Vorgangstyp {
     BuAntragBweinsatz,
     #[serde(rename = "gg-land-parl")]
     GgLandParl,
+    #[serde(rename = "gg-land-parl-haushalt")]
+    GgLandParlHaushalt,
     #[serde(rename = "gg-land-volk")]
     GgLandVolk,
     #[serde(rename = "bw-einsatz")]
@@ -197,6 +199,8 @@ pub enum Stationstyp {
     ParlInitiativ,
     #[serde(rename = "parl-antragsst")]
     ParlAntragsst,
+    #[serde(rename = "parl-anhoerung")]
+    ParlAnhoerung,
     #[serde(rename = "parl-ausschber")]
     ParlAusschber,
     #[serde(rename = "parl-vollvlsgn")]
