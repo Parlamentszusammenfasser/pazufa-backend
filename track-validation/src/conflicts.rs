@@ -2,7 +2,7 @@
     clippy::arithmetic_side_effects,
     reason = "very confined and well reviewed"
 )]
-use crate::regex::Regex;
+use crate::Regex;
 use std::collections::{BTreeMap, VecDeque};
 
 impl Regex {
@@ -37,7 +37,7 @@ impl Regex {
             );
             // goal check
             let chars: Vec<_> = current.iter().map(|&t| into_char(t, map)).collect();
-            let (b, c) = self.match_regex(&chars);
+            let (b, c) = self.nfa.matches(&chars);
             tracing::trace!("matched to: {:?}", (b, c));
 
             if b && c == chars.len() {
@@ -70,7 +70,7 @@ impl Regex {
 )]
 mod test_regex {
     use crate::Regex;
-    use std::{collections::BTreeMap, str::FromStr};
+    use std::collections::BTreeMap;
 
     #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug, Copy)]
     enum MockType {
@@ -119,7 +119,7 @@ mod test_regex {
     #[test]
     fn conflicting_stations_full_fail() {
         let rx = "[RE]*S?I((VA*(Z|VJGK|VN|VA*(Z|VJGK|VN)))|Z)";
-        let rx = Regex::from_str(rx).expect("const string");
+        let rx = Regex::new(rx).expect("const string");
 
         let stats = [MockStat {
             typ: MockType::ParlAusschber,

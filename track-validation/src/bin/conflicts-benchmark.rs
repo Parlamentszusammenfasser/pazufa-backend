@@ -7,7 +7,7 @@
     reason = "this is just a benchmarking binary"
 )]
 #![allow(clippy::expect_used, reason = "this is just a benchmarking binary")]
-use std::{collections::BTreeMap, str::FromStr};
+use std::collections::BTreeMap;
 use track_validation::Regex;
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug, Copy)]
@@ -55,8 +55,7 @@ fn station_mapping() -> BTreeMap<MockType, char> {
 }
 
 fn main() {
-    let rx =
-        Regex::from_str("((E*R+)?S)?I((VA*(Z|VJGK|VN|VA*(Z|VJGK|VN)))|Z)").expect("const string");
+    let rx = Regex::new("((E*R+)?S)?I((VA*(Z|VJGK|VN|VA*(Z|VJGK|VN)))|Z)").expect("const string");
     let station_mapping = station_mapping();
 
     let mut i = 0;

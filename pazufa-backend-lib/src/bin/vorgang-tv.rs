@@ -1,7 +1,3 @@
-#![allow(
-    clippy::disallowed_macros,
-    reason = "I will not do a full logging init for a little program"
-)]
 use clap::Parser;
 use pazufa_backend_lib::db::validate;
 use std::path::PathBuf;
@@ -33,9 +29,9 @@ async fn main() {
     );
     let vorgang = serde_json::from_str(&config.content).expect("Vorgang could not be parsed");
     match tracks.validate(&vorgang) {
-        Ok(()) => println!("Successful validation"),
+        Ok(()) => tracing::info!("Successful validation"),
         Err(e) => {
-            println!("Error validating Vorgang: {e}");
+            tracing::error!("Vorgang validation failed: {e}");
             std::process::exit(1);
         }
     }

@@ -2,7 +2,6 @@ use crate::models;
 use crate::{Result, error::DataValidationError};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::str::FromStr;
 use track_validation::Regex;
 
 #[derive(Deserialize)]
@@ -37,7 +36,7 @@ impl Tracks {
                 v.iter().map(|(&vtyp, rx)| {
                     ((*parl, vtyp), {
                         tracing::trace!("parsing {rx}");
-                        Regex::from_str(rx).expect("Malformed tracks file")
+                        Regex::new(rx).expect("Malformed tracks file")
                     })
                 })
             })
@@ -57,10 +56,10 @@ impl Tracks {
     /// - the track validation of any single-parliament track failed
     pub fn validate(&self, vg: &models::Vorgang) -> Result<()> {
         let mut stations = vg.stationen.clone();
-        stations.sort_by_key(|s| s.zp_start);
+        stations.sort_by_key(|s| (s.zp_start, s.meta_tiebreaker));
         let parls: BTreeSet<models::Parlament> =
             stations.iter().map(|s| s.gremium.parlament).collect();
-        self.singular_legislative_class(&parls)?;
+        Self::singular_legislative_class(&parls)?;
 
         if stations
             .iter()
@@ -84,37 +83,28 @@ impl Tracks {
                 .cloned()
                 .collect();
             tracing::trace!("Subvec constructed");
-            let p_substr: Vec<char> = p_subvec
+            let p_substr: String = p_subvec
                 .iter()
                 .map(|s| self.station_mapping[&s.typ])
                 .collect();
             tracing::trace!("Substr constructed: {:?}", p_substr);
 
             // matching and checking
-            let (matched, consumed) = regex.match_regex(&p_substr);
+            let (matched, consumed) = regex.matches(&p_substr);
             tracing::trace!("{:?} matched like so: {:?}", p_substr, (matched, consumed));
             if !matched {
                 let conflicts: Vec<_> =
                     regex.conflicting_stations(&p_subvec, &self.station_mapping, |s, m| m[&s.typ]);
-                let conflicts_str: Vec<_> = conflicts
-                    .iter()
-                    .map(|s| format!("({} / {})", s.zp_start, s.typ))
-                    .collect();
-                let p_subvec: Vec<_> = p_subvec
-                    .iter()
-                    .map(|s| format!("({} / {})", s.zp_start, s.typ))
-                    .collect();
+                let conflicts_str = conflicts.iter().fold("Conflicts:".to_owned(), |accu, s| {
+                    format!("{accu}\n({} / {})", s.zp_start, s.typ)
+                });
+                let station_ordering = p_subvec.iter().fold("Stations:".to_owned(), |accu, s| {
+                    format!("{accu}\n({} / {})", s.zp_start, s.typ)
+                });
 
                 let reason = format!(
-                    "The Vorgang with this station ordering: {:?} has at least one station that is not adhering to the track for parliament {p} and vgtyp {}: {:?}",
-                    p_subvec, vg.typ, conflicts_str
-                );
-                tracing::warn!("{reason}");
-                validation_errors.push(reason);
-            } else if matched && consumed < p_substr.len() {
-                let reason = format!(
-                    "Some stations have been matched and are in valid order, but there are stations left over that cannot be assigned to a track: {:?}",
-                    &p_substr[p_substr.len() - consumed + 1..]
+                    "The Vorgang with this station ordering: {station_ordering} has at least one station that is not adhering to the track for parliament {p} and vgtyp {}: {conflicts_str}",
+                    vg.typ
                 );
                 tracing::warn!("{reason}");
                 validation_errors.push(reason);
@@ -130,37 +120,37 @@ impl Tracks {
             Err(DataValidationError::MalformedVorgang { reason: fmt }.into())
         }
     }
-    fn singular_legislative_class(&self, parls: &BTreeSet<models::Parlament>) -> Result<()> {
-        fn legislative_class(parl: &models::Parlament) -> u8 {
+    fn singular_legislative_class(parls: &BTreeSet<models::Parlament>) -> Result<()> {
+        fn legislative_class(parl: models::Parlament) -> u8 {
+            use models::Parlament as Parl;
             match parl {
-                models::Parlament::Bt => 1,
-                models::Parlament::Br => 1,
-                models::Parlament::Bv => 2,
-                models::Parlament::Ek => 3,
-                models::Parlament::Bb => 4,
-                models::Parlament::By => 5,
-                models::Parlament::Be => 6,
-                models::Parlament::Hb => 7,
-                models::Parlament::Hh => 8,
-                models::Parlament::He => 9,
-                models::Parlament::Mv => 10,
-                models::Parlament::Ni => 11,
-                models::Parlament::Nw => 12,
-                models::Parlament::Rp => 13,
-                models::Parlament::Sl => 14,
-                models::Parlament::Sn => 15,
-                models::Parlament::Th => 16,
-                models::Parlament::Sh => 17,
-                models::Parlament::Bw => 18,
-                models::Parlament::St => 19,
+                Parl::Bt | Parl::Br => 1,
+                Parl::Bv => 2,
+                Parl::Ek => 3,
+                Parl::Bb => 4,
+                Parl::By => 5,
+                Parl::Be => 6,
+                Parl::Hb => 7,
+                Parl::Hh => 8,
+                Parl::He => 9,
+                Parl::Mv => 10,
+                Parl::Ni => 11,
+                Parl::Nw => 12,
+                Parl::Rp => 13,
+                Parl::Sl => 14,
+                Parl::Sn => 15,
+                Parl::Th => 16,
+                Parl::Sh => 17,
+                Parl::Bw => 18,
+                Parl::St => 19,
             }
         }
         let mut class = None;
         for p in parls {
             if class.is_none() {
-                class = Some(legislative_class(p));
+                class = Some(legislative_class(*p));
             } else if let Some(c) = class
-                && c != legislative_class(p)
+                && c != legislative_class(*p)
             {
                 let s_parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
                 let reason = format!(
@@ -181,7 +171,7 @@ impl Tracks {
 )]
 mod test_regex {
     use super::*;
-    use crate::utils::testing::{TestSetup, generate};
+    use crate::utils::testing::generate;
     use tracing_test::traced_test;
 
     fn open_tracks() -> super::Tracks {
@@ -259,6 +249,51 @@ mod test_regex {
         };
         let res = tracks.validate(&vorgang);
         assert!(res.is_err(), "{res:?}");
+    }
+
+    #[tokio::test]
+    async fn tiebreaker_orders_stations() {
+        let tracks = open_tracks();
+        let now = chrono::Utc::now();
+        let vorgang = models::Vorgang {
+            stationen: vec![
+                models::Station {
+                    typ: models::Stationstyp::ParlInitiativ,
+                    zp_start: now,
+                    meta_tiebreaker: Some(2),
+                    ..generate::default_station()
+                },
+                models::Station {
+                    typ: models::Stationstyp::ParlVollvlsgn,
+                    zp_start: now,
+                    meta_tiebreaker: Some(1),
+                    ..generate::default_station()
+                },
+            ],
+            ..generate::default_vorgang()
+        };
+        let result = tracks.validate(&vorgang);
+        assert!(result.is_err(), "{result:?}");
+
+        let vorgang = models::Vorgang {
+            stationen: vec![
+                models::Station {
+                    typ: models::Stationstyp::ParlInitiativ,
+                    zp_start: now,
+                    meta_tiebreaker: Some(1),
+                    ..generate::default_station()
+                },
+                models::Station {
+                    typ: models::Stationstyp::ParlVollvlsgn,
+                    zp_start: now,
+                    meta_tiebreaker: Some(2),
+                    ..generate::default_station()
+                },
+            ],
+            ..generate::default_vorgang()
+        };
+        let result = tracks.validate(&vorgang);
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[tokio::test]

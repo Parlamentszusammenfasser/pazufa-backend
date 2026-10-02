@@ -3,7 +3,6 @@
     clippy::disallowed_macros,
     reason = "I do not need a full tracing stack"
 )]
-use std::process::exit;
 use track_validation::Regex;
 
 const USAGE: &str = "USAGE: `prefixmatch <regex> <input string>`";
@@ -16,26 +15,16 @@ fn main() {
 
     let regex = args.nth(1).expect(USAGE);
     let input = args.next().expect(USAGE);
-    let regex: Vec<_> = regex.chars().collect();
     let regex = Regex::new(&regex).expect("Regex could not be parsed");
-    let input: Vec<_> = input.chars().collect();
-    let (matched, consumed) = regex.match_regex(&input);
+    let (matched, consumed) = regex.matches(&input);
     let length = input.len();
 
     match (matched, consumed) {
         (true, consumed) => match consumed.cmp(&length) {
             std::cmp::Ordering::Less => {
-                println!(
-                    "Partially Matched! {consumed}/{} input characters consumed, meaning some input is left over:",
-                    input.len()
+                unreachable!(
+                    "State matches but input is left over, this is a bug, please report it"
                 );
-                println!(
-                    "{:?} matched / {:?} left over",
-                    &input[..consumed],
-                    &input[consumed..]
-                );
-                println!("{BACKEND_REJ}");
-                exit(1);
             }
             std::cmp::Ordering::Equal => {
                 println!("Matched, input fully consumed");
@@ -50,16 +39,26 @@ fn main() {
             }
         },
         (false, consumed) => {
-            println!(
-                "Not Matched! {consumed}/{} input characters consumed",
-                input.len()
-            );
-            println!(
-                "{:?} matched / {:?} failed the match",
-                &input[..consumed],
-                &input[consumed..]
-            );
-            println!("{BACKEND_REJ}");
+            if consumed < input.len() {
+                println!(
+                    "Not Matched! {consumed}/{} input characters consumed",
+                    input.len()
+                );
+                println!(
+                    "{:?} matched / {:?} failed the match",
+                    &input[..consumed],
+                    &input[consumed..]
+                );
+                println!("{BACKEND_REJ}");
+            } else {
+                println!(
+                    "Not Matched! {consumed}/{} input characters consumed",
+                    input.len()
+                );
+                println!("Input is Left Over");
+                println!("{BACKEND_REJ}");
+            }
+            std::process::exit(1)
         }
     }
 }
