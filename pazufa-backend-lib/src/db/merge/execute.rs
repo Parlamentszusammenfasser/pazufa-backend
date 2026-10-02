@@ -16,8 +16,6 @@ use super::candidates::{
 use crate::api::RoundTimestamp;
 use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
-#[cfg(feature = "track-validation")]
-use crate::db::validate;
 use crate::error::{DataValidationError, PazufaError};
 use crate::models::enumerations::{HashStrategy, Mime};
 use crate::utils::notify::notify_ambiguous_match;
@@ -545,7 +543,7 @@ pub(crate) async fn execute_merge_vorgang(
     // validation and updating
     let merged_state = crate::db::retrieve::vorgang_by_id(candidate, true, &mut *tx).await?;
     #[cfg(feature = "track-validation")]
-    validate::validate_vorgang(&merged_state, srv).await?;
+    srv.tracks.validate(&merged_state)?;
     if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
         sqlx::query!(
             "UPDATE vorgang

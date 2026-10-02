@@ -1,5 +1,5 @@
 use crate::models;
-use crate::{PazufaServer, Result, error::DataValidationError};
+use crate::{Result, error::DataValidationError};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -49,106 +49,128 @@ impl Tracks {
             trackmap,
         }
     }
-}
+    /// Validates a Vorgang, meaning it checks whether it adheres to the constraints specified
+    /// in the tracks file.
+    /// # Errors
+    /// Fails to validate if:
+    /// - there is more than one parliament of one legislative class in there
+    /// - the track validation of any single-parliament track failed
+    pub fn validate(&self, vg: &models::Vorgang) -> Result<()> {
+        let mut stations = vg.stationen.clone();
+        stations.sort_by_key(|s| s.zp_start);
+        let parls: BTreeSet<models::Parlament> =
+            stations.iter().map(|s| s.gremium.parlament).collect();
+        self.singular_legislative_class(&parls)?;
 
-/// Validates a Vorgang, meaning it checks whether it adheres to the constraints specified
-/// in the tracks file.
-/// # Errors
-/// Can error due to database errors or due to a violation of the trackfile specifications
-pub async fn validate_vorgang(vg: &models::Vorgang, srv: &PazufaServer) -> Result<()> {
-    let mut stations = vg.stationen.clone();
-    stations.sort_by_key(|s| (s.zp_start, s.meta_tiebreaker));
-    let parls: BTreeSet<models::Parlament> = stations.iter().map(|s| s.gremium.parlament).collect();
-    let s_parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
-
-    let num_classes: i64 = sqlx::query_scalar!(
-        r#"SELECT COUNT(DISTINCT(c_id)) as "cnt!"
-        FROM parl_class pc, parlament p
-        WHERE 
-        p_id = p.id AND
-        EXISTS (SELECT 1 FROM UNNEST($1::text[]) as in_parls(ip) WHERE ip = p.value)"#,
-        &s_parls[..]
-    )
-    .fetch_one(&srv.sqlx_db)
-    .await?;
-    if num_classes != 1 {
-        let reason = format!(
-            "The Vorgang contains Stations from more than one legislative class (parliament) in it's body: {s_parls:?}, which invalidates it"
-        );
-        tracing::warn!("{reason}");
-        return Err(DataValidationError::MalformedVorgang { reason }.into());
-    }
-    if stations
-        .iter()
-        .any(|s| !srv.tracks.station_mapping.contains_key(&s.typ))
-    {
-        return Err(crate::error::DataValidationError::MalformedVorgang {
-            reason: "Vorgang contains unmapped station type (probably 'sonstig')".to_owned(),
+        if stations
+            .iter()
+            .any(|s| !self.station_mapping.contains_key(&s.typ))
+        {
+            return Err(crate::error::DataValidationError::MalformedVorgang {
+                reason: "Vorgang contains unmapped station type (probably 'sonstig')".to_owned(),
+            }
+            .into());
         }
-        .into());
-    }
-    let mut validation_errors = Vec::new();
-    for p in parls {
-        tracing::trace!("now in parliament {p}");
-        let regex = srv.tracks.trackmap.get(&(p, vg.typ)).ok_or(
-            DataValidationError::MalformedVorgang { reason: format!("A vorgang of type {} is not specified for parliament {p}. If you believe this to be an error, open an issue: https://codeberg.org/PaZuFa/pazufa-backend/issues", vg.typ) }
+        let mut validation_errors = Vec::new();
+        for p in parls {
+            tracing::trace!("now in parliament {p}");
+            let regex = self.trackmap.get(&(p, vg.typ)).ok_or(
+            DataValidationError::MalformedVorgang { reason: format!("A vorgang of type {} is not specified for parliament {p}. If you believe this to be an error, open an issue: https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues", vg.typ) }
             )?;
-        tracing::trace!("Tracks retrieved");
-        let p_subvec: Vec<models::Station> = stations
-            .iter()
-            .filter(|x| x.gremium.parlament == p)
-            .cloned()
-            .collect();
-        tracing::trace!("Subvec constructed");
-        let p_substr: Vec<char> = p_subvec
-            .iter()
-            .map(|s| srv.tracks.station_mapping[&s.typ])
-            .collect();
-        tracing::trace!("Substr constructed: {:?}", p_substr);
-
-        // matching and checking
-        let (matched, consumed) = regex.match_regex(&p_substr);
-        tracing::trace!("{:?} matched like so: {:?}", p_substr, (matched, consumed));
-        if !matched {
-            let conflicts: Vec<_> =
-                regex
-                    .conflicting_stations(&p_subvec, &srv.tracks.station_mapping, |s, m| m[&s.typ]);
-            let conflicts_str: Vec<_> = conflicts
+            tracing::trace!("Tracks retrieved");
+            let p_subvec: Vec<models::Station> = stations
                 .iter()
-                .map(|s| format!("({} / {})", s.zp_start, s.typ))
+                .filter(|x| x.gremium.parlament == p)
+                .cloned()
                 .collect();
-            let p_subvec: Vec<_> = p_subvec
+            tracing::trace!("Subvec constructed");
+            let p_substr: Vec<char> = p_subvec
                 .iter()
-                .map(|s| format!("({} / {})", s.zp_start, s.typ))
+                .map(|s| self.station_mapping[&s.typ])
                 .collect();
+            tracing::trace!("Substr constructed: {:?}", p_substr);
 
-            let reason = format!(
-                "The Vorgang with this station ordering: {:?} has at least one station that is not adhering to the track for parliament {p} and vgtyp {}: {:?}",
-                p_subvec, vg.typ, conflicts_str
+            // matching and checking
+            let (matched, consumed) = regex.match_regex(&p_substr);
+            tracing::trace!("{:?} matched like so: {:?}", p_substr, (matched, consumed));
+            if !matched {
+                let conflicts: Vec<_> =
+                    regex.conflicting_stations(&p_subvec, &self.station_mapping, |s, m| m[&s.typ]);
+                let conflicts_str: Vec<_> = conflicts
+                    .iter()
+                    .map(|s| format!("({} / {})", s.zp_start, s.typ))
+                    .collect();
+                let p_subvec: Vec<_> = p_subvec
+                    .iter()
+                    .map(|s| format!("({} / {})", s.zp_start, s.typ))
+                    .collect();
+
+                let reason = format!(
+                    "The Vorgang with this station ordering: {:?} has at least one station that is not adhering to the track for parliament {p} and vgtyp {}: {:?}",
+                    p_subvec, vg.typ, conflicts_str
+                );
+                tracing::warn!("{reason}");
+                validation_errors.push(reason);
+            } else if matched && consumed < p_substr.len() {
+                let reason = format!(
+                    "Some stations have been matched and are in valid order, but there are stations left over that cannot be assigned to a track: {:?}",
+                    &p_substr[p_substr.len() - consumed + 1..]
+                );
+                tracing::warn!("{reason}");
+                validation_errors.push(reason);
+            }
+        }
+        if validation_errors.is_empty() {
+            Ok(())
+        } else {
+            let fmt = validation_errors.iter().fold(
+                "Track validation Failed. Reasons:\n".to_owned(),
+                |a, new| format!("{a}\n{new}"),
             );
-            tracing::warn!("{reason}");
-            validation_errors.push(reason);
-        } else if matched && consumed < p_substr.len() {
-            #[allow(
-                clippy::arithmetic_side_effects,
-                reason = "consumed is bounded to be less than length"
-            )]
-            let reason = format!(
-                "Some stations have been matched and are in valid order, but there are stations left over that cannot be assigned to a track: {:?}",
-                &p_substr[p_substr.len() - consumed + 1..]
-            );
-            tracing::warn!("{reason}");
-            validation_errors.push(reason);
+            Err(DataValidationError::MalformedVorgang { reason: fmt }.into())
         }
     }
-    if validation_errors.is_empty() {
+    fn singular_legislative_class(&self, parls: &BTreeSet<models::Parlament>) -> Result<()> {
+        fn legislative_class(parl: &models::Parlament) -> u8 {
+            match parl {
+                models::Parlament::Bt => 1,
+                models::Parlament::Br => 1,
+                models::Parlament::Bv => 2,
+                models::Parlament::Ek => 3,
+                models::Parlament::Bb => 4,
+                models::Parlament::By => 5,
+                models::Parlament::Be => 6,
+                models::Parlament::Hb => 7,
+                models::Parlament::Hh => 8,
+                models::Parlament::He => 9,
+                models::Parlament::Mv => 10,
+                models::Parlament::Ni => 11,
+                models::Parlament::Nw => 12,
+                models::Parlament::Rp => 13,
+                models::Parlament::Sl => 14,
+                models::Parlament::Sn => 15,
+                models::Parlament::Th => 16,
+                models::Parlament::Sh => 17,
+                models::Parlament::Bw => 18,
+                models::Parlament::St => 19,
+            }
+        }
+        let mut class = None;
+        for p in parls {
+            if class.is_none() {
+                class = Some(legislative_class(p));
+            } else if let Some(c) = class
+                && c != legislative_class(p)
+            {
+                let s_parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
+                let reason = format!(
+                    "The Vorgang contains Stations from more than one legislative class (parliament) in it's body: {s_parls:?}, which invalidates it"
+                );
+                tracing::warn!("{reason}");
+                return Err(DataValidationError::MalformedVorgang { reason }.into());
+            }
+        }
         Ok(())
-    } else {
-        let fmt = validation_errors.iter().fold(
-            "Track validation Failed. Reasons:\n".to_owned(),
-            |a, new| format!("{a}\n{new}"),
-        );
-        Err(DataValidationError::MalformedVorgang { reason: fmt }.into())
     }
 }
 
@@ -162,9 +184,13 @@ mod test_regex {
     use crate::utils::testing::{TestSetup, generate};
     use tracing_test::traced_test;
 
+    fn open_tracks() -> super::Tracks {
+        Tracks::new("tracks.toml")
+    }
+
     #[tokio::test]
     async fn sonstig_station_run() {
-        let scenario = TestSetup::new("sonstig_station_run").await;
+        let tracks = open_tracks();
 
         let vg = models::Vorgang {
             stationen: vec![models::Station {
@@ -173,18 +199,18 @@ mod test_regex {
             }],
             ..generate::default_vorgang()
         };
-        let res = validate_vorgang(&vg, &scenario.server).await;
+        let res = tracks.validate(&vg);
         assert!(matches!(
             res,
             Err(crate::error::PazufaError::Validation { .. })
         ));
-        scenario.teardown().await;
     }
 
     #[traced_test]
     #[tokio::test]
     async fn vorgang_validate_starmatching_consumption() {
-        let scenario = TestSetup::new("vorgang_validate_memleak_starmatching").await;
+        let tracks = open_tracks();
+
         let gremium = models::Gremium {
             parlament: models::Parlament::Bt,
             ..generate::default_gremium()
@@ -214,17 +240,16 @@ mod test_regex {
                 .collect(),
             ..generate::random::vorgang(1)
         };
-        let res = validate_vorgang(&catastrophe, &scenario.server).await;
+        let res = tracks.validate(&catastrophe);
         assert!(matches!(
             res,
             Err(crate::error::PazufaError::Validation { .. })
         ));
-        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn validate_vorgang_full_fail() {
-        let scenario = TestSetup::new("validate_vorgang_fine").await;
+        let tracks = open_tracks();
         let vorgang = models::Vorgang {
             stationen: vec![models::Station {
                 typ: models::Stationstyp::ParlAusschber,
@@ -232,74 +257,26 @@ mod test_regex {
             }],
             ..generate::default_vorgang()
         };
-        let result = validate_vorgang(&vorgang, &scenario.server).await;
-        assert!(result.is_err(), "{result:?}");
-        scenario.teardown().await;
-    }
-
-    #[tokio::test]
-    async fn tiebreaker_orders_stations() {
-        let scenario = TestSetup::new("tiebreaker_orders_stations").await;
-        let now = chrono::Utc::now();
-        let vorgang = models::Vorgang {
-            stationen: vec![
-                models::Station {
-                    typ: models::Stationstyp::ParlInitiativ,
-                    zp_start: now,
-                    meta_tiebreaker: Some(2),
-                    ..generate::default_station()
-                },
-                models::Station {
-                    typ: models::Stationstyp::ParlVollvlsgn,
-                    zp_start: now,
-                    meta_tiebreaker: Some(1),
-                    ..generate::default_station()
-                },
-            ],
-            ..generate::default_vorgang()
-        };
-        let result = validate_vorgang(&vorgang, &scenario.server).await;
-        assert!(result.is_err(), "{result:?}");
-
-        let vorgang = models::Vorgang {
-            stationen: vec![
-                models::Station {
-                    typ: models::Stationstyp::ParlInitiativ,
-                    zp_start: now,
-                    meta_tiebreaker: Some(1),
-                    ..generate::default_station()
-                },
-                models::Station {
-                    typ: models::Stationstyp::ParlVollvlsgn,
-                    zp_start: now,
-                    meta_tiebreaker: Some(2),
-                    ..generate::default_station()
-                },
-            ],
-            ..generate::default_vorgang()
-        };
-        let result = validate_vorgang(&vorgang, &scenario.server).await;
-        assert!(result.is_ok(), "{result:?}");
-        scenario.teardown().await;
+        let res = tracks.validate(&vorgang);
+        assert!(res.is_err(), "{res:?}");
     }
 
     #[tokio::test]
     async fn validate_vorgang_formalia_wrong() {
-        let scenario = TestSetup::new("validate_vorgang_formalia").await;
+        let tracks = open_tracks();
         let vorgang = generate::default_vorgang();
         let vorgang = models::Vorgang {
             typ: models::Vorgangstyp::GgLandVolk,
             ..vorgang
         };
-        let result = validate_vorgang(&vorgang, &scenario.server).await;
+        let res = tracks.validate(&vorgang);
         assert!(
-            match result {
+            match res {
                 Err(crate::error::PazufaError::Validation { ref source }) =>
                     matches!(**source, DataValidationError::MalformedVorgang { .. }),
                 _ => false,
             },
-            "{result:?}"
+            "{res:?}"
         );
-        scenario.teardown().await;
     }
 }

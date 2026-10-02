@@ -1,7 +1,5 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
-#[cfg(feature = "track-validation")]
-use crate::db::validate;
 use crate::error::{DataValidationError, PazufaError};
 use crate::models::{self, Zusammenfassungstupel};
 use crate::{PazufaServer, Result};
@@ -213,7 +211,7 @@ pub async fn insert(
 ) -> Result<i32> {
     tracing::info!("Inserting Complete Vorgang into the database");
     #[cfg(feature = "track-validation")]
-    validate::validate_vorgang(vg, server).await?;
+    server.tracks.validate(vg)?;
     tracing::trace!("Validation successful");
 
     let obj = "vorgang";

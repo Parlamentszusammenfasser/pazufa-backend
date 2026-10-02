@@ -3,7 +3,7 @@ FROM rust:1.99-slim-bookworm AS builder
 ARG RUSTFLAGS
 ARG SWAGGER_UI_DOWNLOAD_URL
 
-ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.7+v0.1.0/tracks.toml"
+ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.7+v0.1.1/tracks.toml"
 ENV SQLX_OFFLINE=true
 
 WORKDIR /app
