@@ -136,7 +136,7 @@ impl Regex {
                     child.push(Self::parse_regex(subre)?);
                 }
                 ('[', Regex::Conc(child)) => {
-                    let (cbrx, cblen) = Self::parse_choicebox(re);
+                    let (cbrx, cblen) = Self::parse_choicebox(&re[ci..]);
                     ci += cblen - 1;
                     child.push(cbrx);
                 }
@@ -566,6 +566,19 @@ mod test {
         );
 
         assert_eq!((output, 5), Regex::parse_choicebox(&input));
+    }
+    #[test]
+    fn choicebox_after_star() {
+        let input = "A*[BC]";
+        let input: Vec<char> = input.chars().collect();
+        let input = Regex::parse_regex(&input).expect("Static value unwrap");
+
+        let output = Regex::Conc(vec![
+            Regex::Star(Regex::Lit('A').into()),
+            Regex::Choice(Regex::Lit('B').into(), Regex::Lit('C').into()),
+        ]);
+
+        assert_eq!(output, input);
     }
     #[test]
     fn choiceboxstar() {
