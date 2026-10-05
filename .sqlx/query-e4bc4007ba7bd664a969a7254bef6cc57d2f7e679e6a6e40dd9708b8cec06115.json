@@ -137,17 +137,6 @@
       },
       {
         "ordinal": 12,
-        "name": "tiebreak_order",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "station",
-            "name": "tiebreak_order"
-          }
-        }
-      },
-      {
-        "ordinal": 13,
         "name": "parlv",
         "type_info": "Varchar",
         "origin": {
@@ -158,7 +147,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 13,
         "name": "stattyp",
         "type_info": "Varchar",
         "origin": {
@@ -187,7 +176,6 @@
       false,
       false,
       false,
-      true,
       false,
       false
     ]

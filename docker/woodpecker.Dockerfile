@@ -1,8 +1,8 @@
-FROM rust:1.97.1-bookworm AS base
+FROM rust:1.99-bookworm AS base
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Image for CI with Rust with some prebuilt toolings"
-LABEL version="1.2.0"
+LABEL version="1.3.0"
 
 ENV OPENAPI_GENERATOR_VERSION=7.20.0
 ARG OPENAPI_GENERATOR_VERSION=7.20.0
