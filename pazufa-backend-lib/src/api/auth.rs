@@ -161,14 +161,14 @@ impl FromRequestParts<Arc<PazufaServer>> for Claims {
 }
 #[derive(IntoResponses, PartialEq, Debug)]
 pub enum AuthPostResponse {
-    #[response(status = 201)]
+    #[response(status = 201, description = "API Key Created")]
     KeyCreated(String),
 
-    #[response(status = 400)]
+    #[response(status = 400, description = "Malformed Request")]
     BadRequest,
-    #[response(status = 401)]
+    #[response(status = 401, description = "Authentication or Authorization failed")]
     Unauth,
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error(String),
 }
 impl IntoResponse for AuthPostResponse {
@@ -185,7 +185,11 @@ impl IntoResponse for AuthPostResponse {
 #[derive(IntoResponses, PartialEq, Debug, Serialize)]
 #[serde(untagged)]
 pub enum AuthStatusResponse {
-    #[response(status = 200, content_type = "application/json")]
+    #[response(
+        status = 200,
+        content_type = "application/json",
+        description = "contains scope, current rotation status and expiry date if applicable"
+    )]
     Status {
         /// Note: inline enums are not fully supported by openapi-generator
         scope: APIScope,
@@ -196,9 +200,9 @@ pub enum AuthStatusResponse {
         /// Whether this key is currently in a transition process
         is_being_rotated: bool,
     },
-    #[response(status = 401)]
+    #[response(status = 401, description = "Authentication or Authorization failed")]
     Unauth,
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error(String),
 }
 impl IntoResponse for AuthStatusResponse {
@@ -213,7 +217,11 @@ impl IntoResponse for AuthStatusResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, IntoResponses, PartialEq)]
 pub enum AuthRotateResponse {
-    #[response(status = 201, content_type = "application/json")]
+    #[response(
+        status = 201,
+        content_type = "application/json",
+        description = "API Key Created"
+    )]
     Created {
         /// The newly created API key (shown only once)
         new_api_key: String,
@@ -222,9 +230,9 @@ pub enum AuthRotateResponse {
         rotation_complete_date: chrono::DateTime<chrono::Utc>,
     },
 
-    #[response(status = 401)]
+    #[response(status = 401, description = "Authentication or Authorization failed")]
     Unauth,
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error(String),
 }
 impl IntoResponse for AuthRotateResponse {
@@ -249,11 +257,15 @@ impl IntoResponse for AuthRotateResponse {
 
 #[derive(Debug, IntoResponses, PartialEq)]
 pub enum AuthListingKeytagResponse {
-    #[response(status = 200, content_type = "application/json")]
+    #[response(
+        status = 200,
+        content_type = "application/json",
+        description = "Lists which Objects were touched by a scraper of this key"
+    )]
     KeytagListing(KeytagListing),
-    #[response(status = 401)]
+    #[response(status = 401, description = "Authentication or Authorization failed")]
     Unauth,
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error(String),
 }
 impl IntoResponse for AuthListingKeytagResponse {

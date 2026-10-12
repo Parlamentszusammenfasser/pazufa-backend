@@ -26,11 +26,11 @@ struct PingQueryParams {
 #[allow(unused, reason = "It is used to build response schemata for utoipa")]
 #[derive(IntoResponses)]
 enum PingResponse {
-    #[response(status = 200)]
+    #[response(status = 200, description = "Successful Response")]
     Pong,
-    #[response(status = 400)]
+    #[response(status = 400, description = "Malformed Request")]
     BadReq,
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error,
 }
 impl IntoResponse for PingResponse {

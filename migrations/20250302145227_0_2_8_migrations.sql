@@ -21,15 +21,15 @@ ALTER TABLE station
         UNIQUE(vg_id, zp_start, tiebreak_ordering)
 ;
 
--- #113 ETags for API ID objects
--- the version is bumped when a Vorgang is pushed and NotModified is not returned.
--- the ETag is a hash of this version number+the vorgang api id
-ALTER TABLE vorgang     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
-ALTER TABLE station     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
-ALTER TABLE dokument    ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
-ALTER TABLE autor       ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
-ALTER TABLE gremium     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
-
-ALTER TABLE sitzung     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
+-- -- #113 ETags for API ID objects
+-- -- the version is bumped when a Vorgang is pushed and NotModified is not returned.
+-- -- the ETag is a hash of this version number+the vorgang api id
+-- ALTER TABLE vorgang     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
+-- ALTER TABLE station     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
+-- ALTER TABLE dokument    ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
+-- ALTER TABLE autor       ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
+-- ALTER TABLE gremium     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
+-- 
+-- ALTER TABLE sitzung     ADD COLUMN version INTEGER NOT NULL DEFAULT 318008;
 
 

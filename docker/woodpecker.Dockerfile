@@ -1,4 +1,4 @@
-FROM rust:1.99-bookworm AS base
+FROM rust:1.99-bookworm AS base 
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Image for CI with Rust with some prebuilt toolings"

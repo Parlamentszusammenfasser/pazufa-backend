@@ -89,6 +89,7 @@ impl axum::response::IntoResponse for PazufaOrFtmListingResponse {
 }
 impl IntoResponses for PazufaOrFtmListingResponse {
     fn responses() -> BTreeMap<String, openapi::RefOr<openapi::response::Response>> {
+        use models::headers as hdr;
         ResponsesBuilder::new()
             .response(
                 "200",
@@ -96,31 +97,31 @@ impl IntoResponses for PazufaOrFtmListingResponse {
                     .header(
                         "link",
                         HeaderBuilder::new()
-                            .schema(models::headers::Link::schema())
+                            .schema(Some(hdr::Link::schema()))
                             .build(),
                     )
                     .header(
                         "x-page",
                         HeaderBuilder::new()
-                            .schema(models::headers::XPage::schema())
+                            .schema(Some(hdr::XPage::schema()))
                             .build(),
                     )
                     .header(
                         "x-per-page",
                         HeaderBuilder::new()
-                            .schema(models::headers::XPerPage::schema())
+                            .schema(Some(hdr::XPerPage::schema()))
                             .build(),
                     )
                     .header(
                         "x-total-pages",
                         HeaderBuilder::new()
-                            .schema(models::headers::XTotalPages::schema())
+                            .schema(Some(hdr::XTotalPages::schema()))
                             .build(),
                     )
                     .header(
                         "x-total-count",
                         HeaderBuilder::new()
-                            .schema(models::headers::XTotalPages::schema())
+                            .schema(Some(hdr::XTotalPages::schema()))
                             .build(),
                     )
                     .description("Ok")
@@ -167,6 +168,7 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + Debug + PartialEq> IntoResp
     for AuthListingGetResponse<T>
 {
     fn responses() -> BTreeMap<String, openapi::RefOr<openapi::response::Response>> {
+        use models::headers as hdr;
         ResponsesBuilder::new()
             .response(
                 "200",
@@ -174,31 +176,31 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + Debug + PartialEq> IntoResp
                     .header(
                         "link",
                         HeaderBuilder::new()
-                            .schema(models::headers::Link::schema())
+                            .schema(Some(hdr::Link::schema()))
                             .build(),
                     )
                     .header(
                         "x-page",
                         HeaderBuilder::new()
-                            .schema(models::headers::XPage::schema())
+                            .schema(Some(hdr::XPage::schema()))
                             .build(),
                     )
                     .header(
                         "x-per-page",
                         HeaderBuilder::new()
-                            .schema(models::headers::XPerPage::schema())
+                            .schema(Some(hdr::XPerPage::schema()))
                             .build(),
                     )
                     .header(
                         "x-total-pages",
                         HeaderBuilder::new()
-                            .schema(models::headers::XTotalPages::schema())
+                            .schema(Some(hdr::XTotalPages::schema()))
                             .build(),
                     )
                     .header(
                         "x-total-count",
                         HeaderBuilder::new()
-                            .schema(models::headers::XTotalPages::schema())
+                            .schema(Some(hdr::XTotalPages::schema()))
                             .build(),
                     )
                     .description("Ok")
@@ -269,6 +271,7 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResp
     for ListingGetResponse<T>
 {
     fn responses() -> BTreeMap<String, openapi::RefOr<openapi::response::Response>> {
+        use models::headers as hdr;
         ResponsesBuilder::new()
             .response(
                 "200",
@@ -276,31 +279,31 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResp
                     .header(
                         "link",
                         HeaderBuilder::new()
-                            .schema(models::headers::Link::schema())
+                            .schema(Some(hdr::Link::schema()))
                             .build(),
                     )
                     .header(
                         "x-page",
                         HeaderBuilder::new()
-                            .schema(models::headers::XPage::schema())
+                            .schema(Some(hdr::XPage::schema()))
                             .build(),
                     )
                     .header(
                         "x-per-page",
                         HeaderBuilder::new()
-                            .schema(models::headers::XPerPage::schema())
+                            .schema(Some(hdr::XPerPage::schema()))
                             .build(),
                     )
                     .header(
                         "x-total-pages",
                         HeaderBuilder::new()
-                            .schema(models::headers::XTotalPages::schema())
+                            .schema(Some(hdr::XTotalPages::schema()))
                             .build(),
                     )
                     .header(
                         "x-total-count",
                         HeaderBuilder::new()
-                            .schema(models::headers::XTotalPages::schema())
+                            .schema(Some(hdr::XTotalPages::schema()))
                             .build(),
                     )
                     .description("Ok")
@@ -384,7 +387,7 @@ impl IntoResponse for PutResponse {
 
 #[derive(Debug, IntoResponses, PartialEq)]
 pub enum DeleteResponse {
-    #[response(status = 204)]
+    #[response(status = 204, description = "No Content")]
     Success,
     #[response(status = 401, description = "Authentication failed")]
     Unauth,
@@ -408,17 +411,21 @@ impl IntoResponse for DeleteResponse {
 }
 #[derive(IntoResponses, PartialEq, Debug)]
 pub enum GetSingleResponse<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> {
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error(String),
-    #[response(status = 200, content_type = "application/json")]
+    #[response(
+        status = 200,
+        content_type = "application/json",
+        description = "Successful Response"
+    )]
     Success(Box<T>),
-    #[response(status = 404)]
+    #[response(status = 404, description = "Ressource not found")]
     NotFound,
-    #[response(status = 304)]
+    #[response(status = 304, description = "Ressource was not modified")]
     NotMod,
-    #[response(status = 400)]
+    #[response(status = 400, description = "Malformed Request")]
     BadReq,
-    #[response(status = 501)]
+    #[response(status = 501, description = "Not Implemented")]
     NotImpl,
 }
 impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResponse
@@ -1109,10 +1116,4 @@ impl RoundTimestamp for models::Sitzung {
             ..self.clone()
         }
     }
-}
-
-/// Creates an ETag given an API ID and a version number as u64
-pub fn make_etag(api_id: uuid::Uuid, version_number: u64) -> String {
-    let data = version_number.to_le_bytes();
-    sha256::digest(&uuid::Uuid::new_v5(&api_id, &data).to_bytes_le())
 }

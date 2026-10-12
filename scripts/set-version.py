@@ -1,7 +1,10 @@
 #!/usr/bin/python3
-import re
-import tomllib
+
 from pathlib import Path
+
+import re
+import sys
+import tomllib
 
 # takes the variables in variables.toml and sets all affected files to the values
 # specified there. for example: Project version, API Spec version, ...
@@ -29,6 +32,7 @@ version = file["version"]["backend_version"]
 ec_version = file["version"]["ec_version"]
 trackfile = file["version"]["trackfile"]
 spec_version = file["version"]["spec_version"]
+rust_version = file["version"]["rust_version"]
 
 swagger_ui_download_url = file["external"]["swagger_ui_download_url"]
 database_state_url = file["external"]["database_state_url"]
@@ -145,5 +149,18 @@ replace(
     f'  - &version "{wp_dockerfile_version}"',
 )
 
+# rust toolchain version used in docker builds
+replace(
+    "docker/woodpecker.Dockerfile",
+    r"FROM rust:.*-bookworm AS base",
+    f"FROM rust:{rust_version}-bookworm AS base"
+)
+
+replace(
+    "docker/Dockerfile",
+    r"FROM rust:.*-slim-bookworm AS builder",
+    f"FROM rust:{rust_version}-slim-bookworm AS builder"
+)
+
 if STATE_IS_DIRTY:
-    exit(1)
+    sys.exit(1)

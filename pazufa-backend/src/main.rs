@@ -28,6 +28,7 @@ mod auth;
 mod autoren;
 mod dokument;
 mod enumeration;
+mod etag;
 mod gremien;
 mod kalender;
 mod sitzung;
@@ -45,6 +46,7 @@ mod openapi {
     use super::autoren;
     use super::dokument;
     use super::enumeration;
+    use super::etag::Docs as EtagDocs;
     use super::gremien;
     use super::kalender;
     use super::sitzung;
@@ -83,7 +85,7 @@ mod openapi {
         (path = "/api/v2/sitzung",          api = sitzung::SitzungApi),
         (path = "/api/v2/vorgang",          api = vorgang::VorgangApi),
     ),
-    modifiers(&Security),
+    modifiers(&Security, &EtagDocs),
     tags((name= "Vorgang",                  description= "Endpoints related to legislative processes"),
          (name= "Sitzung",                  description= "Endpoints related to parliamentary sessions"),
          (name= "Data-Administration",      description= "Endpoints used for data administrative purposes"),
@@ -294,7 +296,27 @@ fn initialize_router(state: &Arc<PazufaServer>) -> axum::Router {
         .gzip(true)
         .zstd(true);
 
-    let (router, api) = OpenApiRouter::with_openapi(openapi::PazufAPI::openapi())
+    let (router, api) = api_routes();
+
+    router
+        .merge(SwaggerUi::new("/api/v2").url("/openapi.json", api))
+        .with_state(Arc::clone(state))
+        .route("/", get(handle_root))
+        .layer(DefaultBodyLimit::max(body_size_limit))
+        .layer(request_size_limit)
+        .layer(rate_limiter)
+        .layer(cors_layer)
+        // the two etag layers have to enclose the compression, see the `etag` module
+        .layer(etag::HashLayer)
+        .layer(compression_layer)
+        .layer(etag::ConditionalLayer)
+        .layer(decompression_layer)
+}
+
+/// All documented API routes along with the specification that is served for them
+fn api_routes() -> (axum::Router<Arc<PazufaServer>>, utoipa::openapi::OpenApi) {
+    use utoipa::Modify;
+    let (router, mut api) = OpenApiRouter::with_openapi(openapi::PazufAPI::openapi())
         .nest("/api/v2/auth", auth::router())
         .nest("/api/v2/autoren", autoren::router())
         .nest("/api/v2/dokument", dokument::router())
@@ -305,17 +327,9 @@ fn initialize_router(state: &Arc<PazufaServer>) -> axum::Router {
         .nest("/api/v2/vorgang", vorgang::router())
         .merge(unauthentifiziert::router())
         .split_for_parts();
-
-    router
-        .merge(SwaggerUi::new("/api/v2").url("/openapi.json", api))
-        .with_state(Arc::clone(state))
-        .route("/", get(handle_root))
-        .layer(DefaultBodyLimit::max(body_size_limit))
-        .layer(request_size_limit)
-        .layer(rate_limiter)
-        .layer(cors_layer)
-        .layer(compression_layer)
-        .layer(decompression_layer)
+    // nesting the routers replaces the operations `PazufAPI` already modified
+    etag::Docs.modify(&mut api);
+    (router, api)
 }
 
 fn initialize_logging(config: &Configuration) -> Logging {

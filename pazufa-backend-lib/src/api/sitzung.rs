@@ -43,7 +43,11 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
 /// more specifically: `s_get`, `kal_date_get`, `kal_get`
 #[derive(Debug, IntoResponses, PartialEq)]
 pub enum SitzungListingResponse {
-    #[response(status = 200, content_type = "application/json")]
+    #[response(
+        status = 200,
+        content_type = "application/json",
+        description = "Successful Response"
+    )]
     Success {
         body: Vec<models::Sitzung>,
         x_page: u32,
@@ -52,15 +56,15 @@ pub enum SitzungListingResponse {
         x_total_pages: u32,
         link: String,
     },
-    #[response(status = 204)]
+    #[response(status = 204, description = "No Content")]
     NoContent,
-    #[response(status = 304)]
+    #[response(status = 304, description = "Ressource was not modified")]
     NotMod,
-    #[response(status = 416)]
+    #[response(status = 416, description = "Requested page is out of range")]
     RangeNotSat,
-    #[response(status = 400)]
+    #[response(status = 400, description = "Malformed Request")]
     BadReq,
-    #[response(status = 500)]
+    #[response(status = 500, description = "Internal Server Error")]
     Error(String),
 }
 

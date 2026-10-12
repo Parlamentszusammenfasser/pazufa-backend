@@ -1,5 +1,5 @@
 use axum::extract::{Json, Path, Query, State};
-use axum::http::{HeaderMap, HeaderName};
+use axum::http::HeaderMap;
 use pazufa_backend_lib::PazufaServer;
 use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
@@ -119,9 +119,8 @@ async fn dokumente_get(
     if fmt == DokumentFormat::FTM {
         return PazufaOrFtmListingResponse::NotImpl;
     }
-    let ims = match params::IfModSince::try_from(
-        headers.get(HeaderName::from_static("if-modified-since")),
-    ) {
+    let ims = match params::IfModSince::try_from(headers.get(axum::http::header::IF_MODIFIED_SINCE))
+    {
         Ok(thing) => thing,
         Err(e) => {
             warn!("{e}");
@@ -181,9 +180,8 @@ async fn dokument_get_by_id(
     {
         return GetSingleResponse::NotImpl;
     }
-    let ims = match params::IfModSince::try_from(
-        headers.get(HeaderName::from_static("if-modified-since")),
-    ) {
+    let ims = match params::IfModSince::try_from(headers.get(axum::http::header::IF_MODIFIED_SINCE))
+    {
         Ok(thing) => thing,
         Err(e) => {
             warn!("{e}");

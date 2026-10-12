@@ -86,22 +86,6 @@ impl TryFrom<Option<&HeaderValue>> for IfModSince {
         }
     }
 }
-#[cfg(test)]
-mod test {
-    use axum::http::HeaderValue;
-
-    #[test]
-    fn ims_from_header_value() {
-        let rfc2822_datestring = HeaderValue::from_static("Wed, 18 Feb 2015 23:16:09 GMT");
-        let rfc3339_datestring = HeaderValue::from_static("2015-02-18T23:16:09Z");
-        let ims_2822 = super::IfModSince::try_from(Some(&rfc2822_datestring));
-        let ims_3339 = super::IfModSince::try_from(Some(&rfc3339_datestring));
-        assert_eq!(
-            ims_2822.expect("successful parsing").if_modified_since,
-            ims_3339.expect("successful parsing").if_modified_since
-        );
-    }
-}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Path)]
 pub struct AuthListingKeytagPathParams {
@@ -429,4 +413,21 @@ pub struct VorgangGetQueryParams {
 #[into_params(parameter_in = Query)]
 pub struct DocumentFormatParams {
     pub format: Option<models::enumerations::DokumentFormat>,
+}
+
+#[cfg(test)]
+mod test {
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn ims_from_header_value() {
+        let rfc2822_datestring = HeaderValue::from_static("Wed, 18 Feb 2015 23:16:09 GMT");
+        let rfc3339_datestring = HeaderValue::from_static("2015-02-18T23:16:09Z");
+        let ims_2822 = super::IfModSince::try_from(Some(&rfc2822_datestring));
+        let ims_3339 = super::IfModSince::try_from(Some(&rfc3339_datestring));
+        assert_eq!(
+            ims_2822.expect("successful parsing").if_modified_since,
+            ims_3339.expect("successful parsing").if_modified_since
+        );
+    }
 }

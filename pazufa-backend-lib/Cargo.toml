@@ -41,7 +41,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 track-validation = {path = "../track-validation"}
 
-utoipa = { version = "5.4.0", features = ["uuid", "url", "axum_extras", "chrono", "repr"] }
+utoipa = { version = "6.0.0", features = ["uuid", "url", "axum_extras", "chrono", "repr"] }
 uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
 
 [dev-dependencies]

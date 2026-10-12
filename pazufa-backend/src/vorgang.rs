@@ -1,5 +1,5 @@
 use axum::extract::{Json, Path, Query, State};
-use axum::http::{HeaderMap, HeaderName};
+use axum::http::HeaderMap;
 use pazufa_backend_lib::PazufaServer;
 use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
@@ -86,8 +86,7 @@ async fn vorgang_get(
     State(api_impl): State<Arc<PazufaServer>>,
 ) -> ListingGetResponse<models::Vorgang> {
     // Header parameters
-    let ims = match IfModSince::try_from(headers.get(HeaderName::from_static("if-modified-since")))
-    {
+    let ims = match IfModSince::try_from(headers.get(axum::http::header::IF_MODIFIED_SINCE)) {
         Ok(thing) => thing,
         Err(e) => {
             warn!("{e}");
@@ -128,8 +127,7 @@ async fn vorgang_get_by_id(
     State(api_impl): State<Arc<PazufaServer>>,
 ) -> GetSingleResponse<models::Vorgang> {
     // Header parameters
-    let ims = match IfModSince::try_from(headers.get(HeaderName::from_static("if-modified-since")))
-    {
+    let ims = match IfModSince::try_from(headers.get(axum::http::header::IF_MODIFIED_SINCE)) {
         Ok(thing) => thing,
         Err(e) => {
             warn!("{e}");
