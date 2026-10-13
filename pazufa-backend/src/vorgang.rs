@@ -425,6 +425,7 @@ mod test {
                 dokumente: vec![],
                 stellungnahmen: vec![],
                 additional_links: vec![],
+                meta_tiebreaker: None,
             }],
             ..models::Vorgang::default()
         }

@@ -406,6 +406,23 @@ pub async fn station_by_id(
     })
     .fetch_one(&mut **executor)
     .await??;
+    let trojanergefahr = temp_stat
+        .trojanergefahr
+        .map(|x| {
+            u8::try_from(x).map_err(|e| PazufaError::Other {
+                message: format!("Failed to convert station trojanergefahr to u8: {e}"),
+            })
+        })
+        .transpose()?;
+
+    let meta_tiebreaker = temp_stat
+        .tiebreak_ordering
+        .map(|x| {
+            u16::try_from(x).map_err(|e| PazufaError::Other {
+                message: format!("Failed to convert station trojanergefahr to u8: {e}"),
+            })
+        })
+        .transpose()?;
 
     Ok(models::Station {
         touched_by: vec![],
@@ -417,20 +434,14 @@ pub async fn station_by_id(
         zp_start: temp_stat.zp_start,
         zp_modifiziert: Some(temp_stat.zp_modifiziert),
 
-        trojanergefahr: temp_stat
-            .trojanergefahr
-            .map(|x| {
-                u8::try_from(x).map_err(|e| PazufaError::Other {
-                    message: format!("Failed to convert station trojanergefahr to u8: {e}"),
-                })
-            })
-            .transpose()?,
+        trojanergefahr,
         titel: temp_stat.titel,
         gremium,
         api_id: Some(temp_stat.api_id),
         link: temp_stat.link,
         additional_links,
         gremium_federf: temp_stat.gremium_isff,
+        meta_tiebreaker,
     })
 }
 

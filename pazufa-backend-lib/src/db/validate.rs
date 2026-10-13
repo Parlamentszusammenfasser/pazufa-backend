@@ -57,7 +57,7 @@ impl Tracks {
 /// Can error due to database errors or due to a violation of the trackfile specifications
 pub async fn validate_vorgang(vg: &models::Vorgang, srv: &PazufaServer) -> Result<()> {
     let mut stations = vg.stationen.clone();
-    stations.sort_by_key(|s| s.zp_start);
+    stations.sort_by_key(|s| (s.zp_start, s.meta_tiebreaker));
     let parls: BTreeSet<models::Parlament> = stations.iter().map(|s| s.gremium.parlament).collect();
     let s_parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
 
@@ -234,6 +234,52 @@ mod test_regex {
         };
         let result = validate_vorgang(&vorgang, &scenario.server).await;
         assert!(result.is_err(), "{result:?}");
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn tiebreaker_orders_stations() {
+        let scenario = TestSetup::new("tiebreaker_orders_stations").await;
+        let now = chrono::Utc::now();
+        let vorgang = models::Vorgang {
+            stationen: vec![
+                models::Station {
+                    typ: models::Stationstyp::ParlInitiativ,
+                    zp_start: now,
+                    meta_tiebreaker: Some(2),
+                    ..generate::default_station()
+                },
+                models::Station {
+                    typ: models::Stationstyp::ParlVollvlsgn,
+                    zp_start: now,
+                    meta_tiebreaker: Some(1),
+                    ..generate::default_station()
+                },
+            ],
+            ..generate::default_vorgang()
+        };
+        let result = validate_vorgang(&vorgang, &scenario.server).await;
+        assert!(result.is_err(), "{result:?}");
+
+        let vorgang = models::Vorgang {
+            stationen: vec![
+                models::Station {
+                    typ: models::Stationstyp::ParlInitiativ,
+                    zp_start: now,
+                    meta_tiebreaker: Some(1),
+                    ..generate::default_station()
+                },
+                models::Station {
+                    typ: models::Stationstyp::ParlVollvlsgn,
+                    zp_start: now,
+                    meta_tiebreaker: Some(2),
+                    ..generate::default_station()
+                },
+            ],
+            ..generate::default_vorgang()
+        };
+        let result = validate_vorgang(&vorgang, &scenario.server).await;
+        assert!(result.is_ok(), "{result:?}");
         scenario.teardown().await;
     }
 

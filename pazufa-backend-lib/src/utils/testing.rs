@@ -427,6 +427,7 @@ pub(crate) mod generate {
                 dokumente,
                 additional_links,
                 stellungnahmen,
+                meta_tiebreaker: None,
             }
         }
         pub(crate) fn random_vorgang(rng: &mut StdRng) -> models::Vorgang {
@@ -736,6 +737,7 @@ pub(crate) mod generate {
                 default_dokument(),
             ))],
             gremium: default_gremium(),
+            meta_tiebreaker: None,
         }
     }
     pub(crate) fn default_gremium() -> models::Gremium {

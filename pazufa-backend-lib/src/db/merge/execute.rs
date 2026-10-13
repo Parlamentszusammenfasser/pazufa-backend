@@ -609,11 +609,10 @@ pub(crate) async fn run_integration(
             );
             warn!("Transaction not committed, administrators notified");
             debug!("Details:  {:?} \n\n {:?}", model, many);
-            let api_ids = sqlx::query!(
+            let api_ids = sqlx::query_scalar!(
                 "SELECT api_id FROM vorgang WHERE id=ANY($1::int4[])",
                 &many[..]
             )
-            .map(|r| r.api_id)
             .fetch_all(&mut *tx)
             .await?;
             notify_ambiguous_match(&api_ids, model, "merging vorgang", server)?;

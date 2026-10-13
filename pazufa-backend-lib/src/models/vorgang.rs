@@ -141,8 +141,16 @@ pub struct Station {
     #[serde(deserialize_with = "de_veclinks")]
     pub additional_links: Vec<String>,
 
+    /// List statement of interested parties
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     pub stellungnahmen: Vec<models::DokumentOrApiId>,
+
+    /// Tiebreaker for Station ordering other than `zp_start`.
+    /// If `zp_start(A)` > `zp_start(B)`, A > B;
+    /// If `zp_start(A)` = `zp_start(B)`, `meta_tiebreaker` determines the order
+    /// For more details, see <https://codeberg.org/PaZuFa/pazufa-backend/issues/57>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta_tiebreaker: Option<u16>,
 }
 impl<'de> Deserialize<'de> for Station {
     // the trojanergefahr-constraint is skipped since the whole field is skipped.
@@ -379,7 +387,10 @@ impl<'de> Deserialize<'de> for Vorgang {
             for j in (i + 1)..unchecked.stationen.len() {
                 let s1 = &unchecked.stationen[i];
                 let s2 = &unchecked.stationen[j];
-                if s1.typ != s2.typ && s1.zp_start == s2.zp_start {
+                if s1.typ != s2.typ
+                    && s1.zp_start == s2.zp_start
+                    && s1.meta_tiebreaker == s2.meta_tiebreaker
+                {
                     fails.push(format!(
                         "({}/{}) and ({}/{})",
                         unchecked.stationen[i].typ,
@@ -401,7 +412,7 @@ impl<'de> Deserialize<'de> for Vorgang {
         if fails.is_empty() {
             Ok(unchecked)
         } else {
-            Err(de::Error::custom(format!("Error: Some stations of different type have the exact same `zp_start` value.: {fails:?}\n
+            Err(de::Error::custom(format!("Error: Some stations of different type have the exact same `zp_start` and `meta_tiebreaker` value.: {fails:?}\n
             This is not allowed because this value is used for imposing a total order on the stations for track validation.
                         Please modify these values to make clear which station comes first. For more details see https://codeberg.org/PaZuFa/pazufa-backend/issues/57.")))
         }

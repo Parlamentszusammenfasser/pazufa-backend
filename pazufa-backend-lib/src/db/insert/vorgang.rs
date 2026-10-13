@@ -340,22 +340,23 @@ pub async fn insert_station(
     let stat_id = sqlx::query!(
         "INSERT INTO station 
         (api_id, gr_id, link, titel, trojanergefahr, typ, 
-        zp_start, vg_id, zp_modifiziert, gremium_isff)
+        zp_start, vg_id, zp_modifiziert, gremium_isff, tiebreak_ordering)
         VALUES
         ($1, $2, $3, $4, $5,
         (SELECT id FROM stationstyp WHERE value = $6), $7, $8, 
-        COALESCE($9, NOW()), $10)
+        COALESCE($9, NOW()), $10, $11)
         RETURNING station.id",
         sapi,
         gr_id,
         stat.link,
         stat.titel,
-        stat.trojanergefahr.map(|x| i32::from(x)),
+        stat.trojanergefahr.map(i32::from),
         srv.guard_ts(&stat.typ, sapi, obj),
         stat.zp_start,
         vg_id,
         stat.zp_modifiziert,
-        stat.gremium_federf
+        stat.gremium_federf,
+        stat.meta_tiebreaker.map(i32::from)
     )
     .map(|r| r.id)
     .fetch_one(&mut **tx)

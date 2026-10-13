@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO station \n        (api_id, gr_id, link, titel, trojanergefahr, typ, \n        zp_start, vg_id, zp_modifiziert, gremium_isff)\n        VALUES\n        ($1, $2, $3, $4, $5,\n        (SELECT id FROM stationstyp WHERE value = $6), $7, $8, \n        COALESCE($9, NOW()), $10)\n        RETURNING station.id",
+  "query": "INSERT INTO station \n        (api_id, gr_id, link, titel, trojanergefahr, typ, \n        zp_start, vg_id, zp_modifiziert, gremium_isff, tiebreak_ordering)\n        VALUES\n        ($1, $2, $3, $4, $5,\n        (SELECT id FROM stationstyp WHERE value = $6), $7, $8, \n        COALESCE($9, NOW()), $10, $11)\n        RETURNING station.id",
   "describe": {
     "columns": [
       {
@@ -26,12 +26,13 @@
         "Timestamptz",
         "Int4",
         "Timestamptz",
-        "Bool"
+        "Bool",
+        "Int4"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "b55909da08cc20277cdc203c23a11475502aaba9c4e2c5e1a0499268692f35f5"
+  "hash": "1bb5b17531841e6aa0c1d0c0f8f8e4c7eaad1fa74e0d210f6bd5954e9cf75d6f"
 }
