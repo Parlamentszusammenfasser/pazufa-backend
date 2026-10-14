@@ -5,6 +5,92 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4 / Spec 0.2.8] - 2026-10-14
+### Added
+- `if-modified-since` now also accepts RFC2822 Datetimes (#202)
+- Doktyp has additional Variants (thanks @se-jaeger!) (#195)
+  - beschlussprotokoll
+  - inhaltsprotokoll
+- Stationstyp has additional variants (#203)
+  - `parl-anhoerung`
+- Vorgangstyp has additional variants (#203)
+  - `gg-land-haushalt-parl`
+- Vorgang now features a vorgang-level summary-tuple vector
+  (PazuFa/parlamentszusammenfasser#55)
+- There is a naive Etag implementation that saves a bit of bandwidth (#113)
+  This means there will be: 
+  - strong `etag` headers on each object sent
+  - a correct handling of `if-none-match`
+  However, the implementation is not very efficient and still does a
+  whole fetch / database thingy, only the bandwidth is saved.
+- there is now a tiebreaker in place in the `Station` object that works
+  by being a secondary order criterion after zp_start (#57)
+- there is now a command line tool to trackvalidate vorgang objects
+  given a tracks.toml. This simplifies checking if a debug dump is an
+  actually sensible vorgang
+### Changed
+#### Internal Changes
+- A few functions from pazufa-backend-lib/src/api/* were moved to the
+  binary (pazufa-backend). These were mostly just thin wrappers around a
+  single DB Query or similar. These are their opcodes:
+  - `auth_status`
+  - `auth_post`
+  - `auth_delete`
+  - `auth_metadata`
+  - `keytag_listing`
+  - `dokument_delete_by_id`
+  - `sitzung_delete`
+  - `kal_get`
+  - `kal_date_get`
+  - `s_get`
+- renamed  LTZF* to Pazufa* (Server|Error)
+- CreateAPIKey has been refactored
+- Woodpecker rust docker testing image updated to rust 1.99; rust
+  version used for building there and in the final dockerfile was added
+  to `variables.toml`
+- The insert module has been refactored
+- Refactored validation logic, s.t. parliament classes (BR/BT being
+  handled as one for example) are now defined in the binary 
+#### External Changes
+- Stations without any documents are now also matchable to stations in
+  the database without documents. This should be watched.
+### Deprecated
+### Removed
+- the `parl_class` table has been removed from the database (#209)
+### Fixed
+- Versioning Script had a false line regex to update the spec version (#194)
+- Unicode characters producing `\0` in effect could crash transactions.
+  These are now rejected. (#201)
+- Regex Parsing could crash on parsing choiceboxes (thanks @nobkd!)
+  (#208)
+- The whole regex matching logic has been rewritten to use modified Glushkov-NFAs (#209)
+  There is one breaking change for the track-validation crate which lead
+  to a version bump: A regex which has leftover input after the regex
+  has been consumed is now returning `false` instead of `true`; 
+  This Fixes #207
+- VGTypes other than `vgtyp` were silently dropped. This was due to the
+  types not being inserted prior to inserting the tuples (#211)
+### Security
+### Impact on Scraper Maintainers
+- Please use the freshly introduced `gg-parl-haushalt` for any 
+  Haushaltsgesetzgebung in your BL
+  For context see
+  <https://codeberg.org/PaZuFa/pazufa-backend/issues/150>
+- Please merge all Vorgänge that are descending from one
+  Initiativdrucksache into a single vorgang, even Haushaltseinzelpläne
+- Please merge Ausschusssitzungen together if they 
+  - have the same gremium
+  - happen in between the same reading
+  - for more context and an example see <https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues/53#issuecomment-23218126>
+- Please DO NOT USE artificial `zp_start` values for ordering stations,
+  instead use `meta_tiebreaker` to break ties
+### Impact on API Consumers
+- Please do note that the `etag` and `if-none-match` headers are now
+  available to use
+### Impact on Hosting / Deployment
+- Please do note that the `etag` and `if-none-match` headers are now
+  available to use for caching if available
+
 ## [0.3.3 / Spec 0.2.7] - 2026-09-12
 ### Added
 - A Bulk delete Endpoint that is meant for deleting many `Vorgang` 
