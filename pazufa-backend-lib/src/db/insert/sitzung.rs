@@ -1,7 +1,6 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
-use crate::error::PazufaError;
-use crate::models::{self};
+use crate::models;
 use crate::{PazufaServer, Result};
 use sqlx::PgTransaction;
 use uuid::Uuid;
@@ -30,9 +29,7 @@ pub async fn insert_sitzung(
         ass.public,
         gr_id,
         ass.link,
-        i32::try_from(ass.nummer).map_err(|e| PazufaError::Other {
-            message: format!("Failed to convert sitzung number as it exceeds i32::MAX: {e}")
-        })?,
+        i32::from(ass.nummer),
         ass.titel
     )
     .map(|r| r.id)
@@ -122,9 +119,7 @@ pub(crate) async fn insert_top(
     let tid = sqlx::query!(
         "INSERT INTO top(titel, nummer, sid) VALUES($1, $2, $3) RETURNING id;",
         top.titel,
-        i32::try_from(top.nummer).map_err(|e| PazufaError::Other {
-            message: format!("Failed to convert top number as it exceeds i32::MAX: {e}")
-        })?,
+        i32::from(top.nummer),
         sid
     )
     .map(|r| r.id)

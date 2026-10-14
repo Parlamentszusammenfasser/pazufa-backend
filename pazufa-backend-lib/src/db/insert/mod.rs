@@ -24,9 +24,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
         AND g.wp = $3",
         gr.name,
         gr.parlament.to_string(),
-        i32::try_from(gr.wahlperiode).map_err(|e| PazufaError::Other {
-            message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}"),
-        })?,
+        i32::from(gr.wahlperiode),
     )
     .fetch_optional(&mut **tx)
     .await?;
@@ -71,9 +69,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
         RETURNING gremium.id",
         gr.name,
         gr.parlament.to_string(),
-        i32::try_from(gr.wahlperiode).map_err(|e| PazufaError::Other {
-            message: format!("Failed to convert gremium wahlperiode as it exceeds i32::MAX: {e}")
-        })?,
+        i32::from(gr.wahlperiode),
         gr.link
     )
     .map(|r| r.id)

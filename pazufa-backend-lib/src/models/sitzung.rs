@@ -27,7 +27,7 @@ pub struct Sitzung {
 
     pub gremium: models::Gremium,
 
-    pub nummer: u32,
+    pub nummer: u16,
 
     pub public: bool,
 
@@ -133,7 +133,7 @@ impl std::fmt::Display for Sitzung {
 #[serde(remote = "Self")]
 pub struct Top {
     /// number of this item on the agenda
-    pub nummer: u32,
+    pub nummer: u16,
 
     #[serde(deserialize_with = "de_string")]
     pub titel: String,

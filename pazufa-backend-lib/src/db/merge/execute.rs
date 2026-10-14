@@ -16,7 +16,7 @@ use super::candidates::{
 use crate::api::RoundTimestamp;
 use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
-use crate::error::{DataValidationError, PazufaError};
+use crate::error::DataValidationError;
 use crate::models::enumerations::{HashStrategy, Mime};
 use crate::utils::notify::notify_ambiguous_match;
 use crate::{PazufaServer, Result, models};
@@ -411,9 +411,7 @@ pub(crate) async fn execute_merge_vorgang(
         model.titel,
         model.kurztitel,
         model.verfassungsaendernd,
-        i32::try_from(model.wahlperiode).map_err(|e| PazufaError::Other {
-            message: format!("Failed to convert wahlperiode as it exceeds i32::MAX: {e}")
-        })?,
+        i32::from(model.wahlperiode),
         srv.guard_ts(&model.typ, vapi, obj),
         model.ressort.map(|x| x.to_string()),
         db_id

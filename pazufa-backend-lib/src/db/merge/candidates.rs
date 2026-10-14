@@ -37,8 +37,17 @@ pub(crate) async fn vorgang_merge_candidates(
         .collect();
     let parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
 
+    let statlen = i32::try_from(model.stationen.len()).map_err(|e| PazufaError::Other {
+        message: format!("value was unable to be converted to i32: {e}"),
+    })?;
     let result = sqlx::query!(
-        "WITH db_id_table AS (
+        "WITH 
+        parl_class AS(
+            SELECT p.id as p_id, classcode as c_id
+            FROM parlament p, UNNEST($8::text[], $9::int4[]) as pinp(parlshort, classcode)
+            WHERE p.value = pinp.parlshort
+        ),
+        db_id_table AS (
             SELECT rel_vorgang_ident.vg_id as vg_id, identifikator as ident, vg_ident_typ.value as idt_str
             FROM vg_ident_typ, rel_vorgang_ident 
             WHERE vg_ident_typ.id = rel_vorgang_ident.typ),
@@ -94,11 +103,11 @@ pub(crate) async fn vorgang_merge_candidates(
         )
 	    )
     );",
-    model.api_id, &ident_list[..], &identtyp_list[..],
-    i32::try_from(model.wahlperiode).map_err(|e| PazufaError::Other {message: format!("value was unable to be converted to i32: {e}")})?,
-    srv.guard_ts(&model.typ, model.api_id, obj), &parls[..],
-    i32::try_from(model.stationen.len()).map_err(|e|PazufaError::Other {message: format!("value was unable to be converted to i32: {e}")})?)
-    .fetch_all(executor).await?;
+        model.api_id, &ident_list[..], &identtyp_list[..], i32::from(model.wahlperiode),
+        srv.guard_ts(&model.typ, model.api_id, obj), &parls[..],
+        statlen,
+        &srv.tracks.parl_class.0[..], &srv.tracks.parl_class.1[..]
+    ).fetch_all(executor).await?;
 
     tracing::debug!(
         "Found {} matches for Vorgang with api_id: {}",

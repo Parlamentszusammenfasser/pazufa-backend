@@ -21,3 +21,5 @@ ALTER TABLE station
         UNIQUE(vg_id, zp_start, tiebreak_ordering)
 ;
 
+-- Dropping parl_class as table because it is implemented in Application Code
+DROP TABLE parl_class;

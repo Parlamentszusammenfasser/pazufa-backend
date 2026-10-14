@@ -1,4 +1,4 @@
-use crate::models;
+use crate::models::{self, Parlament};
 use crate::{Result, error::DataValidationError};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,7 +15,18 @@ pub struct Tracks {
     pub version: String,
     pub station_mapping: BTreeMap<models::Stationstyp, char>,
     pub trackmap: BTreeMap<(models::Parlament, models::Vorgangstyp), Regex>,
+    pub parl_class: (Box<[String]>, Box<[i32]>),
 }
+
+fn parl_classes() -> (Box<[String]>, Box<[i32]>) {
+    let (mut v1, mut v2) = (vec![], vec![]);
+    for p in Parlament::all_variants() {
+        v1.push(p.to_string());
+        v2.push(i32::from(p.class()));
+    }
+    (v1.into_boxed_slice(), v2.into_boxed_slice())
+}
+
 impl Tracks {
     /// Creates a new Track struct from a supplied file at runtime
     /// # Panics
@@ -46,6 +57,7 @@ impl Tracks {
             version: rt.version,
             station_mapping: sm,
             trackmap,
+            parl_class: parl_classes(),
         }
     }
     /// Validates a Vorgang, meaning it checks whether it adheres to the constraints specified
@@ -120,37 +132,14 @@ impl Tracks {
             Err(DataValidationError::MalformedVorgang { reason: fmt }.into())
         }
     }
+
     fn singular_legislative_class(parls: &BTreeSet<models::Parlament>) -> Result<()> {
-        fn legislative_class(parl: models::Parlament) -> u8 {
-            use models::Parlament as Parl;
-            match parl {
-                Parl::Bt | Parl::Br => 1,
-                Parl::Bv => 2,
-                Parl::Ek => 3,
-                Parl::Bb => 4,
-                Parl::By => 5,
-                Parl::Be => 6,
-                Parl::Hb => 7,
-                Parl::Hh => 8,
-                Parl::He => 9,
-                Parl::Mv => 10,
-                Parl::Ni => 11,
-                Parl::Nw => 12,
-                Parl::Rp => 13,
-                Parl::Sl => 14,
-                Parl::Sn => 15,
-                Parl::Th => 16,
-                Parl::Sh => 17,
-                Parl::Bw => 18,
-                Parl::St => 19,
-            }
-        }
         let mut class = None;
         for p in parls {
             if class.is_none() {
-                class = Some(legislative_class(*p));
+                class = Some(p.class());
             } else if let Some(c) = class
-                && c != legislative_class(*p)
+                && c != p.class()
             {
                 let s_parls: Vec<_> = parls.iter().map(ToString::to_string).collect();
                 let reason = format!(

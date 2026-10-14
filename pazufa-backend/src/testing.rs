@@ -322,7 +322,7 @@ impl Drop for TestClient {
 /// A minimal Bundestag session in electoral period 20.
 pub(crate) fn test_sitzung(
     termin: chrono::DateTime<chrono::Utc>,
-    nummer: u32,
+    nummer: u16,
 ) -> pazufa_backend_lib::models::Sitzung {
     use pazufa_backend_lib::models;
     models::Sitzung {

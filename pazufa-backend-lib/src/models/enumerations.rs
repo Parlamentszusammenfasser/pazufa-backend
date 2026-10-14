@@ -138,6 +138,57 @@ pub enum Parlament {
     #[serde(rename = "ST")]
     St,
 }
+impl Parlament {
+    #[must_use]
+    pub fn all_variants() -> [Parlament; 20] {
+        [
+            Self::Bt,
+            Self::Br,
+            Self::Bv,
+            Self::Ek,
+            Self::Bb,
+            Self::By,
+            Self::Be,
+            Self::Hb,
+            Self::Hh,
+            Self::He,
+            Self::Mv,
+            Self::Ni,
+            Self::Nw,
+            Self::Rp,
+            Self::Sl,
+            Self::Sn,
+            Self::Th,
+            Self::Sh,
+            Self::Bw,
+            Self::St,
+        ]
+    }
+    #[must_use]
+    pub fn class(&self) -> u8 {
+        match self {
+            Self::Bt | Self::Br => 1,
+            Self::Bv => 2,
+            Self::Ek => 3,
+            Self::Bb => 4,
+            Self::By => 5,
+            Self::Be => 6,
+            Self::Hb => 7,
+            Self::Hh => 8,
+            Self::He => 9,
+            Self::Mv => 10,
+            Self::Ni => 11,
+            Self::Nw => 12,
+            Self::Rp => 13,
+            Self::Sl => 14,
+            Self::Sn => 15,
+            Self::Th => 16,
+            Self::Sh => 17,
+            Self::Bw => 18,
+            Self::St => 19,
+        }
+    }
+}
 
 string_enum_convenience!(Parlament);
 

@@ -1,6 +1,6 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
-use crate::error::{DataValidationError, PazufaError};
+use crate::error::DataValidationError;
 use crate::models::{self, Zusammenfassungstupel};
 use crate::{PazufaServer, Result};
 use sqlx::PgTransaction;
@@ -225,9 +225,7 @@ pub async fn insert(
         vg.titel,
         vg.kurztitel,
         vg.verfassungsaendernd,
-        i32::try_from(vg.wahlperiode).map_err(|e| PazufaError::Other {
-            message: format!("Failed to convert vorgang wahlperiode as it exceeds i32::MAX: {e}")
-        })?,
+        i32::from(vg.wahlperiode),
         server.guard_ts(&vg.typ, vg.api_id, obj),
         vg.ressort.map(|x| x.to_string())
     )
