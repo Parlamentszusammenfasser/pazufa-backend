@@ -99,6 +99,9 @@ pub async fn zusammenfassungen_of_dok(
     Ok(Some(ZusammenfassungWrapper::Future(tuples)))
 }
 
+/// Fetch a database id given an api id
+/// # Errors
+/// Can fail due to database errors
 pub async fn dokument_dbid(
     api_id: Uuid,
     executor: &mut sqlx::PgTransaction<'_>,
@@ -108,6 +111,10 @@ pub async fn dokument_dbid(
         .await?;
     Ok(id)
 }
+
+/// Fetch a document if modified since `if_modified_since`
+/// # Errors
+/// Can fail due to database errors
 pub async fn dokument_by_id_ims(
     id: i32,
     if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
@@ -127,6 +134,9 @@ pub async fn dokument_by_id_ims(
         Ok(None)
     }
 }
+/// Fetch a document by api id
+/// # Errors
+/// Can fail due to database errors
 pub async fn dokument_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
@@ -215,6 +225,9 @@ pub struct DokumentRetrivalParameters {
     pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Fetch a document by a set of parameters
+/// # Errors
+/// Can fail due to database errors
 pub async fn get_dokument_by_parameter(
     parameters: DokumentRetrivalParameters,
     tx: &mut sqlx::PgTransaction<'_>,

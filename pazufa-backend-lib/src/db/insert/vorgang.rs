@@ -310,6 +310,9 @@ pub async fn insert(
     Ok(vg_id)
 }
 
+/// Inserts a station into the database, returning its db id
+/// # Errors
+/// Can fail due to database erorrs
 pub async fn insert_station(
     stat: &models::Station,
     vg_id: i32,

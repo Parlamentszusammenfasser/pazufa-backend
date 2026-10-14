@@ -7,6 +7,8 @@ use uuid::Uuid;
 
 /// the crucial part is how to find out which vg are connected to a DRCKS
 /// if there exists a station which contains a document mentioned in the top, its vorgang is connected
+/// # Errors
+/// Can fail due to database errors
 pub async fn top_by_id(
     id: i32,
     expand: bool,
@@ -81,6 +83,10 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
         vorgang_id,
     })
 }
+
+/// Fetches database id of a session by api id
+/// # Errors
+/// Can fail due to database errors
 pub async fn sitzung_dbid(
     api_id: Uuid,
     executor: &mut sqlx::PgTransaction<'_>,
@@ -90,6 +96,10 @@ pub async fn sitzung_dbid(
         .await?;
     Ok(id)
 }
+
+/// Fetches Sitzung if modified after `if_modified_since`
+/// # Errors
+/// Can fail due to database errors
 pub async fn sitzung_by_id_ims(
     id: i32,
     expand: bool,
@@ -112,6 +122,10 @@ pub async fn sitzung_by_id_ims(
         Ok(None)
     }
 }
+
+/// Fetches Sitzung by its database id
+/// # Errors
+/// Can fail due to database errors
 pub async fn sitzung_by_id(
     id: i32,
     expand: bool,
@@ -204,7 +218,10 @@ pub struct SitzungFilterParameters {
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
 }
-/// returns a tuple made up of: (`total_count`, `retrieved_items`)
+
+/// Fetches Sitzung by a set of parameters
+/// # Errors
+/// Can fail due to database errors
 pub async fn sitzung_by_parameter(
     params: &SitzungFilterParameters,
     page: Option<u32>,

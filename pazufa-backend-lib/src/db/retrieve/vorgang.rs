@@ -160,6 +160,9 @@ pub async fn vorgang_by_id_ims(
     }
 }
 
+/// Returns a vorgang by it's database id
+/// # Errors
+/// can fail due to database errors
 pub async fn vorgang_by_id(
     id: i32,
     expand: bool,
@@ -304,6 +307,10 @@ pub async fn vorgang_by_id(
         zusammenfassung: tuples,
     })
 }
+
+/// Returns a station by it's database id
+/// # Errors
+/// can fail due to database errors
 pub async fn station_by_id(
     id: i32,
     expand: bool,

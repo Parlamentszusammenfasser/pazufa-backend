@@ -90,6 +90,9 @@ async fn insert_zusammenfassung_of_dok(
     .await?;
     Ok(())
 }
+/// Inserts a document into the database, returning its db id
+/// # Errors
+/// Can fail due to database errors
 #[tracing::instrument(skip_all)]
 pub async fn insert_dokument(
     dok: &models::Dokument,
@@ -192,6 +195,9 @@ pub async fn insert_dokument(
     Ok(did)
 }
 
+/// Inserts a document into the database or retrieves it by api id, returning its db id
+/// # Errors
+/// Can fail due to database errors
 pub async fn insert_or_retrieve_dok(
     dr: &models::DokumentOrApiId,
     scraper_id: Uuid,
@@ -213,6 +219,9 @@ pub async fn insert_or_retrieve_dok(
     }
 }
 
+/// Inserts schlagwort vector of a document into the database
+/// # Errors
+/// Can fail due to database errors
 pub async fn insert_schlagworte_of_dok(
     did: i32,
     sw: &[String],

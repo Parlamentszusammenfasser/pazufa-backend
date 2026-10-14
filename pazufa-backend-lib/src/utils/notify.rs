@@ -198,6 +198,9 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     });
 }
 
+/// Notifies of a match that has more than one candidate
+/// # Errors
+/// Can fail due to mailer errors if mail is configured
 pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
     api_ids: &[Uuid],
     object: &T,
