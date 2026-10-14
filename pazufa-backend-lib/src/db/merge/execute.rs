@@ -463,6 +463,14 @@ pub(crate) async fn execute_merge_vorgang(
     }
 
     sqlx::query!(
+        "INSERT INTO vg_ident_typ(value)
+        SELECT * FROM UNNEST($1::text[])
+        ON CONFLICT DO NOTHING",
+        &identtyp_list[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator)
         SELECT $1, vit.id, ident FROM 
         UNNEST($2::text[], $3::text[]) blub(typ_value, ident)

@@ -285,6 +285,14 @@ pub async fn insert(
     }
 
     sqlx::query!(
+        "INSERT INTO vg_ident_typ(value)
+        SELECT * FROM UNNEST($1::text[])
+        ON CONFLICT DO NOTHING",
+        &identtyp_list[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator) 
     SELECT $1, t.id, ident.ident FROM 
     UNNEST($2::text[], $3::text[]) as ident(ident, typ)
@@ -408,4 +416,37 @@ pub async fn insert_station(
     insert_schlagworte_of_vorgang(vg_id, &stat.schlagworte, tx).await?;
 
     Ok(stat_id)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        api::RoundTimestamp,
+        models,
+        utils::testing::{TestSetup, generate::default_vorgang},
+    };
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn issue204_non_standard_idtyp_not_swallowed() {
+        let scenario = TestSetup::new("issue204_allbutvgnr_dropped").await;
+        let vorgang = models::Vorgang {
+            ids: vec![models::VgIdent {
+                id: "beispielid".to_owned(),
+                typ: "beispieltyp".to_owned(),
+            }],
+            ..default_vorgang()
+        };
+        let mut tx = scenario.server.sqlx_db.begin().await.unwrap();
+        let inserted = super::insert(&vorgang, Uuid::nil(), 1, &mut tx, &scenario.server)
+            .await
+            .unwrap();
+        let out_vorgang = crate::db::retrieve::vorgang::vorgang_by_id(inserted, true, &mut tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            vorgang.with_round_timestamps(),
+            out_vorgang.with_round_timestamps()
+        );
+    }
 }

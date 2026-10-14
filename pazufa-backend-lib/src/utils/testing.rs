@@ -890,10 +890,16 @@ pub(crate) mod generate {
             ],
             links: vec!["https://example.com/ichmagmoneten".to_string()],
             initiatoren: at,
-            ids: vec![models::VgIdent {
-                id: "einzigartig".to_string(),
-                typ: "initdrucks".to_owned(),
-            }],
+            ids: vec![
+                models::VgIdent {
+                    id: "einzigartig".to_string(),
+                    typ: "initdrucks".to_owned(),
+                },
+                models::VgIdent {
+                    id: "einzigartig".to_string(),
+                    typ: "zweizigartig".to_owned(),
+                },
+            ],
             lobbyregister: vec![models::Lobbyregistereintrag {
                 betroffene_drucksachen: vec!["20/2014".to_string()],
                 intention: "Für die Klicks".to_string(),

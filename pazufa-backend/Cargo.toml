@@ -33,7 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 utoipa = { version = "6.0.0", features = ["uuid", "url", "axum_extras", "chrono"] }
 utoipa-axum = "0.3.0"
-utoipa-swagger-ui = { version = "10.0.1", features = ["axum", "reqwest"] }
+utoipa-swagger-ui = { version = "10.0.1", features = ["axum"] }
 uuid = { version = "1.0", features = ["fast-rng", "serde", "v5", "v7"] }
 
 pazufa-backend-lib = {path = "../pazufa-backend-lib/"}

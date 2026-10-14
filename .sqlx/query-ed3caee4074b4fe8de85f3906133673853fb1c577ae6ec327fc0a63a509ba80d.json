@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO vg_ident_typ(value)\n        SELECT * FROM UNNEST($1::text[])\n        ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed3caee4074b4fe8de85f3906133673853fb1c577ae6ec327fc0a63a509ba80d"
+}
