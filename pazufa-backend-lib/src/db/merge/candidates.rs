@@ -133,7 +133,8 @@ pub(crate) async fn vorgang_merge_candidates(
 /// `vg_id_old` == `vg_id_new` AND
 /// (`api_id_old` == `api_id_new`
 /// OR
-///  (typ, gremium)_old == (typ, gremium)_new AND one matching document exists
+///  (typ, gremium)_old == (typ, gremium)_new AND
+///     (one matching document exists OR both are empty)
 /// )
 pub(crate) async fn station_merge_candidates(
     model: &models::Station,
@@ -211,11 +212,15 @@ pub(crate) async fn station_merge_candidates(
         (g.wp = $6) AND     -- gremium.wahlperiode übereinstimmt
 
         --mindestens ein Dokument auch in der anderen Station angehängt ist:
-        EXISTS (SELECT * FROM rel_station_dokument rsd 
-        INNER JOIN dokument d ON rsd.dok_id=d.id
-        WHERE rsd.stat_id = s.id
-        AND d.id IN (SELECT i FROM UNNEST($7::int4[]) blub(i))
-	))",
+        (EXISTS (SELECT 1 FROM rel_station_dokument rsd 
+            WHERE rsd.stat_id = s.id
+            AND rsd.dok_id IN (SELECT i FROM UNNEST($7::int4[]) blub(i))
+	        ) OR -- oder beide stationen keine Dokumente enthalten
+             ( 
+                NOT EXISTS(SELECT 1 FROM rel_station_dokument WHERE stat_id = s.id) AND
+                NOT EXISTS(SELECT 1 FROM UNNEST($7::int4[]))
+            )
+        ))",
         model.api_id,
         vorgang,
         srv.guard_ts(&model.typ, api_id, obj),
