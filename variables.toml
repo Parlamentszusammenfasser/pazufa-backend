@@ -1,7 +1,7 @@
 # the variables that are to be set by set-version.py
 # these are used in various locations throughout the project
 [version]
-backend_version="0.3.3"
+backend_version="0.3.4"
 ec_version="0.1.0"
 wp_dockerfile_version="1.3.0"
 rust_version = "1.99"

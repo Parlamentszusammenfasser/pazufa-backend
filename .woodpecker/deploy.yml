@@ -4,7 +4,7 @@ when:
   - event: manual
 
 variables:
-  - &version "0.3.3"
+  - &version "0.3.4"
   - &companion_version "0.1.0"
   - &build_cache "pazufa/backend:buildcache"
   - &swagger_ui_download_url "https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"
