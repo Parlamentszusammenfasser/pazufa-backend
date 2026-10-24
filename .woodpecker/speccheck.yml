@@ -1,0 +1,20 @@
+# This script checks if the tag of the spec has been changed upwards, IFF we 
+# are on a branch like: `spec/*`
+
+when:
+  - event: [pull_request]
+    branch: [develop]
+    ref: refs/heads/spec/*
+
+variables:
+  - &rust_image pazufa/rust-woodpecker:1.4.0
+  - &gate_name speccheck-gate
+
+labels:
+  pazufa_scope: generic
+
+steps:
+  - name: tagcheck-spec
+    image: *rust_image
+    commands:
+      - python3 .woodpecker/scripts/tagcheck-spec.py

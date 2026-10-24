@@ -4,7 +4,7 @@ when:
   - event: manual
 
 variables:
-  - &version "0.3.4"
+  - &version "0.3.5"
   - &companion_version "0.1.0"
   - &build_cache "pazufa/backend:buildcache"
   - &swagger_ui_download_url "https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"
@@ -14,47 +14,11 @@ labels:
   performance: high
 
 steps:
-  # Checks both tags once and writes the results to the shared workspace.
-  # Fails (hard, not ignored) only when BOTH tags already exist - that
-  # failure propagates through depends_on and skips every step below,
-  # aborting the whole workflow.
-  - name: check-tags
-    image: alpine
-    commands:
-      - apk add --no-cache curl
-      - ( sh .woodpecker/docker-tag-free.sh pazufa-backend backend || sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion ) && echo "At least one Tag is free" && exit 0
-      - echo "Both image tags are not available. Aborting"
-      - exit 1
-
-  # Individually-skippable gates: fail (ignored) only for the one target
-  # whose tag already exists, so a single pre-existing tag never fails the
-  # overall pipeline - it just skips that one target's deploy step below.
-  - name: gate-backend
-    image: alpine
-    failure: ignore
-    depends_on: [check-tags]
-    commands:
-      - apk add --no-cache curl
-      - sh .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
-      - echo "pazufa/backend tag is taken - backend-deploy will not run"
-      - exit 1
-
-  - name: gate-ec
-    image: alpine
-    failure: ignore
-    depends_on: [check-tags]
-    commands:
-      - apk add --no-cache curl
-      - sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
-      - echo "pazufa/elastic-companion tag is taken - ec-deploy will run"
-      - exit 1
-
   # Compiles both binaries once (through the shared `builder` stage) and
   # pushes a mode=max registry cache so whichever target(s) below actually
   # build never recompile from scratch. Only skipped in the abort case above.
   - name: prebuild-cache
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [check-tags]
     settings:
       repo: pazufa/backend
       dockerfile: docker/Dockerfile
@@ -71,10 +35,12 @@ steps:
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
+    when:
+      path: [elastic-companion/Cargo.toml, pazufa-backend/Cargo.toml]
 
   - name: backend-deploy
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [gate-backend, prebuild-cache]
+    depends_on: [prebuild-cache]
     settings:
       repo: pazufa/backend
       dockerfile: docker/Dockerfile
@@ -93,10 +59,12 @@ steps:
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
+    when:
+      path: [pazufa-backend/Cargo.toml]
 
   - name: ec-deploy
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [gate-ec, prebuild-cache]
+    depends_on: [prebuild-cache]
     settings:
       repo: pazufa/elastic-companion
       dockerfile: docker/Dockerfile
@@ -115,3 +83,31 @@ steps:
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
+    when:
+      path: [elastic-companion/Cargo.toml]
+
+  # Builds the `release-artifacts` target out of the build cache and writes
+  # the binaries to dist/linux_amd64/ and dist/linux_arm64/.
+  - name: artifacts-export
+    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    depends_on: [prebuild-cache]
+    settings:
+      repo: pazufa/release-binaries
+      dockerfile: docker/Dockerfile
+      context: .
+      target: release-artifacts
+      platforms:
+        - linux/amd64
+        - linux/aarch64
+      build_args:
+        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+      cache_images:
+        - *build_cache
+      tags: 
+        - *version
+        - latest
+      username: pazufa
+      password:
+        from_secret: pazufa-docker-pass
+    when:
+      path: [elastic-companion/Cargo.toml, pazufa-backend/Cargo.toml]

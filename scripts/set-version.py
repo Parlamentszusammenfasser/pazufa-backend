@@ -16,6 +16,10 @@ def replace(file: str, pattern: str, replacement: str):
 
     fpath = Path(file)
     text = fpath.read_text()
+    if not re.search(pattern, text):
+        STATE_IS_DIRTY = True
+        print(f"Error: Pattern /{pattern}/ for file `{file}` did not match anything")
+        sys.exit(2)
     new_text = re.sub(pattern, replacement, text)
     if text != new_text:
         fpath.write_text(new_text)
@@ -28,20 +32,23 @@ def replace(file: str, pattern: str, replacement: str):
 with open("variables.toml", "rb") as f:
     file = tomllib.load(f)
 
-version = file["version"]["backend_version"]
-ec_version = file["version"]["ec_version"]
-trackfile = file["version"]["trackfile"]
-spec_version = file["version"]["spec_version"]
-rust_version = file["version"]["rust_version"]
+version = file["version"]["backend"]
+ec_version = file["version"]["elastic-companion"]
+spec_version = file["version"]["openapi-spec"]
+wp_dockerfile_version = file["version"]["test-dockerfile"]
 
-swagger_ui_download_url = file["external"]["swagger_ui_download_url"]
-database_state_url = file["external"]["database_state_url"]
-wp_dockerfile_version = file["version"]["wp_dockerfile_version"]
+rust_version = file["dependency-version"]["rustc"]
+
+trackfile = file["resources"]["trackfile"]
+swagger_ui_download_url = file["resources"]["cached-swagger-ui"]
+database_state_url = file["resources"]["testing-database-state"]
+
+rel_artifacts = " ".join(sorted(file["artifacts"]["bin-deploy"]))
 
 # spec version
 replace(
     "pazufa-backend-lib/src/utils/status.rs",
-    'pub\\s+const\\s+SPEC_VERSION:\\s+&str\\s+=\\s+"\\d+\\.\\d+\\.\\d+";',
+    r'pub const SPEC_VERSION: &str = "\d+\.\d+\.\d+";',
     f'pub const SPEC_VERSION: &str = "{spec_version}";',
 )
 
@@ -90,8 +97,8 @@ replace(
 )
 replace(
     ".woodpecker/deploy.yml",
-    r"  - &ec_version \"\d+\.\d+\.\d+\"",
-    f'  - &ec_version "{ec_version}"',
+    r"  - &companion_version \"\d+\.\d+\.\d+\"",
+    f'  - &companion_version "{ec_version}"',
 )
 
 # track file
@@ -148,18 +155,36 @@ replace(
     r"  - &version \".*\"",
     f'  - &version "{wp_dockerfile_version}"',
 )
+replace(
+    ".woodpecker/speccheck.yml",
+    r"  - &rust_image pazufa/rust-woodpecker.*",
+    f"  - &rust_image pazufa/rust-woodpecker:{wp_dockerfile_version}",
+)
+replace(
+    ".woodpecker/audit.yml",
+    r"  - &rust_image pazufa/rust-woodpecker.*",
+    f"  - &rust_image pazufa/rust-woodpecker:{wp_dockerfile_version}",
+)
 
 # rust toolchain version used in docker builds
 replace(
     "docker/woodpecker.Dockerfile",
     r"FROM rust:.*-bookworm AS base",
-    f"FROM rust:{rust_version}-bookworm AS base"
+    f"FROM rust:{rust_version}-bookworm AS base",
 )
 
 replace(
     "docker/Dockerfile",
     r"FROM rust:.*-slim-bookworm AS builder",
-    f"FROM rust:{rust_version}-slim-bookworm AS builder"
+    f"FROM rust:{rust_version}-slim-bookworm AS builder",
+)
+
+# deployment artifacts
+
+replace(
+    "docker/Dockerfile",
+    r'ARG RELEASE_ARTIFACTS=".*"',
+    f'ARG RELEASE_ARTIFACTS="{rel_artifacts}"',
 )
 
 if STATE_IS_DIRTY:

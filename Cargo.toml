@@ -5,6 +5,7 @@ members = ["pazufa-backend-lib", "pazufa-backend", "track-validation", "elastic-
 [profile.release]
 codegen-units = 1
 lto = "fat"
+strip = true
 
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }

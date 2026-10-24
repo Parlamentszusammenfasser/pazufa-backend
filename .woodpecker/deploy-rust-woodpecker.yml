@@ -2,7 +2,7 @@ when:
   - event: manual
 
 variables:
-  - &version "1.3.0"
+  - &version "1.4.0"
 
 labels:
   pazufa_scope: generic

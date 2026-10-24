@@ -12,7 +12,7 @@ use tracing::{instrument, warn};
 const MAX_COUNT: usize = 1024;
 pub const COMMIT_HASH: &str = env!("GIT_HASH");
 pub const CRATE_VERSION: &str = crate_version!();
-pub const SPEC_VERSION: &str = "0.2.7";
+pub const SPEC_VERSION: &str = "0.2.8";
 
 #[derive(Serialize)]
 pub struct StatOutput {

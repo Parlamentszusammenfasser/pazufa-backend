@@ -4,7 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
+## [0.3.5 / Spec 0.2.8] - 2026-10-23
+### Added
+- The deployed docker image now contains a copy of what the backend
+  generates as openapi.yml
+- There is a new Docker image in the pazufa/ repo, called
+  pazufa/release-artifacts, which is versioned together with the
+  backend. This is a `scratch` image containing 
+  - arm64/amd64 binaries that are to be released
+  - tracks.toml
+  - openapi.yml
+### Fixed
+- The Version of the Spec is now checked in CI: If a branch starts with
+  spec/*, it is considered for the spec workflow checking for new > old
+- the spec is now deployed after build to a new branch in
+  PaZuFa/parlamentszusammenfasser, and a PR is opened.
+- dependency crates failing an audit were updated
+### Changed
+#### Internal Changes
+- The set-version script now also checks if its Regexes match anything,
+  and fails otherwise
+### Impact on Hosting / Deployment
+- this is practically the exact same version, just with a lot of new CI
+  checks and the correct API version
+### Impact on Scraper Maintainers
+### Impact on API Consumers
+- the version of the spec is now displayed correctly
 ## [0.3.4 / Spec 0.2.8] - 2026-10-14
 ### Added
 - `if-modified-since` now also accepts RFC2822 Datetimes (#202)

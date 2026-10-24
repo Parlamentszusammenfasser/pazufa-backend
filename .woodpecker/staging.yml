@@ -18,27 +18,6 @@ steps:
       - ( sh .woodpecker/docker-tag-free.sh pazufa-backend backend || sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion ) && exit 0
       - echo "Both image tags are not available. Aborting"
       - exit 1
-
-  - name: gate-backend
-    image: alpine
-    failure: ignore
-    depends_on: [check-tags]
-    commands:
-      - apk add --no-cache curl
-      - sh .woodpecker/docker-tag-free.sh pazufa-backend backend && echo "Backend will be built" && exit 0
-      - echo "pazufa/backend tag is taken - backend-deploy will not run"
-      - exit 1
-
-  - name: gate-ec
-    image: alpine
-    failure: ignore
-    depends_on: [check-tags]
-    commands:
-      - apk add --no-cache curl
-      - sh .woodpecker/docker-tag-free.sh elastic-companion elastic-companion && echo "EC will be built" && exit 0
-      - echo "pazufa/elastic-companion tag is taken - ec-deploy will not run"
-      - exit 1
-
   - name: prebuild-cache
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
     depends_on: [check-tags]
@@ -57,10 +36,12 @@ steps:
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
+    when: 
+      path: [elastic-companion/Cargo.toml, pazufa-backend/Cargo.toml]
 
   - name: build-amd64-dry-run-pb
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [prebuild-cache, gate-backend]
+    depends_on: [prebuild-cache]
     settings:
       target: pazufa-backend-runner
       dockerfile: docker/Dockerfile
@@ -73,10 +54,12 @@ steps:
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
+    when: 
+      path: [pazufa-backend/Cargo.toml]
 
   - name: build-amd64-dry-run-ec
     image: docker.io/woodpeckerci/plugin-docker-buildx:6
-    depends_on: [prebuild-cache, gate-ec]
+    depends_on: [prebuild-cache]
     settings:
       target: elastic-companion-runner
       dockerfile: docker/Dockerfile
@@ -91,3 +74,5 @@ steps:
       username: pazufa
       password:
         from_secret: pazufa-docker-pass
+    when: 
+      path: [elastic-companion/Cargo.toml]
