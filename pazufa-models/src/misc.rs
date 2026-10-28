@@ -1,5 +1,4 @@
-use super::{de_optlink, de_optstring, de_string};
-use crate::models;
+use crate::{self as models, de_optlink, de_optstring, de_string};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, str::FromStr};
 use utoipa::ToSchema;

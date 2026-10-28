@@ -16,7 +16,6 @@
 pub mod api;
 pub mod db;
 pub mod error;
-pub mod models;
 pub mod utils;
 
 pub use crate::api::{LTZFArc, PazufaServer};

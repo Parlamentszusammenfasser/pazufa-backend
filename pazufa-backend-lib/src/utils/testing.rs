@@ -123,14 +123,13 @@ impl TestSetup {
 
 pub(crate) mod generate {
 
-    use crate::models::{
-        self,
+    use pazufa_models::{
+        self as models,
         dokument::{HashWrapper, ZusammenfassungWrapper},
     };
 
     pub(crate) mod random {
-
-        use crate::models;
+        use pazufa_models as models;
         use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
@@ -661,8 +660,8 @@ pub(crate) mod generate {
             let mut rng = StdRng::seed_from_u64(seed);
             random_station(&mut rng)
         }
-        use crate::models::dokument::HashWrapper;
-        use crate::models::dokument::ZusammenfassungWrapper;
+        use pazufa_models::dokument::HashWrapper;
+        use pazufa_models::dokument::ZusammenfassungWrapper;
         #[cfg(feature = "track-validation")]
         use std::collections::BTreeMap;
         #[cfg(feature = "track-validation")]

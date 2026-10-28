@@ -1,5 +1,4 @@
-use super::{de_optlink, de_optstring, de_string};
-use crate::models;
+use crate::{self as models, de_optlink, de_optstring, de_string};
 use serde::{Deserialize, Serialize, de, ser};
 use std::str::FromStr;
 use utoipa::ToSchema;
@@ -207,8 +206,9 @@ impl Serialize for Top {
 mod test_sitzung {
     #[test]
     fn deserialize_sitzung_dokumente() {
-        let s: Result<super::Sitzung, _> =
-            serde_json::from_str(include_str!("./../../tests/serialization/sitzung.json"));
+        let s: Result<super::Sitzung, _> = serde_json::from_str(include_str!(
+            "../../pazufa-backend-lib/tests/serialization/sitzung.json"
+        ));
         assert!(
             s.is_err(),
             "Expected to fail due to documents supplied by api id"
@@ -217,7 +217,7 @@ mod test_sitzung {
     #[test]
     fn deserialize_fail_sitzung_tops_dokumente() {
         let s: Result<super::Sitzung, _> = serde_json::from_str(include_str!(
-            "./../../tests/serialization/sitzung-minimal.json"
+            "./../../pazufa-backend-lib/tests/serialization/sitzung-minimal.json"
         ));
         assert!(
             s.is_err(),

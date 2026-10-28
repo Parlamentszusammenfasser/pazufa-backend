@@ -3,9 +3,10 @@ pub mod sitzung;
 pub mod vorgang;
 
 use super::KeyIndex;
+use crate::Result;
 use crate::error::PazufaError;
-use crate::{Result, models};
 pub use dokument::{insert_dokument, insert_or_retrieve_dok, insert_schlagworte_of_dok};
+use pazufa_models as models;
 pub use sitzung::insert_sitzung;
 use sqlx::PgTransaction;
 pub use vorgang::{
