@@ -434,3 +434,17 @@ impl Serialize for APIKeyCreate {
         Self::serialize(self, serializer)
     }
 }
+
+impl std::fmt::Display for APIScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Admin => "admin",
+                Self::Collector => "collector",
+                Self::KeyAdder => "keyadder",
+            }
+        )
+    }
+}

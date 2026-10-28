@@ -17,6 +17,9 @@ macro_rules! error_from {
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum DataValidationError {
+    #[snafu(display("{source}"))]
+    PazufaModel { source: pazufa_models::error::Error },
+
     #[snafu(display("Unauthorized because: {reason}"))]
     Unauthorized { reason: String },
 
@@ -70,6 +73,13 @@ error_from!(
     Validation,
     DataValidationError,
     TrackValidation
+);
+
+error_from!(
+    pazufa_models::error::Error,
+    Validation,
+    DataValidationError,
+    PazufaModel
 );
 error_from!(uuid::Error, Validation, DataValidationError, UuidParse);
 error_from!(

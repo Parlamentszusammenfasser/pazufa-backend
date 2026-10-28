@@ -21,20 +21,6 @@ use utoipa::ToSchema;
 #[derive(Debug)]
 pub struct Claims(pub APIScope, pub i32);
 
-impl std::fmt::Display for APIScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Admin => "admin",
-                Self::Collector => "collector",
-                Self::KeyAdder => "keyadder",
-            }
-        )
-    }
-}
-
 impl Claims {
     /// takes a raw header map, and extracts whichever claims are available.
     /// should only be called if `x-api-key` authentication is required. If it is optional, ignore the

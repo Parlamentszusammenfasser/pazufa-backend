@@ -1,5 +1,5 @@
-use pazufa_models::{self, Parlament};
 use crate::{Result, error::DataValidationError};
+use pazufa_models::{self as models, Parlament};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use track_validation::Regex;

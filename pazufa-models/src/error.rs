@@ -1,8 +1,8 @@
-use std::fmt::Display;
+use snafu::Snafu;
 
 pub type Result<RV> = std::result::Result<RV, Error>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Snafu)]
 pub enum Error {
     /// The object was deserialized, but a validation invariant failed to
     /// hold up
@@ -25,11 +25,5 @@ impl From<base64::DecodeError> for Error {
         Self::DeserializationError {
             error: format!("Error deserializing Password: Invalid Base 64 representation: {value}"),
         }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self, f)
     }
 }

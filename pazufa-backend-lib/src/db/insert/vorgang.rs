@@ -1,8 +1,8 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
 use crate::error::DataValidationError;
-use pazufa_models::{self, Zusammenfassungstupel};
 use crate::{PazufaServer, Result};
+use pazufa_models::{self as models, Zusammenfassungstupel};
 use sqlx::PgTransaction;
 use uuid::Uuid;
 
@@ -421,10 +421,10 @@ pub async fn insert_station(
 #[cfg(test)]
 mod test {
     use crate::{
-        api::RoundTimestamp,
         models,
         utils::testing::{TestSetup, generate::default_vorgang},
     };
+    use pazufa_models::RoundTimestamp;
     use uuid::Uuid;
 
     #[tokio::test]
