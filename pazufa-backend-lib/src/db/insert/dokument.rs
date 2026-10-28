@@ -2,9 +2,9 @@ use super::KeyIndex;
 use crate::db::gen_identifier;
 use crate::db::merge::MatchState;
 use crate::db::merge::candidates::dokument_merge_candidates;
-use crate::models::enumerations::{HashStrategy, Mime};
-use crate::models::{self};
 use crate::{PazufaServer, Result};
+use pazufa_models as models;
+use pazufa_models::enumerations::{HashStrategy, Mime};
 use sqlx::PgTransaction;
 use uuid::Uuid;
 
