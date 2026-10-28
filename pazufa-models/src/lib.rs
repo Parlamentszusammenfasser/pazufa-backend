@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod dokument;
 pub mod enumerations;
+pub mod error;
 pub mod headers;
 pub mod misc;
 pub mod params;
@@ -16,11 +17,13 @@ pub use enumerations::{
     APIScope, Doktyp, EnumerationNames, Parlament, Stationstyp, VgIdentTyp, Vorgangstyp,
 };
 pub use misc::{Autor, Gremium, TouchedByInner};
-use serde::{Deserialize, Deserializer, Serialize, de};
 pub use sitzung::{Sitzung, Top};
+pub use vorgang::{Lobbyregistereintrag, Station, VgIdent, Vorgang};
+
+use chrono::{DateTime, DurationRound, Utc};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use std::str::FromStr;
 use utoipa::ToSchema;
-pub use vorgang::{Lobbyregistereintrag, Station, VgIdent, Vorgang};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ReplacementPutRequest<T: ToSchema> {
@@ -139,4 +142,101 @@ fn de_veclinks<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Vec<String>, 
         is_valid_link(s)?;
     }
     Ok(v)
+}
+
+/// Helper Trait that allows me to compare objects (vorgang, dokument, ...)
+/// that are stored and re-fetched with whatever precision where only the
+/// very very margins differ by a few nanosecs.
+/// Using this trait the thing can round its dates to a precision of 1 second
+/// We do not really need more
+pub trait RoundTimestamp: Clone {
+    fn with_round_timestamps(&self) -> Self;
+}
+
+fn round_to_second(datetime: DateTime<Utc>) -> DateTime<Utc> {
+    if let Ok(datetime) = datetime.duration_round(const { chrono::Duration::seconds(1) }) {
+        datetime
+    } else {
+        let mut unix_time = datetime.timestamp();
+        if datetime.timestamp_subsec_millis() >= 500 {
+            unix_time = unix_time.saturating_add(1);
+        }
+        let Some(datetime) = DateTime::from_timestamp(unix_time, 0) else {
+            unreachable!("Only returns None, if `nsecs` is greater then 999,999,999.");
+        };
+        datetime
+    }
+}
+
+impl RoundTimestamp for Dokument {
+    fn with_round_timestamps(&self) -> Self {
+        Self {
+            zp_referenz: round_to_second(self.zp_referenz),
+            zp_erstellt: self.zp_erstellt.map(round_to_second),
+            zp_modifiziert: round_to_second(self.zp_modifiziert),
+            ..self.clone()
+        }
+    }
+}
+
+impl RoundTimestamp for Station {
+    fn with_round_timestamps(&self) -> Self {
+        Self {
+            zp_modifiziert: self.zp_modifiziert.map(round_to_second),
+            zp_start: round_to_second(self.zp_start),
+            stellungnahmen: self
+                .stellungnahmen
+                .iter()
+                .map(|sn| match sn {
+                    DokumentOrApiId::Dokument(d) => {
+                        DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(*x),
+                })
+                .collect(),
+            dokumente: self
+                .dokumente
+                .iter()
+                .map(|sn| match sn {
+                    DokumentOrApiId::Dokument(d) => {
+                        DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(*x),
+                })
+                .collect(),
+
+            ..self.clone()
+        }
+    }
+}
+
+impl RoundTimestamp for Vorgang {
+    fn with_round_timestamps(&self) -> Self {
+        Self {
+            stationen: self
+                .stationen
+                .iter()
+                .map(RoundTimestamp::with_round_timestamps)
+                .collect(),
+            ..self.clone()
+        }
+    }
+}
+impl RoundTimestamp for Sitzung {
+    fn with_round_timestamps(&self) -> Self {
+        Self {
+            dokumente: self
+                .dokumente
+                .iter()
+                .map(|sn| match sn {
+                    DokumentOrApiId::Dokument(d) => {
+                        DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(*x),
+                })
+                .collect(),
+            termin: round_to_second(self.termin),
+            ..self.clone()
+        }
+    }
 }

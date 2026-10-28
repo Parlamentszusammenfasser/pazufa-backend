@@ -1733,21 +1733,18 @@ dependencies = [
 name = "pazufa-backend-lib"
 version = "0.3.5"
 dependencies = [
- "ammonia",
  "argon2",
  "axum",
  "base64 0.23.1",
  "chrono",
  "clap",
  "clap-stdin",
- "crc",
  "dotenvy",
- "headers",
  "lettre",
+ "pazufa-models",
  "rand 0.10.3",
  "serde",
  "serde_json",
- "serde_repr",
  "sha256",
  "snafu",
  "sqlx",
@@ -1757,6 +1754,28 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "track-validation",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "pazufa-models"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "argon2",
+ "axum",
+ "base64 0.23.1",
+ "chrono",
+ "crc",
+ "headers",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "sha256",
+ "sqlx",
+ "tokio",
  "utoipa",
  "uuid",
 ]

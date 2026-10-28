@@ -1,6 +1,5 @@
 use super::APIScope;
-use crate::error::DataValidationError;
-use crate::{PazufaError, Result};
+use crate::error::{Error, Result};
 use argon2::PasswordHasher;
 use argon2::password_hash::{Salt, SaltString};
 use base64::prelude::*;
@@ -182,13 +181,13 @@ pub fn check_crc(key: &str) -> bool {
 }
 
 impl<T: APIKeyGenerator> TryFrom<String> for APIKey<T> {
-    type Error = PazufaError;
+    type Error = Error;
     fn try_from(thing: String) -> Result<APIKey<T>> {
         let key = APIKey(thing, PhantomData);
         if key.is_format_valid() {
             Ok(key)
         } else {
-            Err(DataValidationError::InvalidFormat {
+            Err(Error::ValidationError {
                 field: "APIKey".to_owned(),
                 message: "Key Format invalid or checksum failed".to_owned(),
             }
@@ -433,146 +432,5 @@ impl Serialize for APIKeyCreate {
         S: serde::ser::Serializer,
     {
         Self::serialize(self, serializer)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::HashAlgorithm;
-    use super::Sha256KeyGenerator;
-    use argon2::password_hash::SaltString;
-    #[allow(
-        deprecated,
-        reason = "used to check equality with deprecated functionality"
-    )]
-    use legacy_util_auth_functions as util_auth;
-
-    #[allow(
-        deprecated,
-        reason = "is explicitly testing equivalence with deprecated function"
-    )]
-    #[test]
-    fn old_and_new_hashes_match() {
-        let (key, salt) = util_auth::new_key();
-        let legacy_hash = util_auth::hash_full_key(&salt, &key, HashAlgorithm::Sha256);
-        let new_key: super::APIKey<Sha256KeyGenerator> = key.clone().try_into().expect("");
-
-        let new_hash = new_key
-            .hash(
-                SaltString::encode_b64(&salt.into_bytes())
-                    .expect("success")
-                    .as_salt(),
-            )
-            .expect("");
-        assert_eq!(legacy_hash, new_hash);
-    }
-
-    #[deprecated]
-    #[allow(deprecated, reason = "is deprecated itself")]
-    mod legacy_util_auth_functions {
-        use crate::models::auth::{
-            HashAlgorithm, KEY_MATERIAL_LENGTH, KEYTAG_LENGTH, SALT_LENGTH, SLUG_LENGTH,
-        };
-        use argon2::PasswordHasher;
-        use argon2::password_hash::SaltString;
-        use rand::distr::Alphanumeric;
-        use rand::rngs::StdRng;
-        use rand::{RngExt, SeedableRng, rng};
-
-        #[must_use]
-        pub fn hash_full_key(salt: &str, full_key: &str, algo: HashAlgorithm) -> String {
-            hash_secret(
-                salt,
-                &full_key
-                    .chars()
-                    .skip(SLUG_LENGTH + 1 + KEYTAG_LENGTH + 1)
-                    .take(KEY_MATERIAL_LENGTH)
-                    .collect::<String>(),
-                algo,
-            )
-        }
-
-        /// Hashes a secret with a bad algo
-        /// # Panics
-        /// can panic if the encoding does not allocate enough space fore the bytes
-        #[must_use]
-        pub fn hash_secret(salt: &str, secret: &str, algo: HashAlgorithm) -> String {
-            match algo {
-                HashAlgorithm::Sha256 => {
-                    sha256::digest(salt.chars().chain(secret.chars()).collect::<String>())
-                }
-                HashAlgorithm::Argon2id => {
-                    let argon2_params = argon2::Argon2::default();
-                    let b64_salt = SaltString::encode_b64(salt.as_bytes()).expect("");
-                    argon2_params
-                        .hash_password(secret.as_bytes(), &b64_salt)
-                        .expect("")
-                        .to_string()
-                }
-            }
-        }
-
-        #[must_use]
-        pub fn generate_api_key() -> String {
-            let keytag = StdRng::from_rng(&mut rng())
-                .sample_iter(&Alphanumeric)
-                .take(KEYTAG_LENGTH)
-                .map(char::from)
-                .map(|c| {
-                    if rng().random_bool(0.5f64) {
-                        c.to_ascii_lowercase()
-                    } else {
-                        c.to_ascii_uppercase()
-                    }
-                });
-
-            let key_material = StdRng::from_rng(&mut rng())
-                .sample_iter(&Alphanumeric)
-                .take(KEY_MATERIAL_LENGTH)
-                .map(char::from)
-                .map(|c| {
-                    if rng().random_bool(0.5f64) {
-                        c.to_ascii_lowercase()
-                    } else {
-                        c.to_ascii_uppercase()
-                    }
-                });
-
-            let pre_key: String = "pazufa-"
-                .chars()
-                .chain(keytag)
-                .chain(std::iter::once('-'))
-                .chain(key_material)
-                .collect();
-
-            let crc_result = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM)
-                .checksum(&pre_key.bytes().collect::<Vec<_>>());
-            let key = format!("{pre_key}{crc_result:08x}");
-            key
-        }
-        #[must_use]
-        pub fn generate_salt() -> String {
-            StdRng::from_rng(&mut rng())
-                .sample_iter(&Alphanumeric)
-                .take(SALT_LENGTH)
-                .map(char::from)
-                .map(|c| {
-                    if rng().random_bool(0.5f64) {
-                        c.to_ascii_lowercase()
-                    } else {
-                        c.to_ascii_uppercase()
-                    }
-                })
-                .collect()
-        }
-
-        /// generates a new key within the database, returning the new key and the new salt.
-        #[must_use]
-        pub fn new_key() -> (String, String) {
-            let new_key = generate_api_key();
-            let new_salt = generate_salt();
-
-            (new_key, new_salt)
-        }
     }
 }

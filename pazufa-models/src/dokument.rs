@@ -1,6 +1,6 @@
 use super::{de_full_text_string, de_hexstring, de_link, de_optstring, de_string, de_vecstring};
-use crate::models::{
-    self,
+use crate::{
+    self as models,
     enumerations::{HashStrategy, Mime},
     is_valid_string,
 };
@@ -461,23 +461,25 @@ impl Serialize for ZusammenfassungWrapper {
 mod dokument_deserialize {
     #[test]
     fn deserialize_dokument() {
-        let s: super::Dokument =
-            serde_json::from_str(include_str!("./../../tests/serialization/dokument.json"))
-                .expect("Expected flawless serialization");
+        let s: super::Dokument = serde_json::from_str(include_str!(
+            "../../pazufa-backend-lib/tests/serialization/dokument.json"
+        ))
+        .expect("Expected flawless serialization");
         assert_eq!(s.link, "https://string.com");
     }
     #[test]
     fn deserialize_dokument_invar_fail() {
         let _e = serde_json::from_str::<super::Dokument>(include_str!(
-            "./../../tests/serialization/dokument-invar.json"
+            "../../pazufa-backend-lib/tests/serialization/dokument-invar.json"
         ))
         .expect_err("Expected a validation failure");
     }
     #[test]
     fn deserialize_enum() {
-        let s: super::DokumentOrApiId =
-            serde_json::from_str(include_str!("./../../tests/serialization/dokument.json"))
-                .expect("Expected flawless serialization");
+        let s: super::DokumentOrApiId = serde_json::from_str(include_str!(
+            "../../pazufa-backend-lib/tests/serialization/dokument.json"
+        ))
+        .expect("Expected flawless serialization");
         assert!(matches!(s, super::DokumentOrApiId::Dokument(_)));
     }
 

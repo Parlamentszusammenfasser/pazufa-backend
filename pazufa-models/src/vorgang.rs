@@ -1,10 +1,7 @@
 use super::{de_link, de_optlink, de_optstring, de_string, de_veclinks, de_vecstring};
 use crate::{
-    api::RoundTimestamp,
-    models::{
-        self, Zusammenfassungstupel,
-        enumerations::{Ressort, Sachgebiet},
-    },
+    self as models, RoundTimestamp, Zusammenfassungstupel,
+    enumerations::{Ressort, Sachgebiet},
 };
 use serde::{Deserialize, Serialize, de, ser};
 use std::str::FromStr;
@@ -475,14 +472,11 @@ impl std::fmt::Display for Vorgang {
 
 #[cfg(test)]
 mod serialization_tests {
-    use crate::{
-        models::enumerations::{Ressort, Sachgebiet},
-        utils::testing::generate,
-    };
+    use crate::enumerations::{Ressort, Sachgebiet};
     #[test]
     fn fails_because_duplicate_api_ids_179() {
         let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
-            "./../../tests/serialization/179-station-api-id.json"
+            "../../pazufa-backend-lib/tests/serialization/179-station-api-id.json"
         ));
 
         assert!(
@@ -494,7 +488,7 @@ mod serialization_tests {
     #[test]
     fn fails_due_to_apiiddoks() {
         let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
-            "./../../tests/serialization/vorgang_dokstring.json"
+            "../../pazufa-backend-lib/tests/serialization/vorgang_dokstring.json"
         ));
 
         assert!(v.is_err(), "Expected to fail due to apiid-doks");
@@ -503,7 +497,7 @@ mod serialization_tests {
     #[test]
     fn fails_due_to_station_zpstart() {
         let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
-            "./../../tests/serialization/equal_zpstarts.json"
+            "../../pazufa-backend-lib/tests/serialization/equal_zpstarts.json"
         ));
 
         assert!(
