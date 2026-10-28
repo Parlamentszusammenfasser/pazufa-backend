@@ -1,10 +1,10 @@
-use super::{de_optlink, de_optstring, de_string};
-use crate::models;
+use crate::{self as models, de_optlink, de_optstring, de_string};
+use arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, str::FromStr};
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct TouchedByInner {
     /// uuid of the scraper that touched this object
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -17,7 +17,7 @@ pub struct TouchedByInner {
 }
 
 /// A body in which decisions can be made: committees, plenary halls, cabinett, peoples, ...
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
 pub struct Gremium {
     pub parlament: models::Parlament,
@@ -83,7 +83,7 @@ impl std::fmt::Display for Gremium {
 /// - expert at a hearing,
 /// - initiator of a Vorgang
 /// - authoring organisations of documents
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Arbitrary, Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(remote = "Self")]
 pub struct Autor {
     #[serde(skip_serializing_if = "Option::is_none")]
