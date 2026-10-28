@@ -1,9 +1,10 @@
 use super::PaginationResponsePart;
 use crate::api::{GetSingleResponse, ListingGetResponse};
 use crate::db::retrieve;
-use crate::models::enumerations::DokumentFormat;
-use crate::models::params::{self, ListingQueryParams};
-use crate::{PazufaError, PazufaServer, Result, models};
+use crate::{PazufaError, PazufaServer, Result};
+use pazufa_models as models;
+use pazufa_models::enumerations::DokumentFormat;
+use pazufa_models::params::{self, ListingQueryParams};
 use sqlx::Row;
 use sqlx::SqlSafeStr;
 use std::collections::BTreeMap;
@@ -308,15 +309,15 @@ pub async fn dokument_get_by_id(
 mod test_unauthorisiert {
     use crate::api::ListingGetResponse;
     use crate::api::vorgang as libvg;
-    use crate::models;
-    use crate::models::dokument::DokumentHash;
-    use crate::models::dokument::HashWrapper;
-    use crate::models::dokument::ZusammenfassungWrapper;
-    use crate::models::dokument::Zusammenfassungstupel;
-    use crate::models::enumerations::HashStrategy;
-    use crate::models::enumerations::Mime;
-    use crate::models::params;
     use crate::utils::testing::{TestSetup, generate};
+    use pazufa_models as models;
+    use pazufa_models::dokument::DokumentHash;
+    use pazufa_models::dokument::HashWrapper;
+    use pazufa_models::dokument::ZusammenfassungWrapper;
+    use pazufa_models::dokument::Zusammenfassungstupel;
+    use pazufa_models::enumerations::HashStrategy;
+    use pazufa_models::enumerations::Mime;
+    use pazufa_models::params;
     use uuid::uuid;
 
     #[tokio::test]

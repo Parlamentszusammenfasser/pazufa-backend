@@ -1,7 +1,7 @@
 use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
 use crate::error::{PazufaError, Result};
-use crate::models;
+use pazufa_models as models;
 use std::str::FromStr;
 use uuid::Uuid;
 

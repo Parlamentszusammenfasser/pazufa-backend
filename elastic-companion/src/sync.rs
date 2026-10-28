@@ -1,5 +1,5 @@
 use anyhow::Result;
-use pazufa_backend_lib::models;
+use pazufa_models as models;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;

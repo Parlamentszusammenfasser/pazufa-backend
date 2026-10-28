@@ -1,7 +1,7 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
-use crate::models;
 use crate::{PazufaServer, Result};
+use pazufa_models as models;
 use sqlx::PgTransaction;
 use uuid::Uuid;
 

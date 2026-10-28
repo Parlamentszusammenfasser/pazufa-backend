@@ -1,25 +1,25 @@
-/// Handles merging of two datasets.
-/// vorgang, station and dokument are mergeable, meaning their data is not atomic.
-/// Stellungnahme is handled like dokument with the rest being overridable data points
-/// `API_ID` or other uniquely identifying information is not overridden, but preserved.
-/// array-like structures are merged by a modified union operation:
-/// for each element:
-///     - if it is mergeable and one merge candidate found, merge
-///     - if it is not mergeable and has a match in the existing set, the existing element takes precedence and is not replaced
-///     - if it is not mergeable and has no match it is added to the set.
-/// basic data items are to be overridden by newer information.
-/// Excempt from this is the `api_id`, since this is a permanent document identifier.
+//! Handles merging of two datasets.
+//! vorgang, station and dokument are mergeable, meaning their data is not atomic.
+//! Stellungnahme is handled like dokument with the rest being overridable data points
+//! `API_ID` or other uniquely identifying information is not overridden, but preserved.
+//! array-like structures are merged by a modified union operation:
+//! for each element:
+//!     - if it is mergeable and one merge candidate found, merge
+//!     - if it is not mergeable and has a match in the existing set, the existing element takes precedence and is not replaced
+//!     - if it is not mergeable and has no match it is added to the set.
+//! basic data items are to be overridden by newer information.
+//! Excempt from this is the `api_id`, since this is a permanent document identifier.
 use super::MatchState;
 use super::candidates::{
     dokument_merge_candidates, station_merge_candidates, vorgang_merge_candidates,
 };
-use crate::api::RoundTimestamp;
 use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
 use crate::error::DataValidationError;
-use crate::models::enumerations::{HashStrategy, Mime};
 use crate::utils::notify::notify_ambiguous_match;
-use crate::{PazufaServer, Result, models};
+use crate::{PazufaServer, Result};
+use pazufa_models::enumerations::{HashStrategy, Mime};
+use pazufa_models::{self as models, RoundTimestamp};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -638,9 +638,9 @@ pub(crate) async fn run_integration(
 #[cfg(test)]
 mod scenariotest {
     use crate::api::SortArrays;
-    use crate::models::{self, DokumentOrApiId};
     use crate::utils::testing::{TestSetup, generate};
     use crate::{PazufaServer, Result, api::PaginationResponsePart, db::retrieve};
+    use pazufa_models::{self as models, DokumentOrApiId};
     use uuid::Uuid;
 
     struct Scenario {
@@ -747,12 +747,12 @@ mod scenariotest {
             let equality = self
                 .expected
                 .iter()
-                .map(crate::api::RoundTimestamp::with_round_timestamps)
+                .map(pazufa_models::RoundTimestamp::with_round_timestamps)
                 .collect::<Vec<_>>()
                 == db_vorgangs
                     .1
                     .iter()
-                    .map(crate::api::RoundTimestamp::with_round_timestamps)
+                    .map(pazufa_models::RoundTimestamp::with_round_timestamps)
                     .collect::<Vec<_>>();
             if !equality && !self.shouldfail {
                 let exp_content = self

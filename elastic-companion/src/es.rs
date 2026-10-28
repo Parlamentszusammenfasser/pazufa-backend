@@ -2,7 +2,7 @@ use crate::Config;
 use anyhow::anyhow;
 use anyhow::{Result, bail};
 use base64::prelude::*;
-use pazufa_backend_lib::models;
+use pazufa_models as models;
 use serde::Serialize;
 use std::io::Write;
 
