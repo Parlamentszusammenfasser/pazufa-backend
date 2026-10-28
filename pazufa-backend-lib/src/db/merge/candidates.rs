@@ -5,7 +5,7 @@ use crate::db::retrieve;
 use crate::error::DataValidationError;
 use crate::error::PazufaError;
 use crate::models;
-use crate::models::enumerations::HashStrategy;
+use pazufa_models::enumerations::HashStrategy;
 #[cfg(feature = "track-validation")]
 use std::collections::BTreeSet;
 use std::string::ToString;
@@ -327,7 +327,7 @@ mod candid_test {
     use super::*;
     use crate::api::vorgang::vorgang_id_put;
     use crate::db::merge::MatchState;
-    use crate::models::{self, params};
+    use pazufa_models::{self, params};
     use crate::utils::testing::generate::random::random_uuid;
     use crate::utils::testing::{TestSetup, generate};
     use chrono::DateTime;

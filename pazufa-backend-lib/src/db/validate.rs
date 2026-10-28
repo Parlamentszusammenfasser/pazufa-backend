@@ -1,4 +1,4 @@
-use crate::models::{self, Parlament};
+use pazufa_models::{self, Parlament};
 use crate::{Result, error::DataValidationError};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};

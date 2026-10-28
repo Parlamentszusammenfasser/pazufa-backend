@@ -1,17 +1,16 @@
 use crate::db::retrieve::auth::get_api_key_metadata;
-use crate::models::APIScope;
-use crate::models::auth::{
-    APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
-};
-use crate::models::params::{AuthListingKeytagPathParams, XAPIKey};
 use crate::utils::as_option;
-use crate::utils::header_params::HeaderParams;
 use crate::{PazufaServer, Result, error::PazufaError};
 use argon2::password_hash::SaltString;
 use axum::extract::FromRequestParts;
 use axum::http::{StatusCode, request::Parts};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
+use pazufa_models::APIScope;
+use pazufa_models::auth::{
+    APIKey, Argon2KeyGenerator, HashAlgorithm, NoopKeyGenerator, Sha256KeyGenerator,
+};
+use pazufa_models::params::{AuthListingKeytagPathParams, HeaderParams, XAPIKey};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::sync::Arc;
@@ -288,8 +287,8 @@ pub async fn auth_rotate(server: &PazufaServer, claims: &Claims) -> Result<AuthR
     let old_key_entry = get_api_key_metadata(claims.1, &mut *tx).await?;
 
     // new key, replacing the old one
-    let api_key = crate::models::auth::APIKey::<crate::models::auth::Argon2KeyGenerator>::default();
-    let new_salt = crate::models::auth::generate_salt();
+    let api_key = pazufa_models::auth::APIKey::<pazufa_models::auth::Argon2KeyGenerator>::default();
+    let new_salt = pazufa_models::auth::generate_salt();
     let new_hash = api_key.hash(new_salt.as_salt())?;
     let mut vec_data = vec![0; new_salt.len()];
     let salt_bytes: Vec<_> = new_salt.decode_b64(&mut vec_data)?.into();
@@ -478,9 +477,9 @@ mod auth_test {
     use crate::api::auth::AuthRotateResponse;
     use crate::api::vorgang;
     use crate::db::retrieve::auth::get_api_key_metadata;
-    use crate::models::auth::{APIKey, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator};
-    use crate::models::params::{self, AuthListingKeytagPathParams};
     use crate::utils::testing::{TestSetup, generate};
+    use pazufa_models::auth::{APIKey, Argon2KeyGenerator, NoopKeyGenerator, Sha256KeyGenerator};
+    use pazufa_models::params::{self, AuthListingKeytagPathParams};
     use sqlx::PgExecutor;
 
     async fn fetch_key_index<'e, E: PgExecutor<'e>>(keytag: &str, ex: E) -> i32 {

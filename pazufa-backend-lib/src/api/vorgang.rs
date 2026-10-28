@@ -1,11 +1,11 @@
 use super::PutResponse;
 use super::find_applicable_date_range;
-use crate::api::{GetSingleResponse, ListingGetResponse, RoundTimestamp};
+use crate::api::{GetSingleResponse, ListingGetResponse};
 use crate::db::retrieve::vorgang_dbid;
 use crate::db::{delete, insert, merge, retrieve};
 use crate::error::{DataValidationError, PazufaError};
-use crate::models::{APIScope, params};
 use crate::{PazufaServer, Result, models};
+use pazufa_models::{APIScope, RoundTimestamp, params};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
@@ -223,9 +223,9 @@ pub async fn vorgang_get(
 #[cfg(test)]
 mod test_endpoints {
     use crate::api::{GetSingleResponse, ListingGetResponse, PutResponse};
-    use crate::models::{self, params};
     use crate::utils::testing::{TestSetup, generate};
     use chrono::Utc;
+    use pazufa_models::{self, params};
     use uuid::Uuid;
 
     // Procedure (Vorgang) tests
@@ -546,10 +546,10 @@ mod test_endpoints {
 #[cfg(test)]
 pub(crate) mod test_failed_irl_scenarios {
     use crate::api::RoundTimestamp;
-    use crate::models::enumerations::{Ressort, Sachgebiet};
-    use crate::models::params;
     use crate::utils::testing::{TestSetup, generate};
     use crate::{api, models};
+    use pazufa_models::enumerations::{Ressort, Sachgebiet};
+    use pazufa_models::params;
     use std::path::{Path, PathBuf};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
@@ -585,7 +585,7 @@ pub(crate) mod test_failed_irl_scenarios {
                     let response = super::vorgang_put(
                         &test_setup.server,
                         1,
-                        &crate::models::params::XScraperId(Uuid::nil()),
+                        &pazufa_models::params::XScraperId(Uuid::nil()),
                         obj,
                     )
                     .await
@@ -608,7 +608,7 @@ pub(crate) mod test_failed_irl_scenarios {
                     let response = super::vorgang_put(
                         &test_setup.server,
                         1,
-                        &crate::models::params::XScraperId(Uuid::nil()),
+                        &pazufa_models::params::XScraperId(Uuid::nil()),
                         obj,
                     )
                     .await
@@ -697,7 +697,7 @@ pub(crate) mod test_failed_irl_scenarios {
             super::vorgang_put(
                 &test_setup.server,
                 1,
-                &crate::models::params::XScraperId(Uuid::nil()),
+                &pazufa_models::params::XScraperId(Uuid::nil()),
                 &vg,
             )
             .await

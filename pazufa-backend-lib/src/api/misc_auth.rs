@@ -1,6 +1,6 @@
-use super::{PutResponse, RoundTimestamp};
-use crate::models::params;
+use super::PutResponse;
 use crate::{PazufaError, PazufaServer, Result, models};
+use pazufa_models::{RoundTimestamp, params};
 use sqlx::PgTransaction;
 use sqlx::SqlSafeStr;
 use std::collections::{BTreeMap, BTreeSet};
@@ -871,8 +871,8 @@ mod test_authorisierte_sonstige {
     use crate::api::vorgang;
     use crate::api::{ListingGetResponse, misc};
     use crate::db::merge::execute::run_integration;
-    use crate::models::{self, DokumentOrApiId, EnumerationNames, params};
     use crate::utils::testing::{TestSetup, generate};
+    use pazufa_models::{self, DokumentOrApiId, EnumerationNames, params};
     use tracing_test::traced_test;
 
     async fn insert_default_vorgang(server: &PazufaServer) {

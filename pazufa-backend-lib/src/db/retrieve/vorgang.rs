@@ -1,8 +1,8 @@
 use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
 use crate::error::{DataValidationError, PazufaError, Result};
-use crate::models::enumerations::{Ressort, Sachgebiet};
-use crate::models::{self, Zusammenfassungstupel};
+use pazufa_models::enumerations::{Ressort, Sachgebiet};
+use pazufa_models::{self, Zusammenfassungstupel};
 use std::str::FromStr;
 use uuid::Uuid;
 

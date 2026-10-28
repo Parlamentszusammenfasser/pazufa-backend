@@ -1,5 +1,5 @@
 use crate::api::PaginationResponsePart;
-use crate::models::{APIScope, auth::APIKeyMetadata};
+use pazufa_models::{APIScope, auth::APIKeyMetadata};
 use crate::{Result, models};
 use sqlx::{PgExecutor, PgTransaction};
 

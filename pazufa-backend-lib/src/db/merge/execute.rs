@@ -17,7 +17,7 @@ use crate::api::RoundTimestamp;
 use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
 use crate::error::DataValidationError;
-use crate::models::enumerations::{HashStrategy, Mime};
+use pazufa_models::enumerations::{HashStrategy, Mime};
 use crate::utils::notify::notify_ambiguous_match;
 use crate::{PazufaServer, Result, models};
 use tracing::{debug, info, warn};
@@ -638,7 +638,7 @@ pub(crate) async fn run_integration(
 #[cfg(test)]
 mod scenariotest {
     use crate::api::SortArrays;
-    use crate::models::{self, DokumentOrApiId};
+    use pazufa_models::{self, DokumentOrApiId};
     use crate::utils::testing::{TestSetup, generate};
     use crate::{PazufaServer, Result, api::PaginationResponsePart, db::retrieve};
     use uuid::Uuid;

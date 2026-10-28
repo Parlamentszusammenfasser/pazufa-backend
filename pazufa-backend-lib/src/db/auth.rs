@@ -1,6 +1,6 @@
 use crate::Result;
-use crate::models::auth::{APIKey, APIKeyGenerator, generate_keytag, generate_salt};
-use crate::models::enumerations::APIScope;
+use pazufa_models::auth::{APIKey, APIKeyGenerator, generate_keytag, generate_salt};
+use pazufa_models::enumerations::APIScope;
 use sqlx::PgExecutor;
 
 /// Creates an API Key with the specified parameters in the database

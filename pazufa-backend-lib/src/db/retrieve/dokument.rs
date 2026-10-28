@@ -1,10 +1,10 @@
 use crate::api::PaginationResponsePart;
 use crate::error::{DataValidationError, PazufaError, Result};
 use crate::models;
-use crate::models::dokument::{
+use pazufa_models::dokument::{
     DokumentHash, HashWrapper, ZusammenfassungWrapper, Zusammenfassungstupel,
 };
-use crate::models::enumerations::{HashStrategy, Mime};
+use pazufa_models::enumerations::{HashStrategy, Mime};
 use std::str::FromStr;
 use uuid::Uuid;
 

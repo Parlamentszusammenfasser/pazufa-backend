@@ -1,6 +1,6 @@
 #[cfg(feature = "track-validation")]
 use crate::db::validate::Tracks;
-use crate::models::{Dokument, FTMDokumentPages};
+use pazufa_models::{Dokument, FTMDokumentPages};
 use crate::utils::notify;
 use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
