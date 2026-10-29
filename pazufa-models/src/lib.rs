@@ -1,4 +1,22 @@
+#![cfg_attr(
+    test,
+    allow(clippy::expect_used, reason = "all is fair in love, war and testing")
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::arithmetic_side_effects,
+        reason = "all is fair in love, war and testing"
+    )
+)]
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, reason = "all is fair in love, war and testing")
+)]
+
+mod arbitrary;
 pub mod auth;
+mod constraint;
 mod deserialization;
 pub mod dokument;
 pub mod enumerations;
@@ -22,8 +40,7 @@ pub use sitzung::{Sitzung, Top};
 pub use vorgang::{Lobbyregistereintrag, Station, VgIdent, Vorgang};
 
 use chrono::{DateTime, DurationRound, Utc};
-use serde::{Deserialize, Deserializer, Serialize, de};
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -45,112 +62,13 @@ pub struct ReplacementPutRequestInner<T: ToSchema> {
     #[serde(rename = "replaced_by")]
     pub replaced_by: u32,
 }
-fn de_full_text_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
-    let s = String::deserialize(deserializer)?;
-    if s.is_empty() {
-        Err(de::Error::custom(
-            "Strings must not be empty. please fill them with TODO markers, with a sensible default or with processed content",
-        ))
-    } else if s.chars().any(|c| c == '\0') {
-        Err(de::Error::custom(
-            "This text contains '\\0'. Please no shenanigans, law texts are boring",
-        ))
-    } else {
-        Ok(s)
-    }
-}
-fn is_valid_string<E: serde::de::Error>(s: &str) -> Result<(), E> {
-    if s.is_empty() {
-        Err(de::Error::custom(
-            "Strings must not be empty. please fill them with TODO markers, with a sensible default or with processed content",
-        ))
-    } else if s.chars().any(|c| c == '\0') {
-        Err(de::Error::custom(
-            "This text contains '\\0', which is rejected due to being the C-String terminator",
-        ))
-    } else if ammonia::is_html(s) {
-        Err(de::Error::custom(
-            "String was recognized to contain html structure. 
-                This might indicate cross-site scripting",
-        ))
-    } else {
-        Ok(())
-    }
-}
-fn is_valid_link<E: serde::de::Error>(s: &str) -> Result<(), E> {
-    let Ok(uri) = axum::http::Uri::from_str(s) else {
-        return Err(de::Error::custom("This vector should only contain links"));
-    };
-    if uri.scheme().is_none() || uri.authority().is_none() {
-        return Err(de::Error::custom(
-            "This vector should only contain links with a scheme (like https)",
-        ));
-    }
-    Ok(())
-}
-fn de_hexstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
-    let s = String::deserialize(deserializer)?;
-    is_valid_string(&s)?;
-    if s.chars().all(|c| c.is_ascii_hexdigit()) {
-        Ok(s)
-    } else {
-        Err(de::Error::custom(
-            "String contains non-hexadecimal digit characters",
-        ))
-    }
-}
-fn de_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
-    let s = String::deserialize(deserializer)?;
-    is_valid_string(&s)?;
-    Ok(s)
-}
-fn de_link<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
-    let s = String::deserialize(deserializer)?;
-    is_valid_string(&s)?;
-    is_valid_link(&s)?;
-    Ok(s)
-}
-
-fn de_optstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Option<String>, D::Error> {
-    let os = <Option<String>>::deserialize(deserializer)?;
-    if let Some(ref s) = os {
-        is_valid_string(s)?;
-        Ok(os)
-    } else {
-        Ok(os)
-    }
-}
-fn de_optlink<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Option<String>, D::Error> {
-    let os = <Option<String>>::deserialize(deserializer)?;
-    if let Some(ref s) = os {
-        is_valid_string(s)?;
-        is_valid_link(s)?;
-    }
-    Ok(os)
-}
-
-fn de_vecstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Vec<String>, D::Error> {
-    let v = <Vec<String>>::deserialize(deserializer)?;
-    for s in &v {
-        is_valid_string(s)?;
-    }
-    Ok(v)
-}
-fn de_veclinks<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Vec<String>, D::Error> {
-    let v = <Vec<String>>::deserialize(deserializer)?;
-    for s in &v {
-        is_valid_string(s)?;
-        is_valid_link(s)?;
-    }
-    Ok(v)
-}
-
 /// Helper Trait that allows me to compare objects (vorgang, dokument, ...)
 /// that are stored and re-fetched with whatever precision where only the
 /// very very margins differ by a few nanosecs.
 /// Using this trait the thing can round its dates to a precision of 1 second
 /// We do not really need more
 pub trait RoundTimestamp: Clone {
+    #[must_use]
     fn with_round_timestamps(&self) -> Self;
 }
 
