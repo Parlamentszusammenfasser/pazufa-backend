@@ -30,7 +30,8 @@ pub(super) struct AuthApi;
 
 pub(super) fn router() -> OpenApiRouter<Arc<PazufaServer>> {
     OpenApiRouter::new()
-        .routes(routes!(auth_post, auth_delete))
+        .routes(routes!(auth_delete))
+        .routes(routes!(auth_post))
         .routes(routes!(auth_status,))
         .routes(routes!(auth_rotate,))
         .routes(routes!(auth_listing,))
@@ -266,8 +267,8 @@ mod test {
     use pazufa_backend_lib::api::auth::{self as libauth, Claims};
     use pazufa_backend_lib::api::{AuthListingGetResponse, DeleteResponse};
     use pazufa_backend_lib::db::auth::create_apikey;
-    use pazufa_models::params::HeaderParams;
     use pazufa_models::auth::{Argon2KeyGenerator, NoopKeyGenerator};
+    use pazufa_models::params::HeaderParams;
     use pazufa_models::params::{self, ApiKeyDelete, ListingQueryParams};
     use pazufa_models::{APIKey, APIScope, auth::APIKeyCreate};
     use sqlx::PgExecutor;

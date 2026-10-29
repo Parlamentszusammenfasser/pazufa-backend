@@ -1,11 +1,12 @@
 use crate::RoundTimestamp;
+use crate::constraint::{HexDigest, KeyedSet, Text};
+
 use crate::auth::{APIKey, APIKeyCreate, APIKeyGenerator};
 use crate::dokument::{
     Dokument, DokumentHash, DokumentOrApiId, HashWrapper, ZusammenfassungWrapper,
     Zusammenfassungstupel,
 };
 use crate::enumerations::{HashStrategy, Mime, Stationstyp};
-use crate::is_valid_string;
 use crate::misc::{Autor, Gremium};
 use crate::params::KalGetQueryParams;
 use crate::sitzung::{Sitzung, Top};
@@ -52,6 +53,120 @@ impl<'de, T: APIKeyGenerator> Deserialize<'de> for APIKey<T> {
         Ok(out)
     }
 }
+
+impl<'de> Deserialize<'de> for Vorgang {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let unchecked = Self::deserialize(deserializer)?;
+        // check that no two stations have the exact same zp_start, rounded
+        let unchecked = unchecked.with_round_timestamps();
+        let mut fails = vec![];
+        for i in 0..unchecked.stationen.len() {
+            #[allow(
+                clippy::arithmetic_side_effects,
+                reason = "cannot be larger than .len()"
+            )]
+            for j in (i + 1)..unchecked.stationen.len() {
+                let s1 = &unchecked.stationen[i];
+                let s2 = &unchecked.stationen[j];
+                if s1.typ != s2.typ
+                    && s1.zp_start == s2.zp_start
+                    && s1.meta_tiebreaker == s2.meta_tiebreaker
+                {
+                    fails.push(format!(
+                        "({}/{}) and ({}/{})",
+                        unchecked.stationen[i].typ,
+                        unchecked.stationen[i].zp_start,
+                        unchecked.stationen[j].typ,
+                        unchecked.stationen[j].zp_start,
+                    ));
+                }
+                if let Some(a) = s1.api_id
+                    && let Some(b) = s2.api_id
+                    && a == b
+                {
+                    return Err(de::Error::custom(format!(
+                        "Two API IDs are equal for different stations in the input data: {a}"
+                    )));
+                }
+            }
+        }
+        if fails.is_empty() {
+            Ok(unchecked)
+        } else {
+            Err(de::Error::custom(format!("Error: Some stations of different type have the exact same `zp_start` and `meta_tiebreaker` value.: {fails:?}\n
+            This is not allowed because this value is used for imposing a total order on the stations for track validation.
+                        Please modify these values to make clear which station comes first. For more details see https://codeberg.org/PaZuFa/pazufa-backend/issues/57.")))
+        }
+    }
+}
+impl Serialize for Vorgang {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Self::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Station {
+    // the trojanergefahr-constraint is skipped since the whole field is skipped.
+    // it will be ignored anyways in 0.2.4
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let unchecked = Station::deserialize(deserializer)?;
+        // custom validation: Dokumente should be objects at deserialization time
+        let api_ids: Vec<_> = unchecked
+            .dokumente
+            .iter()
+            .enumerate()
+            .filter_map(|(index, thing)| match thing {
+                DokumentOrApiId::ApiId(i) => Some((index, i)),
+                DokumentOrApiId::Dokument(_) => None,
+            })
+            .collect();
+        if !api_ids.is_empty() {
+            return Err(de::Error::custom(format!(
+                "Documents Cannot be api ids at upload time, only full objects. The following entries of station.dokumente were api ids(index, api_id): {api_ids:?}"
+            )));
+        }
+        // same for stellungnahmen
+        let api_ids: Vec<_> = unchecked
+            .stellungnahmen
+            .iter()
+            .enumerate()
+            .filter_map(|(index, thing)| match thing {
+                DokumentOrApiId::ApiId(i) => Some((index, i)),
+                DokumentOrApiId::Dokument(_) => None,
+            })
+            .collect();
+        if !api_ids.is_empty() {
+            return Err(de::Error::custom(format!(
+                "Stellungnahmen cannot be api ids at upload time, only full objects. The following entries of station.stellungnahmen were api ids(index, api_id): {api_ids:?}"
+            )));
+        }
+
+        // constraint: gremium_federf can only be SOME for parl-ausschber
+        if unchecked.gremium_federf.is_some() && unchecked.typ != Stationstyp::ParlAusschber {
+            return Err(de::Error::custom(
+                "gremium_federf only makes sense in stations of type parl-ausschber",
+            ));
+        }
+        Ok(unchecked)
+    }
+}
+impl Serialize for Station {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Station::serialize(self, serializer)
+    }
+}
 impl<'de> Deserialize<'de> for Dokument {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -76,6 +191,7 @@ impl Serialize for Dokument {
         Dokument::serialize(self, serializer)
     }
 }
+
 impl<'de> Deserialize<'de> for DokumentOrApiId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -128,43 +244,26 @@ impl<'de> Deserialize<'de> for HashWrapper {
                         "Hashes cannot be an empty list; At least one Hash is required for a complete Document",
                     ));
                 }
+                KeyedSet::validate(&hashlist).map_err(|e| {
+                    serde::de::Error::custom(format!("At most one hash per strategy: {e}"))
+                })?;
+                // DokumentHash.value was already checked by its field rule (HexDigest)
                 if hashlist.iter().all(|x| {
-                    (40usize..=64).contains(&x.value.len())
-                        && is_valid_string::<D::Error>(&x.value).is_ok()
-                        && x.value.chars().all(|c| c.is_ascii_hexdigit())
-                        && (x.strategy != HashStrategy::Sha256Text
-                            || matches!(x.mime, Mime::TextHtml | Mime::TextPlain))
+                    x.strategy != HashStrategy::Sha256Text
+                        || matches!(x.mime, Mime::TextHtml | Mime::TextPlain)
                 }) {
                     return Ok(Self::Future(hashlist));
                 }
                 return Err(serde::de::Error::custom(
-                    "Some Hash Value is not: 
-                - in the applicable length of hexadecimal chars: [40, 64]
-                - a valid string
-                - a string of hexadecimal characters
-                - or it failed the mime/hash sanity check",
+                    "Some Hash failed the mime/hash sanity check: sha256+text requires mime text/html or text/plain",
                 ));
             }
             Err(e) => hl_parsing_err = Some(e.to_string()),
         }
         match String::deserialize(value.clone()) {
             Ok(hash) => {
-                if !(40usize..=64).contains(&hash.len()) {
-                    return Err(serde::de::Error::custom(format!(
-                        "Legacy Hash of length {} is not in length range [40; 64]",
-                        hash.len()
-                    )));
-                }
-                if is_valid_string::<D::Error>(&hash).is_err() {
-                    return Err(serde::de::Error::custom(
-                        "Legacy Hash is not a valid string in our sense",
-                    ));
-                }
-                if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                    return Err(serde::de::Error::custom(
-                        "Legacy Hash must be a string of hexadecimal characters",
-                    ));
-                }
+                HexDigest::validate(&hash)
+                    .map_err(|e| serde::de::Error::custom(format!("Legacy Hash: {e}")))?;
                 return Ok(Self::Legacy(hash));
             }
             Err(e) => str_parsing_err = Some(e.to_string()),
@@ -201,12 +300,17 @@ impl<'de> Deserialize<'de> for ZusammenfassungWrapper {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         if let Ok(summ) = String::deserialize(value.clone()) {
-            is_valid_string(&summ)?;
+            Text::validate(&summ).map_err(serde::de::Error::custom)?;
             return Ok(Self::Legacy(summ));
         }
 
         match <Vec<Zusammenfassungstupel>>::deserialize(value.clone()) {
-            Ok(tupellist) => Ok(Self::Future(tupellist)),
+            Ok(tupellist) => {
+                KeyedSet::validate(&tupellist).map_err(|e| {
+                    serde::de::Error::custom(format!("At most one summary per typ: {e}"))
+                })?;
+                Ok(Self::Future(tupellist))
+            }
             Err(e) => Err(serde::de::Error::custom(format!(
                 "Unable to parse value either as String or Vec<Zusammenfassungstupel>.
                 Zusammenfassungstupel: Parsing Error:\n{e}"
@@ -223,59 +327,6 @@ impl Serialize for ZusammenfassungWrapper {
         Self::serialize(self, serializer)
     }
 }
-
-impl<'de> Deserialize<'de> for Gremium {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Gremium::deserialize(deserializer)?;
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Gremium {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Gremium::serialize(self, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Autor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Autor::deserialize(deserializer)?;
-        if let Some(lobbyreg) = &unchecked.lobbyregister {
-            if let Err(e) = axum::http::Uri::from_str(lobbyreg) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Autor {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Autor::serialize(self, serializer)
-    }
-}
-
 impl<'de> Deserialize<'de> for Sitzung {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -297,15 +348,9 @@ impl<'de> Deserialize<'de> for Sitzung {
                 "Documents Cannot be api ids at upload time, only full objects. The following entries of sitzung.dokumente were api ids(index, api_id): {api_ids:?}"
             )));
         }
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
+
+        // link format is checked by its field rule (Link)
+        Ok(unchecked)
     }
 }
 impl Serialize for Sitzung {
@@ -316,7 +361,6 @@ impl Serialize for Sitzung {
         Sitzung::serialize(self, serializer)
     }
 }
-
 impl<'de> Deserialize<'de> for Top {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -343,143 +387,6 @@ impl<'de> Deserialize<'de> for Top {
     }
 }
 impl Serialize for Top {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Station {
-    // the trojanergefahr-constraint is skipped since the whole field is skipped.
-    // it will be ignored anyways in 0.2.4
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Station::deserialize(deserializer)?;
-        // constraint additional_links.item(format = uri)
-        for link in &unchecked.additional_links {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                return Err(de::Error::custom(e.to_string()));
-            }
-        }
-        // custom validation: Dokumente should be objects at deserialization time
-        let api_ids: Vec<_> = unchecked
-            .dokumente
-            .iter()
-            .enumerate()
-            .filter_map(|(index, thing)| match thing {
-                DokumentOrApiId::ApiId(i) => Some((index, i)),
-                DokumentOrApiId::Dokument(_) => None,
-            })
-            .collect();
-        if !api_ids.is_empty() {
-            return Err(de::Error::custom(format!(
-                "Documents Cannot be api ids at upload time, only full objects. The following entries of station.dokumente were api ids(index, api_id): {api_ids:?}"
-            )));
-        }
-        // same for stellungnahmen
-        let api_ids: Vec<_> = unchecked
-            .dokumente
-            .iter()
-            .enumerate()
-            .filter_map(|(index, thing)| match thing {
-                DokumentOrApiId::ApiId(i) => Some((index, i)),
-                DokumentOrApiId::Dokument(_) => None,
-            })
-            .collect();
-        if !api_ids.is_empty() {
-            return Err(de::Error::custom(format!(
-                "Stellungnahmen cannot be api ids at upload time, only full objects. The following entries of station.stellungnahmen were api ids(index, api_id): {api_ids:?}"
-            )));
-        }
-
-        // constraint: gremium_federf can only be SOME for parl-ausschber
-        if unchecked.gremium_federf.is_some() && unchecked.typ != Stationstyp::ParlAusschber {
-            return Err(de::Error::custom(
-                "gremium_federf only makes sense in stations of type parl-ausschber",
-            ));
-        }
-
-        // constraint link(format=uri)
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Station {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Station::serialize(self, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Vorgang {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // constraint vorgang.links(format=uri)
-        for link in &unchecked.links {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                return Err(de::Error::custom(e.to_string()));
-            }
-        }
-        // check that no two stations have the exact same zp_start, rounded
-        let unchecked = unchecked.with_round_timestamps();
-        let mut fails = vec![];
-        for i in 0..unchecked.stationen.len() {
-            #[allow(
-                clippy::arithmetic_side_effects,
-                reason = "cannot be larger than .len()"
-            )]
-            for j in (i + 1)..unchecked.stationen.len() {
-                let s1 = &unchecked.stationen[i];
-                let s2 = &unchecked.stationen[j];
-                if s1.typ != s2.typ
-                    && s1.zp_start == s2.zp_start
-                    && s1.meta_tiebreaker == s2.meta_tiebreaker
-                {
-                    fails.push(format!(
-                        "({}/{}) and ({}/{})",
-                        unchecked.stationen[i].typ,
-                        unchecked.stationen[i].zp_start,
-                        unchecked.stationen[j].typ,
-                        unchecked.stationen[j].zp_start,
-                    ));
-                }
-                if let Some(a) = s1.api_id
-                    && let Some(b) = s2.api_id
-                    && a == b
-                {
-                    return Err(de::Error::custom(format!(
-                        "Two API IDs are equal for different stations in the input data: {a}"
-                    )));
-                }
-            }
-        }
-        if fails.is_empty() {
-            Ok(unchecked)
-        } else {
-            Err(de::Error::custom(format!("Error: Some stations of different type have the exact same `zp_start` and `meta_tiebreaker` value.: {fails:?}\n
-            This is not allowed because this value is used for imposing a total order on the stations for track validation.
-                        Please modify these values to make clear which station comes first. For more details see https://codeberg.org/PaZuFa/pazufa-backend/issues/57.")))
-        }
-    }
-}
-
-impl Serialize for Vorgang {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: ser::Serializer,
@@ -548,5 +455,56 @@ impl Serialize for KalGetQueryParams {
         S: ser::Serializer,
     {
         Self::serialize(self, serializer)
+    }
+}
+impl<'de> Deserialize<'de> for Gremium {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let unchecked = Gremium::deserialize(deserializer)?;
+        if let Some(link) = &unchecked.link {
+            if let Err(e) = axum::http::Uri::from_str(link) {
+                Err(de::Error::custom(e.to_string()))
+            } else {
+                Ok(unchecked)
+            }
+        } else {
+            Ok(unchecked)
+        }
+    }
+}
+impl Serialize for Gremium {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Gremium::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Autor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let unchecked = Autor::deserialize(deserializer)?;
+        if let Some(lobbyreg) = &unchecked.lobbyregister {
+            if let Err(e) = axum::http::Uri::from_str(lobbyreg) {
+                Err(de::Error::custom(e.to_string()))
+            } else {
+                Ok(unchecked)
+            }
+        } else {
+            Ok(unchecked)
+        }
+    }
+}
+impl Serialize for Autor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Autor::serialize(self, serializer)
     }
 }

@@ -56,10 +56,14 @@ async fn insert_stations_for_vg(
     server: &PazufaServer,
 ) -> Result<()> {
     let mut stat_ids = vec![];
+    tracing::debug!("Vorgang has {} stations", stationen.len());
+    let mut idx = 0usize;
     for stat in stationen {
-        stat_ids.push(insert_station(stat, id, scraper_id, collector_key, tx, server).await?);
+        let stat_dbid = insert_station(stat, id, scraper_id, collector_key, tx, server).await?;
+        tracing::debug!("Station {idx} inserted ({stat_dbid})");
+        idx = idx.saturating_add(1);
+        stat_ids.push(stat_dbid);
     }
-    tracing::debug!("station IDs to be inserted: {stat_ids:?}");
     sqlx::query!(
         "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
         SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid 
@@ -331,6 +335,7 @@ pub async fn insert_station(
 ) -> Result<i32> {
     // master insert
     let sapi = stat.api_id.unwrap_or(gen_identifier(scraper_id));
+    tracing::trace!("Station has api id {sapi}");
     let obj = "station";
     if sqlx::query!("SELECT 1 as id FROM station WHERE api_id = $1", sapi)
         .fetch_optional(&mut **tx)
@@ -381,6 +386,7 @@ pub async fn insert_station(
 
     // assoziierte dokumente
     let mut did = vec![];
+    tracing::trace!("Station has {} docs", stat.dokumente.len());
     for dokument in &stat.dokumente {
         did.push(
             super::dokument::insert_or_retrieve_dok(dokument, scraper_id, collector_key, tx, srv)
@@ -398,6 +404,7 @@ pub async fn insert_station(
 
     // stellungnahmen
     let mut doks = Vec::with_capacity(stat.stellungnahmen.len());
+    tracing::trace!("Station has {} stln", doks.len());
     for stln in &stat.stellungnahmen {
         doks.push(
             super::dokument::insert_or_retrieve_dok(stln, scraper_id, collector_key, tx, srv)

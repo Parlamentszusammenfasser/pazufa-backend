@@ -327,7 +327,7 @@ mod candid_test {
     use super::*;
     use crate::api::vorgang::vorgang_id_put;
     use crate::db::merge::MatchState;
-    use crate::utils::testing::generate::random::random_uuid;
+    use crate::utils::testing::generate::random;
     use crate::utils::testing::{TestSetup, generate};
     use chrono::DateTime;
     use pazufa_models::{self, params};
@@ -342,47 +342,54 @@ mod candid_test {
 
         #[cfg(feature = "track-validation")]
         let vgs: Vec<_> = vec![
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 1,
                 models::Vorgangstyp::BuEinspruchInibreg,
                 "IL",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 2,
                 models::Vorgangstyp::GgLandParl,
                 "RSILAZ",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 3,
                 models::Vorgangstyp::GgLandParl,
                 "ILAALJG",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 4,
                 models::Vorgangstyp::BuEinspruchInibreg,
                 "ILAAA",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
         ];
 
         for vg in &vgs {
             tracing::debug!("Vorgang: {}", vg.api_id);
-            for s in &vg.stationen {
-                tracing::debug!("Station api id: {}", s.api_id.expect(""));
-            }
         }
 
         #[cfg(not(feature = "track-validation"))]
         let vgs: Vec<_> = (1..5).map(generate::random::vorgang).collect();
+
+        // Without the api_id, vgs[0] can only be matched by a shared identifier.
+        // Whether a seed generates one depends on arbitrary's byte consumption, so pin it.
+        let mut vgs = vgs;
+        vgs[0].ids = vec![models::VgIdent {
+            id: "20/4711".to_owned(),
+            typ: "initdrucks".to_owned(),
+        }];
         // insert vorgang 1,2,3, ...
         for vg in &vgs {
             tracing::info!("Inserting {}", vg.api_id);
-            vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg)
-                .await
-                .expect("Failed ot get valid server respone when trying to push new Vorgang.");
+            let r = vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg).await;
+            assert!(
+                matches!(r, Ok(crate::api::PutResponse::Success)),
+                "{r:?}: {vg:?}"
+            );
         }
         let mut tx = srv
             .sqlx_db
@@ -417,7 +424,7 @@ mod candid_test {
                 .iter()
                 .cloned()
                 .map(|s| models::Station {
-                    api_id: Some(random_uuid(&mut rng)),
+                    api_id: Some(random::with_rng(&mut rng)),
                     ..s
                 })
                 .collect(),
@@ -446,7 +453,7 @@ mod candid_test {
             470,
             models::Vorgangstyp::BuEinspruchInibreg,
             "IL",
-            &srv.tracks.station_mapping,
+            &srv.tracks,
         );
         let vg_b = models::Vorgang {
             typ: models::Vorgangstyp::BuZustimmungInibreg,
@@ -469,7 +476,10 @@ mod candid_test {
             .await
             .expect("Starting a Transaction failed");
         let candidates = super::vorgang_merge_candidates(&vg_b, &mut *tx, srv).await;
-        assert!(matches!(candidates, Ok(MatchState::ExactlyOne(_))));
+        assert!(
+            matches!(candidates, Ok(MatchState::ExactlyOne(_))),
+            "with this vorgang: {vg_a:?}\n{vg_b:?}"
+        );
         setup.teardown().await;
     }
 
@@ -508,70 +518,60 @@ mod candid_test {
         let setup = TestSetup::new("test_dokument_candidates").await;
         let srv = &setup.server;
 
+        // The document all test_docs below are matched against.
+        // drucksnr is set explicitly, since matching by (typ, drucksnr, zp_referenz) needs it
+        // and whether a seed generates one depends on arbitrary's byte consumption.
+        let base_dok = models::Dokument {
+            drucksnr: Some("20/4711".to_string()),
+            ..random::seeded(0)
+        };
+
         #[cfg(feature = "track-validation")]
         let vgs = [
             models::Vorgang {
                 stationen: vec![models::Station {
                     dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
-                        generate::random::dokument(0),
+                        base_dok.clone(),
                     ))],
                     gremium: models::Gremium {
                         parlament: models::Parlament::Bt,
-                        ..generate::default_gremium()
+                        ..models::Gremium::default()
                     },
                     typ: models::Stationstyp::ParlInitiativ,
-                    ..generate::random::station(0)
+                    ..random::seeded(0)
                 }],
                 typ: models::Vorgangstyp::BuEinspruchInibreg,
-                ..generate::random::vorgang(0)
+                ..random::seeded(90)
             },
             generate::random::vorgang_with_stations(
-                1,
+                3,
                 models::Vorgangstyp::BuEinspruchInibreg,
                 "IL",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
             generate::random::vorgang_with_stations(
-                2,
+                6,
                 models::Vorgangstyp::GgLandParl,
                 "RSILAZ",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
             generate::random::vorgang_with_stations(
-                3,
+                27,
                 models::Vorgangstyp::GgLandParl,
                 "ILAALJG",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
             generate::random::vorgang_with_stations(
-                4,
+                99,
                 models::Vorgangstyp::BuEinspruchInibreg,
                 "ILAAA",
-                &srv.tracks.station_mapping,
+                &srv.tracks,
             ),
         ];
 
-        #[cfg(not(feature = "track-validation"))]
-        let vgs: Vec<_> = (1..5)
-            .map(generate::random::vorgang)
-            .chain(std::iter::once(models::Vorgang {
-                stationen: vec![models::Station {
-                    dokumente: vec![models::DokumentOrApiId::Dokument(
-                        generate::random::dokument(0),
-                    )],
-                    gremium: models::Gremium {
-                        parlament: models::Parlament::Bt,
-                        ..generate::default_gremium()
-                    },
-                    typ: models::Stationstyp::ParlInitiativ,
-                    ..generate::random::station(0)
-                }],
-                typ: models::Vorgangstyp::BuEinspruchInibreg,
-                ..generate::random::vorgang(0)
-            }))
-            .collect();
         // insert vorgang 1,2,3, ...
         for vg in &vgs {
+            tracing::debug!("vorgang {vg:?}");
             vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg)
                 .await
                 .expect("Failed to get valid server response when trying to push new Vorgang.");
@@ -592,7 +592,7 @@ mod candid_test {
                     .expect("Failed to parse datetime. Test broken.")
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
-                ..generate::random::dokument(0)
+                ..base_dok.clone()
             },
             // by hash
             models::Dokument {
@@ -602,7 +602,7 @@ mod candid_test {
                     .expect("Failed to parse datetime. Test broken.")
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
-                ..generate::random::dokument(0)
+                ..base_dok.clone()
             },
             // by typ, refts, drucksnr
             models::Dokument {
@@ -610,7 +610,7 @@ mod candid_test {
                 hash: models::dokument::HashWrapper::Legacy(
                     "918439184791824719184391847918247183919388".to_string(),
                 ),
-                ..generate::random::dokument(0)
+                ..base_dok.clone()
             },
         ];
         for (i, d) in test_docs.iter().enumerate() {
@@ -630,7 +630,7 @@ mod candid_test {
                 .expect("Failed to parse datetime. Test broken.")
                 .to_utc(),
             typ: models::Doktyp::Antwort,
-            ..generate::random::dokument(0)
+            ..base_dok.clone()
         };
         let r = dokument_merge_candidates(&fail, &mut *tx, srv)
             .await
