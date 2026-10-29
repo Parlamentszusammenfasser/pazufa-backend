@@ -638,7 +638,7 @@ pub(crate) async fn run_integration(
 #[cfg(test)]
 mod scenariotest {
     use crate::api::SortArrays;
-    use crate::utils::testing::{TestSetup, generate};
+    use crate::utils::testing::{TestSetup, generate, generate::random};
     use crate::{PazufaServer, Result, api::PaginationResponsePart, db::retrieve};
     use pazufa_models::{self as models, DokumentOrApiId};
     use uuid::Uuid;
@@ -864,7 +864,7 @@ mod scenariotest {
             id: "einzigartig und anders".to_string(),
             typ: "initdrucks".to_owned(),
         }];
-        vg_mod.initiatoren = vec![generate::random::autor(0)];
+        vg_mod.initiatoren = vec![random::seeded(0)];
 
         let mut vg_exp = vg.clone();
         vg_exp.links = []

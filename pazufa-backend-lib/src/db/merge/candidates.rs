@@ -327,7 +327,7 @@ mod candid_test {
     use super::*;
     use crate::api::vorgang::vorgang_id_put;
     use crate::db::merge::MatchState;
-    use crate::utils::testing::generate::random::random_uuid;
+    use crate::utils::testing::generate::random;
     use crate::utils::testing::{TestSetup, generate};
     use chrono::DateTime;
     use pazufa_models::{self, params};
@@ -342,25 +342,25 @@ mod candid_test {
 
         #[cfg(feature = "track-validation")]
         let vgs: Vec<_> = vec![
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 1,
                 models::Vorgangstyp::BuEinspruchInibreg,
                 "IL",
                 &srv.tracks.station_mapping,
             ),
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 2,
                 models::Vorgangstyp::GgLandParl,
                 "RSILAZ",
                 &srv.tracks.station_mapping,
             ),
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 3,
                 models::Vorgangstyp::GgLandParl,
                 "ILAALJG",
                 &srv.tracks.station_mapping,
             ),
-            generate::random::vorgang_with_stations(
+            random::vorgang_with_stations(
                 4,
                 models::Vorgangstyp::BuEinspruchInibreg,
                 "ILAAA",
@@ -417,7 +417,7 @@ mod candid_test {
                 .iter()
                 .cloned()
                 .map(|s| models::Station {
-                    api_id: Some(random_uuid(&mut rng)),
+                    api_id: Some(random::with_rng(&mut rng)),
                     ..s
                 })
                 .collect(),
@@ -512,18 +512,18 @@ mod candid_test {
         let vgs = [
             models::Vorgang {
                 stationen: vec![models::Station {
-                    dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(
-                        generate::random::dokument(0),
-                    ))],
+                    dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(random::seeded(
+                        0,
+                    )))],
                     gremium: models::Gremium {
                         parlament: models::Parlament::Bt,
-                        ..generate::default_gremium()
+                        ..models::Gremium::default()
                     },
                     typ: models::Stationstyp::ParlInitiativ,
-                    ..generate::random::station(0)
+                    ..random::seeded(0)
                 }],
                 typ: models::Vorgangstyp::BuEinspruchInibreg,
-                ..generate::random::vorgang(0)
+                ..random::seeded(0)
             },
             generate::random::vorgang_with_stations(
                 1,
@@ -561,13 +561,13 @@ mod candid_test {
                     )],
                     gremium: models::Gremium {
                         parlament: models::Parlament::Bt,
-                        ..generate::default_gremium()
+                        ..models::Gremium::default()()
                     },
                     typ: models::Stationstyp::ParlInitiativ,
-                    ..generate::random::station(0)
+                    ..random::seeded(0)
                 }],
                 typ: models::Vorgangstyp::BuEinspruchInibreg,
-                ..generate::random::vorgang(0)
+                ..random::seeded(0)
             }))
             .collect();
         // insert vorgang 1,2,3, ...
@@ -592,7 +592,7 @@ mod candid_test {
                     .expect("Failed to parse datetime. Test broken.")
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
-                ..generate::random::dokument(0)
+                ..random::seeded(0)
             },
             // by hash
             models::Dokument {
@@ -602,7 +602,7 @@ mod candid_test {
                     .expect("Failed to parse datetime. Test broken.")
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
-                ..generate::random::dokument(0)
+                ..random::seeded(0)
             },
             // by typ, refts, drucksnr
             models::Dokument {
@@ -610,7 +610,7 @@ mod candid_test {
                 hash: models::dokument::HashWrapper::Legacy(
                     "918439184791824719184391847918247183919388".to_string(),
                 ),
-                ..generate::random::dokument(0)
+                ..random::seeded(0)
             },
         ];
         for (i, d) in test_docs.iter().enumerate() {
@@ -630,7 +630,7 @@ mod candid_test {
                 .expect("Failed to parse datetime. Test broken.")
                 .to_utc(),
             typ: models::Doktyp::Antwort,
-            ..generate::random::dokument(0)
+            ..random::seeded(0)
         };
         let r = dokument_merge_candidates(&fail, &mut *tx, srv)
             .await

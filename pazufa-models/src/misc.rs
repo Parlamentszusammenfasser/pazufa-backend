@@ -78,6 +78,17 @@ impl std::fmt::Display for Gremium {
     }
 }
 
+impl Default for Gremium {
+    fn default() -> Self {
+        Self {
+            name: "DEFAULT".to_owned(),
+            link: None,
+            parlament: crate::Parlament::Bt,
+            wahlperiode: 27,
+        }
+    }
+}
+
 /// Person or organisation in some function. e.g.:
 /// - authors of a statement,
 /// - expert at a hearing,

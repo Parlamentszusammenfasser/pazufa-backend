@@ -316,7 +316,7 @@ mod sitzung_test {
     use crate::api::find_applicable_date_range;
     use crate::api::sitzung::get_sitzung_by_parameter;
     use crate::api::{GetSingleResponse, PutResponse, auth::Claims};
-    use crate::utils::testing::{TestSetup, generate};
+    use crate::utils::testing::{TestSetup, generate, generate::random};
     use chrono::Datelike;
     use pazufa_models::{self as models, APIScope, params};
     use tracing_test::traced_test;
@@ -561,7 +561,7 @@ mod sitzung_test {
     async fn test_session_modify_update() {
         let scenario = TestSetup::new("test_session_modify_update").await;
         let server = &scenario.server;
-        let sitzung = generate::random::sitzung(12);
+        let sitzung: models::Sitzung = random::seeded(12);
 
         // Test case: Input non-existing session
         let response = super::sid_put(

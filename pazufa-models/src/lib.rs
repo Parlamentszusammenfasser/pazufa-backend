@@ -14,7 +14,6 @@
     allow(clippy::unwrap_used, reason = "all is fair in love, war and testing")
 )]
 
-mod arbitrary;
 pub mod auth;
 pub mod dokument;
 pub mod enumerations;
