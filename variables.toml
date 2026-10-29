@@ -1,10 +1,12 @@
 # the variables that are to be set by set-version.py
 # these are used in various locations throughout the project
 [version]
+# this versions pazufa-backend-lib as well as pazufa-backend
 backend="0.3.5"
 elastic-companion="0.1.0"
 
 test-dockerfile="1.4.0"
+# this versions the spec itself, as well as pazufa-models
 openapi-spec="0.2.8"
 
 [dependency-version]

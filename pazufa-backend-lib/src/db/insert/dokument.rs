@@ -207,15 +207,18 @@ pub async fn insert_or_retrieve_dok(
 ) -> Result<i32> {
     match dr {
         models::DokumentOrApiId::Dokument(dok) => {
+            tracing::trace!("insert dok");
             Ok(insert_dokument(dok, scraper_id, collector_key, tx, srv).await?)
         }
-        models::DokumentOrApiId::ApiId(dapi_id) => Ok(sqlx::query!(
-            "SELECT id FROM dokument WHERE api_id = $1",
-            dapi_id
-        )
-        .map(|r| r.id)
-        .fetch_one(&mut **tx)
-        .await?),
+        models::DokumentOrApiId::ApiId(dapi_id) => {
+            tracing::trace!("retriv dok");
+            Ok(
+                sqlx::query!("SELECT id FROM dokument WHERE api_id = $1", dapi_id)
+                    .map(|r| r.id)
+                    .fetch_one(&mut **tx)
+                    .await?,
+            )
+        }
     }
 }
 

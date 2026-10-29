@@ -161,6 +161,7 @@ impl Tracks {
 mod test_regex {
     use super::*;
     use crate::utils::testing::generate;
+    use crate::utils::testing::generate::random;
     use tracing_test::traced_test;
 
     fn open_tracks() -> super::Tracks {
@@ -213,11 +214,11 @@ mod test_regex {
                             .into(),
                         gremium: gremium.clone(),
                         typ: *typ,
-                        ..generate::random::station(i)
+                        ..random::seeded(i)
                     }
                 })
                 .collect(),
-            ..generate::random::vorgang(1)
+            ..random::seeded(1)
         };
         let res = tracks.validate(&catastrophe);
         assert!(matches!(

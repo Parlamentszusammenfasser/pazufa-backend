@@ -1,10 +1,7 @@
-#!/usr/bin/python3
-
-from pathlib import Path
-
 import re
 import sys
 import tomllib
+from pathlib import Path
 
 # takes the variables in variables.toml and sets all affected files to the values
 # specified there. for example: Project version, API Spec version, ...
@@ -50,6 +47,11 @@ replace(
     "pazufa-backend-lib/src/utils/status.rs",
     r'pub const SPEC_VERSION: &str = "\d+\.\d+\.\d+";',
     f'pub const SPEC_VERSION: &str = "{spec_version}";',
+)
+replace(
+    "pazufa-models/Cargo.toml",
+    'version\\s*=\\s*"\\d+\\.\\d+\\.\\d+"\n',
+    f'version = "{spec_version}"\n',
 )
 
 # backend version
