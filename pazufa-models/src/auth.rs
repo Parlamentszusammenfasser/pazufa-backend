@@ -190,8 +190,7 @@ impl<T: APIKeyGenerator> TryFrom<String> for APIKey<T> {
             Err(Error::ValidationError {
                 field: "APIKey".to_owned(),
                 message: "Key Format invalid or checksum failed".to_owned(),
-            }
-            .into())
+            })
         }
     }
 }

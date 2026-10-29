@@ -1,3 +1,20 @@
+#![cfg_attr(
+    test,
+    allow(clippy::expect_used, reason = "all is fair in love, war and testing")
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::arithmetic_side_effects,
+        reason = "all is fair in love, war and testing"
+    )
+)]
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, reason = "all is fair in love, war and testing")
+)]
+
+mod arbitrary;
 pub mod auth;
 pub mod dokument;
 pub mod enumerations;
@@ -150,6 +167,7 @@ fn de_veclinks<'a, D: Deserializer<'a>>(deserializer: D) -> Result<Vec<String>, 
 /// Using this trait the thing can round its dates to a precision of 1 second
 /// We do not really need more
 pub trait RoundTimestamp: Clone {
+    #[must_use]
     fn with_round_timestamps(&self) -> Self;
 }
 

@@ -1,3 +1,4 @@
+use arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use utoipa::ToSchema;
@@ -20,7 +21,9 @@ macro_rules! string_enum_convenience {
         }
     };
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize, ToSchema,
+)]
 #[sqlx(type_name = "\"APIScope\"")]
 pub enum APIScope {
     #[sqlx(rename = "keyadder")]
@@ -34,7 +37,9 @@ pub enum APIScope {
     Collector,
 }
 /// Type of a Document
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum Doktyp {
     /// Pre-lawtext drafts. Mostly Eckpunktepapiere
     #[serde(rename = "eckpunktepapier")]
@@ -95,7 +100,9 @@ pub enum Doktyp {
 string_enum_convenience!(Doktyp);
 
 /// Enumeration of parliaments or similar bodies in germany
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum Parlament {
     #[serde(rename = "BT")]
     Bt,
@@ -193,7 +200,9 @@ impl Parlament {
 string_enum_convenience!(Parlament);
 
 /// The legislative Track we are on. Together with a parliament, this tells us about the possible stations that can occurr within
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum Vorgangstyp {
     #[serde(rename = "bu-einspruch-inibreg")]
     BuEinspruchInibreg,
@@ -234,7 +243,9 @@ string_enum_convenience!(Vorgangstyp);
 
 /// Substantive legislative steps, that a Vorgang can pass on its way to a law or rejection or similar endings.
 /// The categorisation pre/postparl is to a degree arbitrary, these are just identifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum Stationstyp {
     #[serde(rename = "preparl-regent")]
     PreparlRegent,
@@ -284,7 +295,7 @@ string_enum_convenience!(Stationstyp);
 /// Type of an identifier of a Vorgang. Can contain whatever a parliament uses to identify any complete process.
 /// Currently in existence: vorgnr, api-id, initdrucks, sonstig.
 /// If possible, please do not invent any type like `inids`, and use the ones in existence
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, ToSchema)]
+#[derive(Arbitrary, Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, ToSchema)]
 pub struct VgIdentTyp(pub String);
 impl std::convert::From<String> for VgIdentTyp {
     fn from(x: String) -> Self {
@@ -325,7 +336,9 @@ impl std::ops::DerefMut for VgIdentTyp {
 }
 
 /// Enumeration of values
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum EnumerationNames {
     #[serde(rename = "schlagworte")]
     Schlagworte,
@@ -344,7 +357,9 @@ pub enum EnumerationNames {
 string_enum_convenience!(EnumerationNames);
 
 /// Ressort, which the Vorgang is associated with. Usually the name of a ministry
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum Ressort {
     #[serde(rename = "Arbeit")]
     Arbeit,
@@ -418,7 +433,17 @@ string_enum_convenience!(Ressort);
 /// Sachgebiet / Themenbereich inspired by the  Parlamentsspiegel.
 /// Within the Parlamentsspiegel search this corresponds to the parameter `fqVSys`
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize_repr, Deserialize_repr, ToSchema,
+    Arbitrary,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize_repr,
+    Deserialize_repr,
+    ToSchema,
 )]
 #[repr(u16)]
 pub enum Sachgebiet {
@@ -610,7 +635,9 @@ impl From<Sachgebiet> for i32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 pub enum Mime {
     #[serde(rename = "application/json")]
     ApplicationJson,
@@ -624,7 +651,18 @@ pub enum Mime {
 string_enum_convenience!(Mime);
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema, Default,
+    Arbitrary,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    Default,
 )]
 pub enum HashStrategy {
     #[default]
@@ -638,7 +676,7 @@ pub enum HashStrategy {
 string_enum_convenience!(HashStrategy);
 
 /// Format of return of the documents. Defaults to pazufa
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, Default)]
+#[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub enum DokumentFormat {
     #[serde(rename = "ftm")]
     FTM,
