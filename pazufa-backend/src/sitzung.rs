@@ -10,8 +10,7 @@ use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, PutResponse, find_applicable_date_range,
 };
 use pazufa_backend_lib::db::retrieve;
-use pazufa_backend_lib::models;
-use pazufa_backend_lib::models::{APIScope, params};
+use pazufa_models::{self as models, APIScope, params};
 use std::sync::Arc;
 use tracing::warn;
 use utoipa::OpenApi;
@@ -222,8 +221,8 @@ mod test {
         TestClient, TestSetup, authtesting, rfc3339, seed_sitzungen, test_sitzung, tomorrow,
         yesterday,
     };
-    use pazufa_backend_lib::models::params::{self};
-    use pazufa_backend_lib::models::{self, APIScope};
+    use pazufa_models::params::{self};
+    use pazufa_models::{self, APIScope};
 
     use pazufa_backend_lib::api::PutResponse;
     use std::sync::Arc;
@@ -241,7 +240,7 @@ mod test {
                     api_id: uuid::Uuid::nil(),
                 }),
                 axum::extract::State(server),
-                axum::Json(pazufa_backend_lib::models::Sitzung::default()),
+                axum::Json(pazufa_models::Sitzung::default()),
             )
             .await
         };
@@ -290,9 +289,9 @@ mod test {
     async fn test_session_delete() {
         let mut scenario = TestSetup::new("test_session_delete").await;
         let server = Arc::new(scenario.server.take().expect("Expected a server value"));
-        let sitzung = pazufa_backend_lib::models::Sitzung {
+        let sitzung = pazufa_models::Sitzung {
             api_id: Some(uuid::uuid!("6142b111-f691-404d-aeff-521a7a530134")),
-            ..pazufa_backend_lib::models::Sitzung::default()
+            ..pazufa_models::Sitzung::default()
         };
 
         // Test case: Input non-existing session

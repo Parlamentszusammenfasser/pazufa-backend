@@ -1,6 +1,6 @@
 use crate::api::PaginationResponsePart;
-use pazufa_models::{APIScope, auth::APIKeyMetadata};
 use crate::{Result, models};
+use pazufa_models::{APIScope, auth::APIKeyMetadata};
 use sqlx::{PgExecutor, PgTransaction};
 
 /// Retrieves a full Metadata row for any API Key.

@@ -9,10 +9,9 @@ use pazufa_backend_lib::api::sitzung::{
 };
 use pazufa_backend_lib::api::{PutResponse, find_applicable_date_range};
 use pazufa_backend_lib::db::retrieve::SitzungFilterParameters;
-use pazufa_backend_lib::models;
-use pazufa_backend_lib::models::APIScope;
-use pazufa_backend_lib::models::params::{self, XScraperId};
-use pazufa_backend_lib::utils::header_params::HeaderParams;
+use pazufa_models::params::HeaderParams;
+use pazufa_models::params::{self, XScraperId};
+use pazufa_models::{self as models, APIScope};
 use std::sync::Arc;
 use tracing::{info, instrument, warn};
 use utoipa::OpenApi;
@@ -244,9 +243,9 @@ mod test {
         yesterday,
     };
     use chrono::Datelike;
-    use pazufa_backend_lib::models::params::{self, XScraperId};
-    use pazufa_backend_lib::models::{self, APIScope};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
+    use pazufa_models::params::{self, XScraperId};
+    use pazufa_models::{self, APIScope};
     use std::sync::Arc;
     use tracing_test::traced_test;
 
@@ -260,7 +259,7 @@ mod test {
                 api_key,
                 HeaderParams(XScraperId(uuid::Uuid::nil())),
                 axum::extract::Path(params::KalDatePutPathParams {
-                    parlament: pazufa_backend_lib::models::Parlament::Bt,
+                    parlament: pazufa_models::Parlament::Bt,
                     datum: chrono::Utc::now().date_naive(),
                 }),
                 axum::extract::State(server),

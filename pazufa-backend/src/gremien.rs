@@ -4,9 +4,7 @@ use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, ListingGetResponse, PutResponse, misc as libmisc, misc_auth as libmisca,
 };
-use pazufa_backend_lib::models;
-use pazufa_backend_lib::models::APIScope;
-use pazufa_backend_lib::models::params;
+use pazufa_models::{self as models, APIScope, params};
 use std::sync::Arc;
 use tracing::{error, warn};
 use utoipa::OpenApi;
@@ -115,8 +113,8 @@ async fn gremien_get(
 #[cfg(test)]
 mod test {
     use crate::testing::{TestSetup, authtesting};
-    use pazufa_backend_lib::models::APIScope;
-    use pazufa_backend_lib::models::{self, params};
+    use pazufa_models::APIScope;
+    use pazufa_models::{self, params};
     use std::sync::Arc;
 
     #[tokio::test]

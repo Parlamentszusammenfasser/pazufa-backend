@@ -3,11 +3,11 @@
     reason = "Database setup and taredown requires use of `sqlx::query` as those cannot be statically verified."
 )]
 use pazufa_backend_lib::api::auth::Claims;
-use pazufa_backend_lib::models::auth::Sha256KeyGenerator;
-use pazufa_backend_lib::models::params::XAPIKey;
-use pazufa_backend_lib::models::{APIKey, APIScope};
 use pazufa_backend_lib::utils::tracing::Logging;
 use pazufa_backend_lib::{Configuration, PazufaServer};
+use pazufa_models::auth::Sha256KeyGenerator;
+use pazufa_models::params::XAPIKey;
+use pazufa_models::{APIKey, APIScope};
 use sha256::digest;
 use sqlx::SqlSafeStr;
 use std::fmt::Debug;
@@ -323,8 +323,8 @@ impl Drop for TestClient {
 pub(crate) fn test_sitzung(
     termin: chrono::DateTime<chrono::Utc>,
     nummer: u16,
-) -> pazufa_backend_lib::models::Sitzung {
-    use pazufa_backend_lib::models;
+) -> pazufa_models::Sitzung {
+    use pazufa_models;
     models::Sitzung {
         titel: Some(format!("Testsitzung {nummer}")),
         termin,
@@ -345,7 +345,7 @@ pub(crate) fn test_sitzung(
 pub(crate) async fn seed_sitzungen(
     client: &TestClient,
     server: &PazufaServer,
-    sessions: &[pazufa_backend_lib::models::Sitzung],
+    sessions: &[pazufa_models::Sitzung],
 ) {
     let (collector_key, _, _) = gen_all_keylevels(server)
         .await

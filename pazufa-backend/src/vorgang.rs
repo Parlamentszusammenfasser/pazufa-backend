@@ -5,9 +5,9 @@ use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, ListingGetResponse, PutResponse, vorgang as libvg,
 };
-use pazufa_backend_lib::models::params::{IfModSince, VorgangGetQueryParams, XScraperId};
-use pazufa_backend_lib::models::{self, APIScope, params};
-use pazufa_backend_lib::utils::header_params::HeaderParams;
+use pazufa_models::params::HeaderParams;
+use pazufa_models::params::{IfModSince, VorgangGetQueryParams, XScraperId};
+use pazufa_models::{self as models, APIScope, params};
 use std::sync::Arc;
 use tracing::{info, warn};
 use utoipa::OpenApi;
@@ -295,10 +295,10 @@ mod test {
     use pazufa_backend_lib::PazufaServer;
     use pazufa_backend_lib::api::auth::Claims;
     use pazufa_backend_lib::api::{GetSingleResponse, PutResponse, vorgang as libvg};
-    use pazufa_backend_lib::models;
-    use pazufa_backend_lib::models::APIScope;
-    use pazufa_backend_lib::models::params::{self, XScraperId};
     use pazufa_backend_lib::utils::header_params::HeaderParams;
+    use pazufa_models;
+    use pazufa_models::APIScope;
+    use pazufa_models::params::{self, XScraperId};
     use std::sync::Arc;
 
     #[tokio::test]
