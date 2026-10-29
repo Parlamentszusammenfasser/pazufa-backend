@@ -295,10 +295,8 @@ mod test {
     use pazufa_backend_lib::PazufaServer;
     use pazufa_backend_lib::api::auth::Claims;
     use pazufa_backend_lib::api::{GetSingleResponse, PutResponse, vorgang as libvg};
-    use pazufa_backend_lib::utils::header_params::HeaderParams;
-    use pazufa_models;
-    use pazufa_models::APIScope;
-    use pazufa_models::params::{self, XScraperId};
+    use pazufa_models::params::{self, HeaderParams, XScraperId};
+    use pazufa_models::{self as models, APIScope};
     use std::sync::Arc;
 
     #[tokio::test]

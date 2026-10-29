@@ -872,7 +872,7 @@ mod test_authorisierte_sonstige {
     use crate::api::{ListingGetResponse, misc};
     use crate::db::merge::execute::run_integration;
     use crate::utils::testing::{TestSetup, generate};
-    use pazufa_models::{self, DokumentOrApiId, EnumerationNames, params};
+    use pazufa_models::{self as models, DokumentOrApiId, EnumerationNames, params};
     use tracing_test::traced_test;
 
     async fn insert_default_vorgang(server: &PazufaServer) {

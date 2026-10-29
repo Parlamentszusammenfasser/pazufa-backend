@@ -318,7 +318,7 @@ mod sitzung_test {
     use crate::api::{GetSingleResponse, PutResponse, auth::Claims};
     use crate::utils::testing::{TestSetup, generate};
     use chrono::Datelike;
-    use pazufa_models::{self, APIScope, params};
+    use pazufa_models::{self as models, APIScope, params};
     use tracing_test::traced_test;
     use uuid::Uuid;
 

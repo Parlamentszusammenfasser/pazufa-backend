@@ -640,7 +640,7 @@ mod scenariotest {
     use crate::api::SortArrays;
     use crate::utils::testing::{TestSetup, generate};
     use crate::{PazufaServer, Result, api::PaginationResponsePart, db::retrieve};
-    use pazufa_models::{self, DokumentOrApiId};
+    use pazufa_models::{self as models, DokumentOrApiId};
     use uuid::Uuid;
 
     struct Scenario {
@@ -747,12 +747,12 @@ mod scenariotest {
             let equality = self
                 .expected
                 .iter()
-                .map(crate::api::RoundTimestamp::with_round_timestamps)
+                .map(pazufa_models::RoundTimestamp::with_round_timestamps)
                 .collect::<Vec<_>>()
                 == db_vorgangs
                     .1
                     .iter()
-                    .map(crate::api::RoundTimestamp::with_round_timestamps)
+                    .map(pazufa_models::RoundTimestamp::with_round_timestamps)
                     .collect::<Vec<_>>();
             if !equality && !self.shouldfail {
                 let exp_content = self

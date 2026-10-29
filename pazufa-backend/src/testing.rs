@@ -324,7 +324,7 @@ pub(crate) fn test_sitzung(
     termin: chrono::DateTime<chrono::Utc>,
     nummer: u16,
 ) -> pazufa_models::Sitzung {
-    use pazufa_models;
+    use pazufa_models as models;
     models::Sitzung {
         titel: Some(format!("Testsitzung {nummer}")),
         termin,

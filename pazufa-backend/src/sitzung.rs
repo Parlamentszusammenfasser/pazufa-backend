@@ -221,10 +221,9 @@ mod test {
         TestClient, TestSetup, authtesting, rfc3339, seed_sitzungen, test_sitzung, tomorrow,
         yesterday,
     };
-    use pazufa_models::params::{self};
-    use pazufa_models::{self, APIScope};
-
     use pazufa_backend_lib::api::PutResponse;
+    use pazufa_models::params::{self};
+    use pazufa_models::{self as models, APIScope};
     use std::sync::Arc;
     use tracing_test::traced_test;
 

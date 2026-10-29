@@ -114,7 +114,7 @@ async fn enum_get(
 mod test {
     use crate::testing::{TestSetup, authtesting};
     use pazufa_models::APIScope;
-    use pazufa_models::{self, params};
+    use pazufa_models::{self as models, params};
     use std::sync::Arc;
 
     #[tokio::test]

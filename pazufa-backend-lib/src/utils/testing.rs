@@ -124,13 +124,12 @@ impl TestSetup {
 pub(crate) mod generate {
 
     use pazufa_models::{
-        self,
+        self as models,
         dokument::{HashWrapper, ZusammenfassungWrapper},
     };
 
     pub(crate) mod random {
-
-        use crate::models;
+        use pazufa_models as models;
         use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;

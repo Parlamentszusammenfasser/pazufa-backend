@@ -9,8 +9,7 @@ use pazufa_backend_lib::api::sitzung::{
 };
 use pazufa_backend_lib::api::{PutResponse, find_applicable_date_range};
 use pazufa_backend_lib::db::retrieve::SitzungFilterParameters;
-use pazufa_models::params::HeaderParams;
-use pazufa_models::params::{self, XScraperId};
+use pazufa_models::params::{self, HeaderParams, XScraperId};
 use pazufa_models::{self as models, APIScope};
 use std::sync::Arc;
 use tracing::{info, instrument, warn};
@@ -243,9 +242,8 @@ mod test {
         yesterday,
     };
     use chrono::Datelike;
-    use pazufa_backend_lib::utils::header_params::HeaderParams;
-    use pazufa_models::params::{self, XScraperId};
-    use pazufa_models::{self, APIScope};
+    use pazufa_models::params::{self, HeaderParams, XScraperId};
+    use pazufa_models::{self as models, APIScope};
     use std::sync::Arc;
     use tracing_test::traced_test;
 

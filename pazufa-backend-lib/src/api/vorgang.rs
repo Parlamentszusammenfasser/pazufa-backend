@@ -225,7 +225,7 @@ mod test_endpoints {
     use crate::api::{GetSingleResponse, ListingGetResponse, PutResponse};
     use crate::utils::testing::{TestSetup, generate};
     use chrono::Utc;
-    use pazufa_models::{self, params};
+    use pazufa_models::{self as models, params};
     use uuid::Uuid;
 
     // Procedure (Vorgang) tests
@@ -545,9 +545,9 @@ mod test_endpoints {
 
 #[cfg(test)]
 pub(crate) mod test_failed_irl_scenarios {
-    use crate::api::RoundTimestamp;
     use crate::utils::testing::{TestSetup, generate};
     use crate::{api, models};
+    use pazufa_models::RoundTimestamp;
     use pazufa_models::enumerations::{Ressort, Sachgebiet};
     use pazufa_models::params;
     use std::path::{Path, PathBuf};
