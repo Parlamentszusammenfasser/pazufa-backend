@@ -1,4 +1,4 @@
-use crate::{self as models, de_optlink, de_optstring, de_string};
+use crate::{self as models, de_datetime, de_optlink, de_optstring, de_string};
 use arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize, de, ser};
 use std::str::FromStr;
@@ -23,6 +23,7 @@ pub struct Sitzung {
     #[serde(deserialize_with = "de_optstring", default)]
     pub titel: Option<String>,
 
+    #[serde(deserialize_with = "de_datetime", default)]
     pub termin: chrono::DateTime<chrono::Utc>,
 
     pub gremium: models::Gremium,
@@ -89,6 +90,7 @@ impl<'de> Deserialize<'de> for Sitzung {
                 "Documents Cannot be api ids at upload time, only full objects. The following entries of sitzung.dokumente were api ids(index, api_id): {api_ids:?}"
             )));
         }
+
         if let Some(link) = &unchecked.link {
             if let Err(e) = axum::http::Uri::from_str(link) {
                 Err(de::Error::custom(e.to_string()))

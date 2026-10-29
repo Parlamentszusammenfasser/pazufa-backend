@@ -1,4 +1,7 @@
-use super::{de_full_text_string, de_hexstring, de_link, de_optstring, de_string, de_vecstring};
+use super::{
+    de_datetime, de_full_text_string, de_hexstring, de_link, de_optdatetime, de_optstring,
+    de_string, de_vecstring,
+};
 use crate::{
     self as models,
     enumerations::{HashStrategy, Mime},
@@ -175,13 +178,16 @@ pub struct Dokument {
     pub zusammenfassung: Option<ZusammenfassungWrapper>,
 
     /// Protocol of the session on 7.3., created on 8.3. *modified on 9.3*.
+    #[serde(deserialize_with = "de_datetime", default)]
     pub zp_modifiziert: chrono::DateTime<chrono::Utc>,
 
     /// Protocol of the *session on 7.3.*, created on 8.3. modified on 9.3.
+    #[serde(deserialize_with = "de_datetime", default)]
     pub zp_referenz: chrono::DateTime<chrono::Utc>,
 
     /// Protocol of the session on 7.3., *created on 8.3.* modified on 9.3.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "de_optdatetime", default)]
     pub zp_erstellt: Option<chrono::DateTime<chrono::Utc>>,
 
     #[schema(format = "uri")]

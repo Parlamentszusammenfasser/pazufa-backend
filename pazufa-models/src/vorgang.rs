@@ -1,4 +1,7 @@
-use super::{de_link, de_optlink, de_optstring, de_string, de_veclinks, de_vecstring};
+use super::{
+    de_datetime, de_link, de_optdatetime, de_optlink, de_optstring, de_string, de_veclinks,
+    de_vecstring,
+};
 use crate::{
     self as models, RoundTimestamp, Zusammenfassungstupel,
     enumerations::{Ressort, Sachgebiet},
@@ -93,10 +96,12 @@ pub struct Station {
     pub titel: Option<String>,
 
     /// Date of the first action within this station. i.e.: First session of a committee
+    #[serde(deserialize_with = "de_datetime", default)]
     pub zp_start: chrono::DateTime<chrono::Utc>,
 
     /// Date of the last relevant action within this station. i.e.: last session of a committee
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "de_optdatetime", default)]
     pub zp_modifiziert: Option<chrono::DateTime<chrono::Utc>>,
 
     pub gremium: models::Gremium,

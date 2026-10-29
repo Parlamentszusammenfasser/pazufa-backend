@@ -168,9 +168,12 @@ pub(crate) mod generate {
         where
             for<'a> T: Arbitrary<'a>,
         {
+            const SIZE: usize = 2048 * 2 * 2 * 2048;
             let size_hint = T::size_hint(20);
+            //let size = size_hint.1.unwrap_or(size_hint.0) * 8;
+            //let size = size.clamp(16, usize::MAX);
 
-            let mut random_data = vec![0u8; size_hint.1.unwrap_or(size_hint.0) * 8];
+            let mut random_data = vec![0u8; SIZE];
             rng.fill_bytes(&mut random_data);
             let unstructured = Unstructured::new(&random_data);
             T::arbitrary_take_rest(unstructured).unwrap_or_else(|e| {

@@ -114,6 +114,38 @@ fn de_hexstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::E
         ))
     }
 }
+fn is_valid_datetime<E: serde::de::Error>(dt: chrono::DateTime<chrono::Utc>) -> Result<(), E> {
+    let baseline_time = chrono::DateTime::parse_from_rfc3339("1900-01-01T00:00:00Z")
+        .map_err(|_| unreachable!())?
+        .to_utc();
+    let end_time = chrono::DateTime::parse_from_rfc3339("9999-01-01T00:00:00Z")
+        .map_err(|_| unreachable!())?
+        .to_utc();
+    if dt < baseline_time {
+        Err(de::Error::custom("DateTime is too early"))
+    } else if dt >= end_time {
+        Err(de::Error::custom("DateTime is too late"))
+    } else {
+        Ok(())
+    }
+}
+
+fn de_optdatetime<'a, D: Deserializer<'a>>(
+    deserializer: D,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, D::Error> {
+    let s = Option::<chrono::DateTime<chrono::Utc>>::deserialize(deserializer)?;
+    if let Some(s) = s {
+        is_valid_datetime(s)?;
+    }
+    Ok(s)
+}
+fn de_datetime<'a, D: Deserializer<'a>>(
+    deserializer: D,
+) -> Result<chrono::DateTime<chrono::Utc>, D::Error> {
+    let s = chrono::DateTime::<chrono::Utc>::deserialize(deserializer)?;
+    is_valid_datetime(s)?;
+    Ok(s)
+}
 fn de_string<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::Error> {
     let s = String::deserialize(deserializer)?;
     is_valid_string(&s)?;
