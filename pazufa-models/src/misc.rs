@@ -1,7 +1,8 @@
-use crate::{self as models, de_optlink, de_optstring, de_string};
+use crate::constraint::{Link, Text};
+use crate::{self as models};
 use arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, str::FromStr};
+use std::cmp::Ordering;
 use utoipa::ToSchema;
 
 #[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -12,13 +13,13 @@ pub struct TouchedByInner {
 
     /// Key hash of the scraper that touched the object
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring")]
+    #[serde(deserialize_with = "Text::de_opt")]
+    #[arbitrary(with = Text::arb_opt)]
     pub key: Option<String>,
 }
 
 /// A body in which decisions can be made: committees, plenary halls, cabinett, peoples, ...
 #[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(remote = "Self")]
 pub struct Gremium {
     pub parlament: models::Parlament,
 
@@ -26,37 +27,14 @@ pub struct Gremium {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_optlink", default)]
+    #[serde(deserialize_with = "Link::de_opt", default)]
+    #[arbitrary(with = Link::arb_opt)]
     pub link: Option<String>,
 
     /// Name of the body. 'plenum', 'regierung', 'volk' are reserved
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub name: String,
-}
-impl<'de> Deserialize<'de> for Gremium {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Gremium::deserialize(deserializer)?;
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Gremium {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Gremium::serialize(self, serializer)
-    }
 }
 
 impl std::fmt::Display for Gremium {
@@ -78,55 +56,43 @@ impl std::fmt::Display for Gremium {
     }
 }
 
+impl Default for Gremium {
+    fn default() -> Self {
+        Self {
+            name: "DEFAULT".to_owned(),
+            link: None,
+            parlament: crate::Parlament::Bt,
+            wahlperiode: 27,
+        }
+    }
+}
+
 /// Person or organisation in some function. e.g.:
 /// - authors of a statement,
 /// - expert at a hearing,
 /// - initiator of a Vorgang
 /// - authoring organisations of documents
 #[derive(Arbitrary, Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(remote = "Self")]
 pub struct Autor {
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "Text::de_opt", default)]
+    #[arbitrary(with = Text::arb_opt)]
     pub person: Option<String>,
 
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub organisation: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "Text::de_opt", default)]
+    #[arbitrary(with = Text::arb_opt)]
     pub fachgebiet: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "Link::de_opt", default)]
+    #[arbitrary(with = Link::arb_opt)]
     pub lobbyregister: Option<String>,
-}
-use serde::{de, ser};
-impl<'de> Deserialize<'de> for Autor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Autor::deserialize(deserializer)?;
-        if let Some(lobbyreg) = &unchecked.lobbyregister {
-            if let Err(e) = axum::http::Uri::from_str(lobbyreg) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Autor {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Autor::serialize(self, serializer)
-    }
 }
 
 impl std::fmt::Display for Autor {

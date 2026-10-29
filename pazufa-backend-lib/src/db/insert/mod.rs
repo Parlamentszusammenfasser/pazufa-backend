@@ -20,7 +20,7 @@ pub(crate) async fn insert_or_retrieve_gremium(
     let gid: Option<i32> = sqlx::query_scalar!(
         "SELECT g.id FROM gremium g, parlament p WHERE
         g.name = $1 AND 
-        p.id = g.parl AND  p.value = $2
+        p.id = g.parl AND p.value = $2
         AND g.wp = $3",
         gr.name,
         gr.parlament.to_string(),
@@ -82,21 +82,22 @@ pub(crate) async fn insert_or_retrieve_autor(
     at: &models::Autor,
     tx: &mut PgTransaction<'_>,
 ) -> Result<i32> {
+    tracing::trace!("ior_autor: {at:?}");
     let eid = sqlx::query!(
-        "SELECT a.id FROM autor a WHERE 
-        ((a.person IS NULL AND $1::text IS NULL) OR a.person = $1) AND 
-        ((a.organisation IS NULL AND $2::text IS NULL) OR a.organisation = $2) AND 
-        ((a.fachgebiet IS NULL AND $3::text IS NULL) OR a.fachgebiet = $3)",
+        "SELECT a.id FROM autor a WHERE
+        ((a.person IS NULL          AND $1::text IS NULL) OR a.person = $1) AND
+        ((a.organisation IS NULL    AND $2::text IS NULL) OR a.organisation = $2)",
         at.person,
-        at.organisation,
-        at.fachgebiet
+        at.organisation
     )
     .map(|r| r.id)
     .fetch_optional(&mut **tx)
     .await?;
     if let Some(eid) = eid {
+        tracing::trace!("Autor found with db id: {eid}");
         return Ok(eid);
     }
+    tracing::trace!("Autor not found");
 
     let similarity = sqlx::query!(
         r#"

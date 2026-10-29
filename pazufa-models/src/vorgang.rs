@@ -1,56 +1,45 @@
-use super::{de_link, de_optlink, de_optstring, de_string, de_veclinks, de_vecstring};
+use crate::constraint::{KeyedSet, Link, Set, SetKey, Text, Timestamp};
 use crate::{
-    self as models, RoundTimestamp, Zusammenfassungstupel,
+    self as models, Zusammenfassungstupel,
     enumerations::{Ressort, Sachgebiet},
 };
 use arbitrary::Arbitrary;
-use serde::{Deserialize, Serialize, de, ser};
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Entry of the Bundestagslobbyregister for a specific Vorgang
 #[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(remote = "Self")]
 pub struct Lobbyregistereintrag {
     pub organisation: models::Autor,
 
     /// Internal ID within the register, necessary to build a url for it
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub interne_id: String,
 
     /// Subject and reason for influencing the legislative process
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub intention: String,
 
     /// direct link to the entry
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_link")]
+    #[serde(deserialize_with = "Link::de")]
+    #[arbitrary(with = Link::arb)]
     pub link: String,
 
     /// Array with associated Drucksachennummern.
     /// Is not crossreferenced in the database and just added as dataset
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub betroffene_drucksachen: Vec<String>,
 }
-impl<'de> Deserialize<'de> for Lobbyregistereintrag {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // constraint link(format=uri)
-        if let Err(e) = axum::http::Uri::from_str(&unchecked.link) {
-            Err(de::Error::custom(e.to_string()))
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Lobbyregistereintrag {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
+
+/// The database allows only one entry per organisation and Vorgang
+impl SetKey for Lobbyregistereintrag {
+    type Key = models::Autor;
+    fn key(&self) -> &models::Autor {
+        &self.organisation
     }
 }
 
@@ -85,18 +74,24 @@ pub struct Station {
 
     /// list of scraper uuids / key database ids that have touched this object
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     /// optional title, if other data does not provide a proper description
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "Text::de_opt", default)]
+    #[arbitrary(with = Text::arb_opt)]
     pub titel: Option<String>,
 
     /// Date of the first action within this station. i.e.: First session of a committee
+    #[serde(deserialize_with = "Timestamp::de", default)]
+    #[arbitrary(with = Timestamp::arb)]
     pub zp_start: chrono::DateTime<chrono::Utc>,
 
     /// Date of the last relevant action within this station. i.e.: last session of a committee
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "Timestamp::de_opt", default)]
+    #[arbitrary(with = Timestamp::arb_opt)]
     pub zp_modifiziert: Option<chrono::DateTime<chrono::Utc>>,
 
     pub gremium: models::Gremium,
@@ -108,7 +103,8 @@ pub struct Station {
     /// Link to a web page describing this station in more detail, NOT to a pdf document
     #[schema(format = "uri")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optlink", default)]
+    #[serde(deserialize_with = "Link::de_opt", default)]
+    #[arbitrary(with = Link::arb_opt)]
     pub link: Option<String>,
 
     pub typ: models::Stationstyp,
@@ -116,18 +112,22 @@ pub struct Station {
     /// Currently unused. Always set to null
     #[serde(skip)]
     #[schema(minimum = 1, maximum = 10)]
+    #[arbitrary(default)]
     pub trojanergefahr: Option<u8>,
 
     /// DEPRECATED: This has been moved to the Vorgang level.
     /// Please do not submit any data here, it will be merged as Vorgangs-Schlagworte
     /// For details, see <https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues/54>
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
-    #[serde(deserialize_with = "de_vecstring")]
+    #[serde(deserialize_with = "Text::de_vec")]
+    #[arbitrary(with = Text::arb_vec)]
     pub schlagworte: Vec<String>,
 
     /// Documents that make up the Station or are associated with it.
     /// NOTE: At upload time, only complete documents are accepted;
     /// At download time, only the API IDs of the documents are passed down to the clients.
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub dokumente: Vec<models::DokumentOrApiId>,
 
     /// Further links to interesting infos for this station
@@ -136,11 +136,14 @@ pub struct Station {
         format = "uri",
         example = "https://example.com/video/of/plenary/session"
     )]
-    #[serde(deserialize_with = "de_veclinks")]
+    #[serde(deserialize_with = "Link::de_vec")]
+    #[arbitrary(with = Link::arb_vec)]
     pub additional_links: Vec<String>,
 
     /// List statement of interested parties
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub stellungnahmen: Vec<models::DokumentOrApiId>,
 
     /// Tiebreaker for Station ordering other than `zp_start`.
@@ -149,79 +152,6 @@ pub struct Station {
     /// For more details, see <https://codeberg.org/PaZuFa/pazufa-backend/issues/57>
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_tiebreaker: Option<u16>,
-}
-impl<'de> Deserialize<'de> for Station {
-    // the trojanergefahr-constraint is skipped since the whole field is skipped.
-    // it will be ignored anyways in 0.2.4
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Station::deserialize(deserializer)?;
-        // constraint additional_links.item(format = uri)
-        for link in &unchecked.additional_links {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                return Err(de::Error::custom(e.to_string()));
-            }
-        }
-        // custom validation: Dokumente should be objects at deserialization time
-        let api_ids: Vec<_> = unchecked
-            .dokumente
-            .iter()
-            .enumerate()
-            .filter_map(|(index, thing)| match thing {
-                models::DokumentOrApiId::ApiId(i) => Some((index, i)),
-                models::DokumentOrApiId::Dokument(_) => None,
-            })
-            .collect();
-        if !api_ids.is_empty() {
-            return Err(de::Error::custom(format!(
-                "Documents Cannot be api ids at upload time, only full objects. The following entries of station.dokumente were api ids(index, api_id): {api_ids:?}"
-            )));
-        }
-        // same for stellungnahmen
-        let api_ids: Vec<_> = unchecked
-            .dokumente
-            .iter()
-            .enumerate()
-            .filter_map(|(index, thing)| match thing {
-                models::DokumentOrApiId::ApiId(i) => Some((index, i)),
-                models::DokumentOrApiId::Dokument(_) => None,
-            })
-            .collect();
-        if !api_ids.is_empty() {
-            return Err(de::Error::custom(format!(
-                "Stellungnahmen cannot be api ids at upload time, only full objects. The following entries of station.stellungnahmen were api ids(index, api_id): {api_ids:?}"
-            )));
-        }
-
-        // constraint: gremium_federf can only be SOME for parl-ausschber
-        if unchecked.gremium_federf.is_some() && unchecked.typ != models::Stationstyp::ParlAusschber
-        {
-            return Err(de::Error::custom(
-                "gremium_federf only makes sense in stations of type parl-ausschber",
-            ));
-        }
-
-        // constraint link(format=uri)
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Station {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Station::serialize(self, serializer)
-    }
 }
 impl std::fmt::Display for Station {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -255,10 +185,12 @@ impl std::fmt::Display for Station {
 /// Unique identifyer for a Vorgang within a parliament and election period: Vorgangsnummer, Initiativdrucksache, ...
 #[derive(Arbitrary, Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct VgIdent {
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub id: String,
 
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub typ: String,
 }
 
@@ -288,17 +220,20 @@ pub struct Vorgang {
     /// list of scraper uuids / key database ids that have touched this object
     /// ontrack(meta)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     /// Official Title of this Proceeding
     /// ontrack(-)
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub titel: String,
 
     /// A brief, layman-understandable title of this law
     /// ontrack(-)
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "Text::de_opt", default)]
+    #[arbitrary(with = Text::arb_opt)]
     pub kurztitel: Option<String>,
 
     /// number of the electoral period
@@ -317,37 +252,49 @@ pub struct Vorgang {
     /// Tuple of (typ, id)
     /// ontrack(-)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub ids: Vec<models::VgIdent>,
 
     /// Links that are associated with the Full Vorgang
     /// ontrack(refactor)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
     #[schema(format = "uri")]
-    #[serde(deserialize_with = "de_veclinks")]
+    #[serde(deserialize_with = "Link::de_vec")]
+    #[arbitrary(with = Link::arb_vec)]
     pub links: Vec<String>,
 
     /// List of persons or organisations, which initiated the Vorgang
     /// ontrack(refactor)
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub initiatoren: Vec<models::Autor>,
 
     /// List of stations, the core of what happens in one Proceeding
     /// ontrack(-)
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub stationen: Vec<models::Station>,
 
     /// Lobbyregister annotations from Bundestag sources
     /// ontrack(refactor)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "KeyedSet::de")]
+    #[arbitrary(with = KeyedSet::arb)]
     pub lobbyregister: Vec<models::Lobbyregistereintrag>,
 
     /// Sachgebiet information
     /// ontrack(at-least-one)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub sachgebiete: Vec<Sachgebiet>,
 
     /// General Vorgangs-Schlagworte
     /// ontrack(at-least-one)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
-    #[serde(deserialize_with = "de_vecstring")]
+    #[serde(deserialize_with = "Text::de_vec")]
+    #[arbitrary(with = Text::arb_vec)]
     pub schlagworte: Vec<String>,
 
     /// Ressort. Skipped if None
@@ -359,62 +306,9 @@ pub struct Vorgang {
     /// See parlamentszusammenfasser#55
     /// ontrack(at-least-one)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "KeyedSet::de")]
+    #[arbitrary(with = KeyedSet::arb)]
     pub zusammenfassung: Vec<Zusammenfassungstupel>,
-}
-
-impl<'de> Deserialize<'de> for Vorgang {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // constraint vorgang.links(format=uri)
-        for link in &unchecked.links {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                return Err(de::Error::custom(e.to_string()));
-            }
-        }
-        // check that no two stations have the exact same zp_start, rounded
-        let unchecked = unchecked.with_round_timestamps();
-        let mut fails = vec![];
-        for i in 0..unchecked.stationen.len() {
-            #[allow(
-                clippy::arithmetic_side_effects,
-                reason = "cannot be larger than .len()"
-            )]
-            for j in (i + 1)..unchecked.stationen.len() {
-                let s1 = &unchecked.stationen[i];
-                let s2 = &unchecked.stationen[j];
-                if s1.typ != s2.typ
-                    && s1.zp_start == s2.zp_start
-                    && s1.meta_tiebreaker == s2.meta_tiebreaker
-                {
-                    fails.push(format!(
-                        "({}/{}) and ({}/{})",
-                        unchecked.stationen[i].typ,
-                        unchecked.stationen[i].zp_start,
-                        unchecked.stationen[j].typ,
-                        unchecked.stationen[j].zp_start,
-                    ));
-                }
-                if let Some(a) = s1.api_id
-                    && let Some(b) = s2.api_id
-                    && a == b
-                {
-                    return Err(de::Error::custom(format!(
-                        "Two API IDs are equal for different stations in the input data: {a}"
-                    )));
-                }
-            }
-        }
-        if fails.is_empty() {
-            Ok(unchecked)
-        } else {
-            Err(de::Error::custom(format!("Error: Some stations of different type have the exact same `zp_start` and `meta_tiebreaker` value.: {fails:?}\n
-            This is not allowed because this value is used for imposing a total order on the stations for track validation.
-                        Please modify these values to make clear which station comes first. For more details see https://codeberg.org/PaZuFa/pazufa-backend/issues/57.")))
-        }
-    }
 }
 
 impl std::default::Default for Vorgang {
@@ -440,14 +334,6 @@ impl std::default::Default for Vorgang {
     }
 }
 
-impl Serialize for Vorgang {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
-}
 impl std::fmt::Display for Vorgang {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![

@@ -1,7 +1,7 @@
-use crate::{self as models, de_optlink, de_optstring, de_string};
+use crate::constraint::{Link, Set, Text, Timestamp};
+use crate::{self as models};
 use arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize, de, ser};
-use std::str::FromStr;
 use utoipa::ToSchema;
 
 /// plenary session, committee session or committee hearing.
@@ -16,13 +16,17 @@ pub struct Sitzung {
 
     /// list of scraper uuids / key database ids that have touched this object
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     /// Title if applicable
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optstring", default)]
+    #[serde(deserialize_with = "Text::de_opt", default)]
+    #[arbitrary(with = Text::arb_opt)]
     pub titel: Option<String>,
 
+    #[serde(deserialize_with = "Timestamp::de", default)]
+    #[arbitrary(with = Timestamp::arb)]
     pub termin: chrono::DateTime<chrono::Utc>,
 
     pub gremium: models::Gremium,
@@ -33,17 +37,24 @@ pub struct Sitzung {
 
     #[schema(format = "uri")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "de_optlink", default)]
+    #[serde(deserialize_with = "Link::de_opt", default)]
+    #[arbitrary(with = Link::arb_opt)]
     pub link: Option<String>,
 
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub tops: Vec<models::Top>,
 
     /// Announcements, agendas and changed/amended agendas
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub dokumente: Vec<models::DokumentOrApiId>,
 
     /// List of invited experts. if this is not null or empty, a session is a hearing.
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub experten: Vec<models::Autor>,
 }
 impl std::default::Default for Sitzung {
@@ -89,15 +100,9 @@ impl<'de> Deserialize<'de> for Sitzung {
                 "Documents Cannot be api ids at upload time, only full objects. The following entries of sitzung.dokumente were api ids(index, api_id): {api_ids:?}"
             )));
         }
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
+
+        // link format is checked by its field rule (Link)
+        Ok(unchecked)
     }
 }
 impl Serialize for Sitzung {
@@ -135,17 +140,22 @@ pub struct Top {
     /// number of this item on the agenda
     pub nummer: u16,
 
-    #[serde(deserialize_with = "de_string")]
+    #[serde(deserialize_with = "Text::de")]
+    #[arbitrary(with = Text::arb)]
     pub titel: String,
 
     /// api ids of associated Vorgang objects.
     /// Is ignored at upload time, but passed at download time.
     /// The matching happens via the documents supplied below
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(default)]
     pub vorgang_id: Vec<uuid::Uuid>,
 
     /// documents handled in this agenda item
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[serde(deserialize_with = "Set::de")]
+    #[arbitrary(with = Set::arb)]
     pub dokumente: Vec<models::DokumentOrApiId>,
 }
 
