@@ -14,6 +14,7 @@
     allow(clippy::unwrap_used, reason = "all is fair in love, war and testing")
 )]
 
+mod arbitrary;
 pub mod auth;
 pub mod dokument;
 pub mod enumerations;
@@ -115,7 +116,7 @@ fn de_hexstring<'a, D: Deserializer<'a>>(deserializer: D) -> Result<String, D::E
     }
 }
 fn is_valid_datetime<E: serde::de::Error>(dt: chrono::DateTime<chrono::Utc>) -> Result<(), E> {
-    let baseline_time = chrono::DateTime::parse_from_rfc3339("1900-01-01T00:00:00Z")
+    let baseline_time = chrono::DateTime::parse_from_rfc3339("0000-01-01T00:00:00Z")
         .map_err(|_| unreachable!())?
         .to_utc();
     let end_time = chrono::DateTime::parse_from_rfc3339("9999-01-01T00:00:00Z")

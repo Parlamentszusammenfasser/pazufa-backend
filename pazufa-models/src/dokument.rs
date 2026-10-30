@@ -147,6 +147,7 @@ pub struct Dokument {
 
     /// list of scraper uuids / key database ids that have touched this object
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,15 +180,18 @@ pub struct Dokument {
 
     /// Protocol of the session on 7.3., created on 8.3. *modified on 9.3*.
     #[serde(deserialize_with = "de_datetime", default)]
+    #[arbitrary(with=crate::arbitrary::arbitrary_datetime)]
     pub zp_modifiziert: chrono::DateTime<chrono::Utc>,
 
     /// Protocol of the *session on 7.3.*, created on 8.3. modified on 9.3.
     #[serde(deserialize_with = "de_datetime", default)]
+    #[arbitrary(with=crate::arbitrary::arbitrary_datetime)]
     pub zp_referenz: chrono::DateTime<chrono::Utc>,
 
     /// Protocol of the session on 7.3., *created on 8.3.* modified on 9.3.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "de_optdatetime", default)]
+    #[arbitrary(with=crate::arbitrary::arbitrary_optdatetime)]
     pub zp_erstellt: Option<chrono::DateTime<chrono::Utc>>,
 
     #[schema(format = "uri")]

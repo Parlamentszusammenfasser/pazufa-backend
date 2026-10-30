@@ -561,10 +561,7 @@ mod sitzung_test {
     async fn test_session_modify_update() {
         let scenario = TestSetup::new("test_session_modify_update").await;
         let server = &scenario.server;
-        let sitzung: models::Sitzung = models::Sitzung {
-            api_id: Some(uuid::uuid!("18186817-24c4-4582-9301-58d82c255ecf")),
-            ..random::seeded(10)
-        };
+        let sitzung: models::Sitzung = random::seeded(123);
 
         tracing::debug!("Session: {sitzung:?}");
         // Test case: Input non-existing session

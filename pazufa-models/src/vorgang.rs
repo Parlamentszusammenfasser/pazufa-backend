@@ -88,6 +88,7 @@ pub struct Station {
 
     /// list of scraper uuids / key database ids that have touched this object
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     /// optional title, if other data does not provide a proper description
@@ -97,11 +98,13 @@ pub struct Station {
 
     /// Date of the first action within this station. i.e.: First session of a committee
     #[serde(deserialize_with = "de_datetime", default)]
+    #[arbitrary(with=crate::arbitrary::arbitrary_datetime)]
     pub zp_start: chrono::DateTime<chrono::Utc>,
 
     /// Date of the last relevant action within this station. i.e.: last session of a committee
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "de_optdatetime", default)]
+    #[arbitrary(with=crate::arbitrary::arbitrary_optdatetime)]
     pub zp_modifiziert: Option<chrono::DateTime<chrono::Utc>>,
 
     pub gremium: models::Gremium,
@@ -121,6 +124,7 @@ pub struct Station {
     /// Currently unused. Always set to null
     #[serde(skip)]
     #[schema(minimum = 1, maximum = 10)]
+    #[arbitrary(default)]
     pub trojanergefahr: Option<u8>,
 
     /// DEPRECATED: This has been moved to the Vorgang level.
@@ -293,6 +297,7 @@ pub struct Vorgang {
     /// list of scraper uuids / key database ids that have touched this object
     /// ontrack(meta)
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     /// Official Title of this Proceeding

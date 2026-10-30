@@ -16,6 +16,7 @@ pub struct Sitzung {
 
     /// list of scraper uuids / key database ids that have touched this object
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub touched_by: Vec<models::TouchedByInner>,
 
     /// Title if applicable
@@ -24,6 +25,7 @@ pub struct Sitzung {
     pub titel: Option<String>,
 
     #[serde(deserialize_with = "de_datetime", default)]
+    #[arbitrary(with=crate::arbitrary::arbitrary_datetime)]
     pub termin: chrono::DateTime<chrono::Utc>,
 
     pub gremium: models::Gremium,
@@ -144,6 +146,7 @@ pub struct Top {
     /// Is ignored at upload time, but passed at download time.
     /// The matching happens via the documents supplied below
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Vec::new")]
+    #[arbitrary(default)]
     pub vorgang_id: Vec<uuid::Uuid>,
 
     /// documents handled in this agenda item

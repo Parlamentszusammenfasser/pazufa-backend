@@ -469,7 +469,10 @@ mod candid_test {
             .await
             .expect("Starting a Transaction failed");
         let candidates = super::vorgang_merge_candidates(&vg_b, &mut *tx, srv).await;
-        assert!(matches!(candidates, Ok(MatchState::ExactlyOne(_))));
+        assert!(
+            matches!(candidates, Ok(MatchState::ExactlyOne(_))),
+            "with this vorgang: {vg_a:?}\n{vg_b:?}"
+        );
         setup.teardown().await;
     }
 

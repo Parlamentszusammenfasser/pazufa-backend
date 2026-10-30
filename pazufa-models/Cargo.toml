@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 ammonia = "4.1.2"
-arbitrary = {version = "1", features = ["derive"]}
+arbitrary = { version = "1.5", features = ["derive"] }
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash", "std"] }
 axum = "0.8"
 
