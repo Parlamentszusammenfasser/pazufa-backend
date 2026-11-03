@@ -1,4 +1,5 @@
 pub mod auth;
+mod deserialization;
 pub mod dokument;
 pub mod enumerations;
 pub mod error;

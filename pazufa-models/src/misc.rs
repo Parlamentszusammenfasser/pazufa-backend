@@ -1,6 +1,6 @@
 use crate::{self as models, de_optlink, de_optstring, de_string};
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, str::FromStr};
+use std::cmp::Ordering;
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -31,31 +31,6 @@ pub struct Gremium {
     /// Name of the body. 'plenum', 'regierung', 'volk' are reserved
     #[serde(deserialize_with = "de_string")]
     pub name: String,
-}
-impl<'de> Deserialize<'de> for Gremium {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Gremium::deserialize(deserializer)?;
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Gremium {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Gremium::serialize(self, serializer)
-    }
 }
 
 impl std::fmt::Display for Gremium {
@@ -100,32 +75,6 @@ pub struct Autor {
     #[schema(format = "uri")]
     #[serde(deserialize_with = "de_optstring", default)]
     pub lobbyregister: Option<String>,
-}
-use serde::{de, ser};
-impl<'de> Deserialize<'de> for Autor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Autor::deserialize(deserializer)?;
-        if let Some(lobbyreg) = &unchecked.lobbyregister {
-            if let Err(e) = axum::http::Uri::from_str(lobbyreg) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Autor {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Autor::serialize(self, serializer)
-    }
 }
 
 impl std::fmt::Display for Autor {
