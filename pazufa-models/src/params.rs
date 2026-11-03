@@ -6,7 +6,7 @@ use axum::{
 };
 use chrono;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize, de, ser};
+use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid;
 
@@ -296,45 +296,6 @@ pub struct KalGetQueryParams {
     /// Number of items to return per page. Maximum value is capped at server-defined limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u32>,
-}
-impl<'de> Deserialize<'de> for KalGetQueryParams {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // constraint y(>1944)
-        if let Some(y) = unchecked.y
-            && y < 1945
-        {
-            return Err(de::Error::custom("Error: Year must be >= 1945".to_owned()));
-        }
-        // constraint dom(<31)
-        if let Some(m) = unchecked.m
-            && !(1..=12).contains(&m)
-        {
-            return Err(de::Error::custom(
-                "Error: Month must be between 1 and 12".to_owned(),
-            ));
-        }
-        // constraint m(1<=m<=12)
-        if let Some(dom) = unchecked.dom
-            && !(1..=31).contains(&dom)
-        {
-            return Err(de::Error::custom(
-                "Error: DoM must be in valid value range".to_owned(),
-            ));
-        }
-        Ok(unchecked)
-    }
-}
-impl Serialize for KalGetQueryParams {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
