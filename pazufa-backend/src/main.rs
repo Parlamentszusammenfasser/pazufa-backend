@@ -177,9 +177,7 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<()> {
     let key: APIKey<Argon2KeyGenerator> = APIKey::try_from(key.to_owned())?;
 
-    let salt = generate_salt();
-    let mut salt_bytes = vec![0; salt.len()];
-    let salt_bytes = salt.decode_b64(&mut salt_bytes)?;
+    let salt_bytes = generate_salt();
 
     tracing::info!("Master key of this session has keytag {}", key.keytag());
 
@@ -194,7 +192,7 @@ async fn initialize_master_key(key: &str, tx: &mut PgTransaction<'_>) -> Result<
             (SELECT id FROM hash_algorithm WHERE value = $4)
         )
         ON CONFLICT DO NOTHING;",
-        key.hash(salt.as_salt())?,
+        key.hash(&salt_bytes)?,
         salt_bytes,
         key.keytag(),
         key.hash_algorithm().to_string()

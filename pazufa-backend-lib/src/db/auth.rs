@@ -13,13 +13,11 @@ pub async fn create_apikey<'e, KeyGenerator: APIKeyGenerator, E: PgExecutor<'e>>
     keytag_prefix: Option<&str>,
     ex: E,
 ) -> Result<APIKey<KeyGenerator>> {
-    let salt = generate_salt();
-    let mut vec_data = vec![0; salt.len()];
-    let salt_bytes: Vec<_> = salt.decode_b64(&mut vec_data)?.into();
+    let salt_bytes = generate_salt();
     let keytag = generate_keytag(keytag_prefix);
 
     let key = APIKey::<KeyGenerator>::new(&keytag);
-    let hash = key.hash(salt.as_salt())?;
+    let hash = key.hash(&salt_bytes)?;
 
     sqlx::query!(
         "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag, algo)
