@@ -39,6 +39,19 @@ pub use misc::{Autor, Gremium, TouchedByInner};
 pub use sitzung::{Sitzung, Top};
 pub use vorgang::{Lobbyregistereintrag, Station, VgIdent, Vorgang};
 
+/// Lowercase hex representation of the SHA-256 digest of `data`.
+pub fn sha256_hex(data: impl AsRef<[u8]>) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    Sha256::digest(data)
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            // writing into a String cannot fail
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
+}
+
 use chrono::{DateTime, DurationRound, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -157,5 +170,20 @@ impl RoundTimestamp for Sitzung {
             termin: round_to_second(self.termin),
             ..self.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod sha256_test {
+    #[test]
+    fn known_vectors() {
+        assert_eq!(
+            super::sha256_hex(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            super::sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

@@ -324,7 +324,7 @@ impl APIKeyGenerator for Sha256KeyGenerator {
         let mut buf: Vec<_> = salt_buf.into();
         buf.extend_from_slice(password.key_material().as_bytes());
 
-        Ok(sha256::digest(buf))
+        Ok(crate::sha256_hex(buf))
     }
 
     fn generate(keytag: &[char; KEYTAG_LENGTH]) -> APIKey<Self> {
@@ -472,7 +472,7 @@ mod test {
         pub fn hash_secret(salt: &str, secret: &str, algo: HashAlgorithm) -> String {
             match algo {
                 HashAlgorithm::Sha256 => {
-                    sha256::digest(salt.chars().chain(secret.chars()).collect::<String>())
+                    crate::sha256_hex(salt.chars().chain(secret.chars()).collect::<String>())
                 }
                 HashAlgorithm::Argon2id => {
                     let argon2_params = argon2::Argon2::default();

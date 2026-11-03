@@ -79,7 +79,7 @@ where
                     return Ok(res);
                 }
             };
-            let etag = format!("\"{}\"", sha256::digest(bytes.as_ref()));
+            let etag = format!("\"{}\"", pazufa_models::sha256_hex(bytes.as_ref()));
             if let Ok(etag) = HeaderValue::from_str(&etag) {
                 parts.headers.insert(header::ETAG, etag);
             }
@@ -307,13 +307,13 @@ mod tests {
         assert_eq!(body, BODY);
         assert_eq!(
             etag(&res),
-            Some(format!("\"{}\"", sha256::digest(BODY)).as_str())
+            Some(format!("\"{}\"", pazufa_models::sha256_hex(BODY)).as_str())
         );
     }
 
     #[tokio::test]
     async fn test_etag_is_specific_to_content_coding() {
-        let plain = format!("\"{}\"", sha256::digest(BODY));
+        let plain = format!("\"{}\"", pazufa_models::sha256_hex(BODY));
         for coding in ["gzip", "br", "zstd", "deflate"] {
             let (res, _) = call(Method::GET, "/", &[("accept-encoding", coding)]).await;
             assert_eq!(
@@ -324,7 +324,7 @@ mod tests {
             );
             assert_eq!(
                 etag(&res),
-                Some(format!("\"{}-{coding}\"", sha256::digest(BODY)).as_str())
+                Some(format!("\"{}-{coding}\"", pazufa_models::sha256_hex(BODY)).as_str())
             );
 
             // the tag of another coding is not a match

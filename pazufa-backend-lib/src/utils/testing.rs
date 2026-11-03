@@ -8,7 +8,7 @@
 )]
 use crate::utils::tracing::Logging;
 use crate::{Configuration, PazufaServer};
-use sha256::digest;
+use pazufa_models::sha256_hex;
 use sqlx::SqlSafeStr;
 use std::sync::LazyLock;
 
@@ -77,7 +77,7 @@ impl TestSetup {
             .run(&pool)
             .await
             .expect("Failed to run migrations.");
-        let hash = digest("total-nutzloser-wert");
+        let hash = sha256_hex("total-nutzloser-wert");
         sqlx::query!(
             "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag, algo)
             VALUES

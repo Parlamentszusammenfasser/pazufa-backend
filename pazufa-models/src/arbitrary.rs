@@ -16,18 +16,18 @@ impl<'a> Arbitrary<'a> for DokumentHash {
             HashStrategy::Sha256Text => DokumentHash {
                 mime: crate::enumerations::Mime::TextHtml,
                 strategy,
-                value: sha256::digest(hash_input.to_string()),
+                value: crate::sha256_hex(hash_input.to_string()),
             },
             HashStrategy::Sha256Bytes => DokumentHash {
                 mime: Mime::ApplicationPdf,
                 strategy,
-                value: sha256::digest(hash_input.to_string()),
+                value: crate::sha256_hex(hash_input.to_string()),
             },
             HashStrategy::Sha1Bytes => DokumentHash {
                 mime: Mime::ApplicationPdf,
                 strategy,
                 // sha1 digests are 40 hex chars long
-                value: sha256::digest(hash_input.to_string())
+                value: crate::sha256_hex(hash_input.to_string())
                     .chars()
                     .take(40)
                     .collect(),

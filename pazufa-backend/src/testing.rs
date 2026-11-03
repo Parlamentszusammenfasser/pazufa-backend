@@ -7,8 +7,8 @@ use pazufa_backend_lib::utils::tracing::Logging;
 use pazufa_backend_lib::{Configuration, PazufaServer};
 use pazufa_models::auth::Sha256KeyGenerator;
 use pazufa_models::params::XAPIKey;
+use pazufa_models::sha256_hex;
 use pazufa_models::{APIKey, APIScope};
-use sha256::digest;
 use sqlx::SqlSafeStr;
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
@@ -78,7 +78,7 @@ impl TestSetup {
             .run(&pool)
             .await
             .expect("Failed to run migrations.");
-        let hash = digest("total-nutzloser-wert");
+        let hash = sha256_hex("total-nutzloser-wert");
         sqlx::query!(
             "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag, algo)
             VALUES
