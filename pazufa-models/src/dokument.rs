@@ -2,9 +2,8 @@ use super::{de_full_text_string, de_hexstring, de_link, de_optstring, de_string,
 use crate::{
     self as models,
     enumerations::{HashStrategy, Mime},
-    is_valid_string,
 };
-use serde::{Deserialize, Serialize, de, ser};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -235,30 +234,6 @@ impl std::default::Default for Dokument {
     }
 }
 
-impl<'de> Deserialize<'de> for Dokument {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Dokument::deserialize(deserializer)?;
-        if let Some(meinung) = &unchecked.meinung
-            && !(1..=5).contains(meinung)
-        {
-            return Err(de::Error::custom(
-                "dokument.meinung must be between 1 and 5",
-            ));
-        }
-        Ok(unchecked)
-    }
-}
-impl Serialize for Dokument {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Dokument::serialize(self, serializer)
-    }
-}
 impl std::fmt::Display for Dokument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
@@ -303,153 +278,6 @@ impl std::fmt::Display for Dokument {
             "{}",
             params.into_iter().flatten().collect::<Vec<_>>().join(",")
         )
-    }
-}
-impl<'de> Deserialize<'de> for DokumentOrApiId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if let Ok(api_id) = Uuid::deserialize(value.clone()) {
-            return Ok(Self::ApiId(api_id));
-        }
-        match Dokument::deserialize(value.clone()) {
-            Ok(d) => Ok(Self::Dokument(Box::new(d))),
-            Err(e) => Err(serde::de::Error::custom(format!(
-                "Unable to parse value either as document or as API ID
-Document Parsing Error:\n{e}"
-            ))),
-        }
-    }
-}
-impl Serialize for DokumentOrApiId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for HashWrapper {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-
-        #[allow(
-            unused,
-            reason = "I just want to keep these around to hold the parsing errors"
-        )]
-        let mut hl_parsing_err = None;
-        #[allow(
-            unused,
-            reason = "I just want to keep these around to hold the parsing errors"
-        )]
-        let mut str_parsing_err = None;
-
-        match <Vec<DokumentHash>>::deserialize(value.clone()) {
-            Ok(hashlist) => {
-                if hashlist.is_empty() {
-                    return Err(serde::de::Error::custom(
-                        "Hashes cannot be an empty list; At least one Hash is required for a complete Document",
-                    ));
-                }
-                if hashlist.iter().all(|x| {
-                    (40usize..=64).contains(&x.value.len())
-                        && is_valid_string::<D::Error>(&x.value).is_ok()
-                        && x.value.chars().all(|c| c.is_ascii_hexdigit())
-                        && (x.strategy != HashStrategy::Sha256Text
-                            || matches!(x.mime, Mime::TextHtml | Mime::TextPlain))
-                }) {
-                    return Ok(Self::Future(hashlist));
-                }
-                return Err(serde::de::Error::custom(
-                    "Some Hash Value is not: 
-                - in the applicable length of hexadecimal chars: [40, 64]
-                - a valid string
-                - a string of hexadecimal characters
-                - or it failed the mime/hash sanity check",
-                ));
-            }
-            Err(e) => hl_parsing_err = Some(e.to_string()),
-        }
-        match String::deserialize(value.clone()) {
-            Ok(hash) => {
-                if !(40usize..=64).contains(&hash.len()) {
-                    return Err(serde::de::Error::custom(format!(
-                        "Legacy Hash of length {} is not in length range [40; 64]",
-                        hash.len()
-                    )));
-                }
-                if is_valid_string::<D::Error>(&hash).is_err() {
-                    return Err(serde::de::Error::custom(
-                        "Legacy Hash is not a valid string in our sense",
-                    ));
-                }
-                if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                    return Err(serde::de::Error::custom(
-                        "Legacy Hash must be a string of hexadecimal characters",
-                    ));
-                }
-                return Ok(Self::Legacy(hash));
-            }
-            Err(e) => str_parsing_err = Some(e.to_string()),
-        }
-        if let Some(hl) = hl_parsing_err
-            && let Some(st) = str_parsing_err
-        {
-            Err(serde::de::Error::custom(format!(
-                "Unable to parse value either as String or HashList.
-                Hashlist Parsing Error: {hl}
-                String Parsing Error:   {st}"
-            )))
-        } else {
-            unreachable!(
-                "If Hash list and String deserialization failed, both error thingies should contain errors"
-            )
-        }
-    }
-}
-
-impl Serialize for HashWrapper {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ZusammenfassungWrapper {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if let Ok(summ) = String::deserialize(value.clone()) {
-            is_valid_string(&summ)?;
-            return Ok(Self::Legacy(summ));
-        }
-
-        match <Vec<Zusammenfassungstupel>>::deserialize(value.clone()) {
-            Ok(tupellist) => Ok(Self::Future(tupellist)),
-            Err(e) => Err(serde::de::Error::custom(format!(
-                "Unable to parse value either as String or Vec<Zusammenfassungstupel>.
-                Zusammenfassungstupel: Parsing Error:\n{e}"
-            ))),
-        }
-    }
-}
-
-impl Serialize for ZusammenfassungWrapper {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
     }
 }
 

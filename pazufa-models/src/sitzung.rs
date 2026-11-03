@@ -1,6 +1,5 @@
 use crate::{self as models, de_optlink, de_optstring, de_string};
-use serde::{Deserialize, Serialize, de, ser};
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// plenary session, committee session or committee hearing.
@@ -67,46 +66,6 @@ impl std::default::Default for Sitzung {
         }
     }
 }
-impl<'de> Deserialize<'de> for Sitzung {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Sitzung::deserialize(deserializer)?;
-        // custom validation: Dokumente should be objects at deserialization time
-        let api_ids: Vec<_> = unchecked
-            .dokumente
-            .iter()
-            .enumerate()
-            .filter_map(|(index, thing)| match thing {
-                models::DokumentOrApiId::ApiId(i) => Some((index, i)),
-                models::DokumentOrApiId::Dokument(_) => None,
-            })
-            .collect();
-        if !api_ids.is_empty() {
-            return Err(de::Error::custom(format!(
-                "Documents Cannot be api ids at upload time, only full objects. The following entries of sitzung.dokumente were api ids(index, api_id): {api_ids:?}"
-            )));
-        }
-        if let Some(link) = &unchecked.link {
-            if let Err(e) = axum::http::Uri::from_str(link) {
-                Err(de::Error::custom(e.to_string()))
-            } else {
-                Ok(unchecked)
-            }
-        } else {
-            Ok(unchecked)
-        }
-    }
-}
-impl Serialize for Sitzung {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Sitzung::serialize(self, serializer)
-    }
-}
 
 impl std::fmt::Display for Sitzung {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -162,39 +121,6 @@ impl std::fmt::Display for Top {
             "{}",
             params.into_iter().flatten().collect::<Vec<_>>().join(",")
         )
-    }
-}
-impl<'de> Deserialize<'de> for Top {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // custom validation: Dokumente should be objects at deserialization time
-        let api_ids: Vec<_> = unchecked
-            .dokumente
-            .iter()
-            .enumerate()
-            .filter_map(|(index, thing)| match thing {
-                models::DokumentOrApiId::ApiId(i) => Some((index, i)),
-                models::DokumentOrApiId::Dokument(_) => None,
-            })
-            .collect();
-        if api_ids.is_empty() {
-            Ok(unchecked)
-        } else {
-            Err(de::Error::custom(format!(
-                "Documents Cannot be api ids at upload time, only full objects. The following entries of top.dokumente were api ids(index, api_id): {api_ids:?}"
-            )))
-        }
-    }
-}
-impl Serialize for Top {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        Self::serialize(self, serializer)
     }
 }
 

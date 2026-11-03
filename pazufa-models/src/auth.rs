@@ -213,18 +213,6 @@ pub trait APIKeyGenerator: Sized {
 #[serde(remote = "Self")]
 pub struct APIKey<T>(String, PhantomData<T>);
 
-impl<'de, T: APIKeyGenerator> Deserialize<'de> for APIKey<T> {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = String::deserialize(deserializer)?;
-        let out = Self::try_from(unchecked)
-            .map_err(|e| serde::de::Error::custom(format!("Error deserializing: {e}")))?;
-        Ok(out)
-    }
-}
-
 impl<T: APIKeyGenerator> Display for APIKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -407,32 +395,6 @@ pub struct APIKeyCreate {
     /// random data. It is recommended to use this to later identify the keys more easily
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keytag_prefix: Option<String>,
-}
-impl<'de> Deserialize<'de> for APIKeyCreate {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let unchecked = Self::deserialize(deserializer)?;
-        // check that the max length of the keytag name is <= 10
-        if let Some(kt) = &unchecked.keytag_prefix
-            && kt.len() > 10
-        {
-            return Err(serde::de::Error::custom(
-                "Error: Supplied Keytag is too long (>10 ascii characters)",
-            ));
-        }
-        Ok(unchecked)
-    }
-}
-
-impl Serialize for APIKeyCreate {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        Self::serialize(self, serializer)
-    }
 }
 
 impl std::fmt::Display for APIScope {
