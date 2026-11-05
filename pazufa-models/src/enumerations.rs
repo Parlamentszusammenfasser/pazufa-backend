@@ -21,6 +21,11 @@ macro_rules! string_enum_convenience {
         }
     };
 }
+/// The three levels of authentication. They determine which of the access-controlled API endpoints
+/// are callable:
+/// - Collector can call PUT /api/v2/vorgang and PUT /api/v2/kalender/y/m/d
+/// - Admin can call everything admin-tagged, meaning no /api/v2/auth endpoints
+/// - Keyadder can Call everything
 #[derive(
     Arbitrary, Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize, ToSchema,
 )]
@@ -99,7 +104,7 @@ pub enum Doktyp {
 }
 string_enum_convenience!(Doktyp);
 
-/// Enumeration of parliaments or similar bodies in germany
+/// Enumeration of parliaments or similar bodies in germany. The naming adheres to ISO 3166-2:DE
 #[derive(
     Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
 )]
@@ -204,37 +209,56 @@ string_enum_convenience!(Parlament);
     Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
 )]
 pub enum Vorgangstyp {
+    /// Bundesgesetz, Einspruchsgesetz, Initiiert von der Bundesregierung
     #[serde(rename = "bu-einspruch-inibreg")]
     BuEinspruchInibreg,
+    /// Bundesgesetz, Einspruchsgesetz, Initiiert von der Bundesregierung, Haushaltsgesetz
     #[serde(rename = "bu-einspruch-inibreg-haushalt")]
     BuEinspruchInibregHaushalt,
+    /// Bundesgesetz, Zustimmungsgesetz, Initiiert von der Bundesregierung
     #[serde(rename = "bu-zustimmung-inibreg")]
     BuZustimmungInibreg,
+    /// Bundesgesetz, Zustimmungsgesetz, Initiiert von der Bundesregierung, Haushaltsgesetz
     #[serde(rename = "bu-zustimmung-inibreg-haushalt")]
     BuZustimmungInibregHaushalt,
+    /// Bundesgesetz, Einspruchsgesetz, Initiiert von der Bundesregierung, Internationaler Vertrag
     #[serde(rename = "bu-einspruch-inibreg-intvertrag")]
     BuEinspruchInibregIntvertrag,
+    /// Bundesgesetz, Zustimmungsgesetz, Initiiert von der Bundesregierung, Internationaler Vertrag
     #[serde(rename = "bu-zustimmung-inibreg-intvertrag")]
     BuZustimmungInibregIntvertrag,
+    /// Bundesgesetz, Einspruchsgesetz, Initiiert von Ländern oder aus der Mitte des Bundestags
     #[serde(rename = "bu-einspruch-inisonst")]
     BuEinspruchInisonst,
 
+    /// Bundesgesetz, Einspruchsgesetz, Initiiert von Ländern oder aus der Mitte des Bundestags,
+    /// Internationaler Vertrag
     #[serde(rename = "bu-einspruch-inisonst-intvertrag")]
     BuEinspruchInisonstIntvertrag,
+    /// Bundesgesetz, Zustimmungsgesetz, Initiiert von Ländern oder aus der Mitte des Bundestags
     #[serde(rename = "bu-zustimmung-inisonst")]
     BuZustimmungInisonst,
+    /// Bundesgesetz, Zustimmungsgesetz, Initiiert von Ländern oder aus der Mitte des Bundestags,
+    /// Internationaler Vertrag
     #[serde(rename = "bu-zustimmung-inisonst-intvertrag")]
     BuZustimmungInisonstIntvertrag,
+
+    /// Antrag der Bundesregierung zu einem Bundeswehreinsatz
     #[serde(rename = "bu-antrag-bweinsatz")]
     BuAntragBweinsatz,
+    /// Parlamentarisch initiierte Landesgesetzgebung
     #[serde(rename = "gg-land-parl")]
     GgLandParl,
+    /// Parlamentarisch initiierte Landesgesetzgebung, Haushaltsgesetz
     #[serde(rename = "gg-land-parl-haushalt")]
     GgLandParlHaushalt,
+    /// Volksgesetzgebung in den Ländern
     #[serde(rename = "gg-land-volk")]
     GgLandVolk,
+    /// Veraltet: Antrag auf Einsatz der Bundeswehr
     #[serde(rename = "bw-einsatz")]
     BwEinsatz,
+    /// Nicht bestimmt, sonstig
     #[serde(rename = "sonstig")]
     Sonstig,
 }
@@ -247,46 +271,69 @@ string_enum_convenience!(Vorgangstyp);
     Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
 )]
 pub enum Stationstyp {
+    /// Referentenentwurf in den Ministerien, schon als Gesetz formuliert, aber noch nicht
+    /// eingebracht
     #[serde(rename = "preparl-regent")]
     PreparlRegent,
+    /// Eckpunktepapier, Gesetzgebungs-Eckpunkte, noch keine Gesetzesformulierungen
     #[serde(rename = "preparl-eckpup")]
     PreparlEckpup,
+    /// Kabinettsbeschluss der Regierung; noch nicht im Parlament eingebracht
     #[serde(rename = "preparl-regbsl")]
     PreparlRegbsl,
+    /// Volksbegehren / Diskussionsentwurf
     #[serde(rename = "preparl-vbegde")]
     PreparlVbegde,
+
+    /// Formulierungsvorschlag der Regierung für die Fraktionen
     #[serde(rename = "preparl-formvs")]
     PreparlFormvs,
+    /// Parlamentarische Initiative
     #[serde(rename = "parl-initiativ")]
     ParlInitiativ,
+    /// Einbringung eines Antrags
     #[serde(rename = "parl-antragsst")]
     ParlAntragsst,
+    /// Anhörung in einem Ausschuss
     #[serde(rename = "parl-anhoerung")]
     ParlAnhoerung,
+    /// Ausschussberatung eines Ausschusses vor oder zwischen zwei Lesungen
     #[serde(rename = "parl-ausschber")]
     ParlAusschber,
+    /// Vollversammlung / Lesung im Plenum
     #[serde(rename = "parl-vollvlsgn")]
     ParlVollvlsgn,
+    /// Gesetzentwurf wurde angenommen
     #[serde(rename = "parl-akzeptanz")]
     ParlAkzeptanz,
+    /// Gesetzentwurf wurde abgelehnt
     #[serde(rename = "parl-ablehnung")]
     ParlAblehnung,
+    /// Gesetzentwurf wurde vom Initiator zurückgezogen
     #[serde(rename = "parl-zurueckgz")]
     ParlZurueckgz,
+    /// Gegenentwurf / Initiative der Regierung zu einem Volksbegehren
     #[serde(rename = "parl-ggentwurf")]
     ParlGgentwurf,
+    /// Vermittlungsausschuss wurde angerufen
     #[serde(rename = "parl-vermittas")]
     ParlVermittas,
+    /// Verfassungsgericht hat das Gesetz gestoppt
     #[serde(rename = "postparl-vgstp")]
     PostparlVgstp,
+    /// Volksentscheid, Ja
     #[serde(rename = "postparl-vesja")]
     PostparlVesja,
+    /// Volksentscheid, Nein
     #[serde(rename = "postparl-vesne")]
     PostparlVesne,
+    /// Veröffentlichung im Gesetzblatt
     #[serde(rename = "postparl-gsblt")]
     PostparlGsblt,
+    /// Inkrafttreten des Gesetzes
     #[serde(rename = "postparl-kraft")]
     PostparlKraft,
+    /// Unbestimmt
     #[serde(rename = "sonstig")]
     Sonstig,
 }
@@ -335,7 +382,7 @@ impl std::ops::DerefMut for VgIdentTyp {
     }
 }
 
-/// Enumeration of values
+/// Helper Enumeration to record which enumerations can be modified at runtime through API calls
 #[derive(
     Arbitrary, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
 )]
