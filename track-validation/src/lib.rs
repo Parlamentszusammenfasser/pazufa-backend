@@ -2,18 +2,44 @@
     test,
     allow(clippy::expect_used, reason = "no allowline in every single test mod")
 )]
+
+use std::error::Error;
+use std::fmt::Display;
+
 mod conflicts;
-mod matching;
 mod nfa;
 mod parser;
 
-use snafu::Snafu;
-
-#[derive(Debug, Snafu)]
+#[derive(Debug)]
 pub enum TrackValidationError {
-    IllegalExpression,
-    RxParsingError,
-    NotMatching,
+    UnknownCharacter(char, usize),
+    TooLong,
+    StarMisplaced,
+    PlusMisplaced,
+    QuestionMisplaced,
+    BraceMismatch,
+    BraceNotClosed,
+}
+
+impl Display for TrackValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BraceMismatch => write!(f, "Closing brace without previous open one"),
+            Self::BraceNotClosed => write!(f, "Opening brace without closing one"),
+            Self::UnknownCharacter(c, cidx) => {
+                write!(f, "Unknown Character: {c} at index {cidx}")
+            }
+            Self::QuestionMisplaced => write!(f, "Question Mark without previous expression"),
+            Self::PlusMisplaced => write!(f, "Plus without previous expression"),
+            Self::StarMisplaced => write!(f, "Kleene Star without previous expression"),
+            Self::TooLong => write!(f, "The regex is too long to pe parsed"),
+        }
+    }
+}
+impl Error for TrackValidationError {
+    fn cause(&self) -> Option<&dyn Error> {
+        None
+    }
 }
 
 pub struct Regex {
