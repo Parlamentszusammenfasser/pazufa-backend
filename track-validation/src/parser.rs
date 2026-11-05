@@ -1,6 +1,7 @@
 use crate::TrackValidationError;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::fmt::Display;
 use std::mem;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,8 +49,11 @@ impl Ord for Parser {
 
 impl Parser {
     pub fn new(rx: &[char]) -> Result<Self, TrackValidationError> {
-        if rx.len() == usize::MAX {
-            Err(TrackValidationError::RxParsingError)
+        let Ok(max_value) = usize::try_from(i64::MAX) else {
+            return Err(TrackValidationError::TooLong);
+        };
+        if rx.len() >= max_value {
+            Err(TrackValidationError::TooLong)
         } else {
             Self::parse_regex(rx)
         }
@@ -106,7 +110,7 @@ impl Parser {
                     if let Some(last_child) = child.pop() {
                         child.push(Parser::Star(last_child.into()));
                     } else {
-                        return Err(TrackValidationError::RxParsingError);
+                        return Err(TrackValidationError::StarMisplaced);
                     }
                 }
                 ('|', Parser::Conc(_)) => {
@@ -134,18 +138,18 @@ impl Parser {
                     if let Some(last_child) = child.pop() {
                         child.push(Parser::Choice(last_child.into(), Parser::Empty.into()));
                     } else {
-                        return Err(TrackValidationError::RxParsingError);
+                        return Err(TrackValidationError::QuestionMisplaced);
                     }
                 }
                 ('+', Parser::Conc(child)) => {
                     if let Some(last_child) = child.last() {
                         child.push(Parser::Star(Box::new(last_child.clone())));
                     } else {
-                        return Err(TrackValidationError::RxParsingError);
+                        return Err(TrackValidationError::PlusMisplaced);
                     }
                 }
-                _ => {
-                    return Err(TrackValidationError::RxParsingError);
+                (c, _) => {
+                    return Err(TrackValidationError::UnknownCharacter(c, ci));
                 }
             }
             ci += 1;
@@ -169,10 +173,10 @@ impl Parser {
     /// takes `(abc(de)fg(h))` and returns `abc(de)fg(h)`
     #[allow(
         clippy::arithmetic_side_effects,
-        reason = "brace_ident cannot exceed re.len()"
+        reason = "brace_ident cannot exceed i64::MAX"
     )]
     fn find_matching_brace(re: &[char]) -> Result<&[char], TrackValidationError> {
-        let mut brace_indent = 0;
+        let mut brace_indent: i64 = 0;
         for ci in 0..re.len() {
             match re[ci] {
                 '(' => brace_indent += 1,
@@ -181,12 +185,16 @@ impl Parser {
             }
             if brace_indent == 0 {
                 return Ok(&re[1..ci]);
+            } else if brace_indent < 0 {
+                return Err(TrackValidationError::BraceMismatch);
             }
         }
-        Ok(&re[1..re
-            .len()
-            .checked_sub(1)
-            .ok_or(TrackValidationError::RxParsingError)?])
+        if brace_indent != 0 {
+            Err(TrackValidationError::BraceNotClosed)
+        } else {
+            let upper_idx = re.len() - 1;
+            Ok(&re[1..upper_idx])
+        }
     }
     fn simplify(self) -> Self {
         match self {
@@ -248,16 +256,11 @@ impl Parser {
         }
     }
 
-    fn from_parts(mut parts: Vec<Parser>) -> Parser {
-        if parts.len() == 1 {
-            let Some(head) = parts.pop() else {
-                unreachable!()
-            };
-            head
-        } else if parts.is_empty() {
-            Self::Empty
-        } else {
-            Self::Conc(parts)
+    fn from_parts(parts: Vec<Parser>) -> Parser {
+        match <[Parser; 1]>::try_from(parts) {
+            Ok([head]) => head,
+            Err(thingy) if thingy.is_empty() => Self::Empty,
+            Err(thingy) => Self::Conc(thingy),
         }
     }
     fn canonicalize_choice(self) -> Parser {
@@ -376,6 +379,23 @@ impl Parser {
         }
 
         Self::from_parts(absorbed)
+    }
+    fn print(&self) -> String {
+        match self {
+            Self::Empty => String::new(),
+            Self::Lit(c) => c.to_string(),
+            Self::Star(rx) => match &**rx {
+                Self::Lit(x) => format!("{x}*"),
+                other => format!("({})*", other.print()),
+            },
+            Self::Conc(rx) => rx.iter().fold(String::new(), |a, b| format!("{a}{b}")),
+            Self::Choice(rxa, rxb) => format!("{}|{}", rxa.print(), rxb.print()),
+        }
+    }
+}
+impl Display for Parser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.print())
     }
 }
 

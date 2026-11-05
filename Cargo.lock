@@ -3044,7 +3044,6 @@ name = "track-validation"
 version = "0.2.0"
 dependencies = [
  "rand 0.10.3",
- "snafu",
  "tracing",
  "tracing-test",
 ]

@@ -48,7 +48,6 @@ impl Regex {
                 return s.into();
             }
 
-            // explanation: c (as in 'consumed') is the longest already matching substring
             for i in next_index..current.len() {
                 if i != 0 && into_char(current[i], map) == into_char(current[i - 1], map) {
                     continue;
