@@ -1,5 +1,5 @@
 use clap::Parser;
-use pazufa_backend_lib::db::validate;
+use pazufa_models::tracks::Tracks;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -21,7 +21,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
     let config = Config::parse();
-    let tracks = validate::Tracks::new(
+    let tracks = Tracks::new(
         config
             .tracks
             .to_str()

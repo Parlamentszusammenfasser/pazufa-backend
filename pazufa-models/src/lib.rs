@@ -14,6 +14,9 @@
     allow(clippy::unwrap_used, reason = "all is fair in love, war and testing")
 )]
 
+#[cfg(test)]
+mod generate;
+
 mod arbitrary;
 pub mod auth;
 mod constraint;
@@ -25,6 +28,7 @@ pub mod headers;
 pub mod misc;
 pub mod params;
 pub mod sitzung;
+pub mod tracks;
 pub mod vorgang;
 
 pub use auth::{APIKey, APIKeyGenerator, APIKeyMetadata, HashAlgorithm, KeyTag};

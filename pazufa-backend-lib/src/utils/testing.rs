@@ -130,6 +130,7 @@ pub(crate) mod generate {
     pub(crate) mod random {
         use arbitrary::{Arbitrary, Unstructured};
         use pazufa_models as models;
+        use pazufa_models::tracks::Tracks;
         use rand::Rng;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
@@ -144,7 +145,7 @@ pub(crate) mod generate {
             seed: u64,
             t: models::Vorgangstyp,
             stypes: &str,
-            tracks: &crate::db::validate::Tracks,
+            tracks: &Tracks,
         ) -> models::Vorgang {
             let map = &tracks.station_mapping;
             let parls: Vec<models::Parlament> = tracks

@@ -1,7 +1,7 @@
-#[cfg(feature = "track-validation")]
-use crate::db::validate::Tracks;
 use chrono::DateTime;
 use clap::crate_version;
+#[cfg(feature = "track-validation")]
+use pazufa_models::tracks::Tracks;
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::sync::RwLock;

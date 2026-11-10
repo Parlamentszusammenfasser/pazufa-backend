@@ -186,9 +186,8 @@ impl<T: APIKeyGenerator> TryFrom<String> for APIKey<T> {
         if key.is_format_valid() {
             Ok(key)
         } else {
-            Err(Error::ValidationError {
-                field: "APIKey".to_owned(),
-                message: "Key Format invalid or checksum failed".to_owned(),
+            Err(Error::AuthError {
+                error: "Key Format invalid or checksum failed".to_owned(),
             })
         }
     }

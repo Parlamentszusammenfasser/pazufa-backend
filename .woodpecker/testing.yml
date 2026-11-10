@@ -82,6 +82,7 @@ steps:
       # check that the spec is valid openapi/swagger
       - cargo run --bin pazufa-backend -- --dump-spec > openapi.json && /oapigen/openapi-generator-cli validate -i openapi.json
       - cp tracks.toml pazufa-backend-lib
+      - cp tracks.toml pazufa-models
       - cp tracks.toml pazufa-backend
       # 12 jobs are enough to currently not overwhelm the postgres connection pooling mechanism
       # if this scales up to more databases we might need to find a better way like pgbouncer

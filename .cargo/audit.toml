@@ -1,0 +1,4 @@
+[advisories]
+# this is an error in libsqlite, which we do not use, but which is in the 
+# theoretical dep graph of sqlx, and thus appears in Cargo.lock
+ignore = ["RUSTSEC-2026-0459"]

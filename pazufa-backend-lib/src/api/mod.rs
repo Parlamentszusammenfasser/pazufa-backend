@@ -1,12 +1,12 @@
 use crate::Configuration;
-#[cfg(feature = "track-validation")]
-use crate::db::validate::Tracks;
 use crate::utils::notify;
 use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{Datelike, NaiveDate};
+#[cfg(feature = "track-validation")]
+use pazufa_models::tracks::Tracks;
 use pazufa_models::{self as models, Dokument, FTMDokumentPages};
 use serde::Serialize;
 use std::collections::BTreeMap;

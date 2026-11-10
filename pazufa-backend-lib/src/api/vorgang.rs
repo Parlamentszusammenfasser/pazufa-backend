@@ -47,9 +47,9 @@ pub async fn vorgang_id_put(
         }
         Err(e) => match &e {
             PazufaError::Validation { source } => match &(**source) {
-                DataValidationError::MalformedVorgang { reason } => {
+                DataValidationError::PazufaModel { source } => {
                     tx.rollback().await?;
-                    Ok(PutResponse::BadReq(reason.clone()))
+                    Ok(PutResponse::BadReq(source.to_string()))
                 }
                 _ => Err(e),
             },

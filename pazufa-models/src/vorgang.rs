@@ -154,6 +154,7 @@ pub struct Station {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_tiebreaker: Option<u16>,
 }
+
 impl std::fmt::Display for Station {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let params: Vec<Option<String>> = vec![
