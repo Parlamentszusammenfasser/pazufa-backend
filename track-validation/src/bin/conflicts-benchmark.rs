@@ -76,7 +76,7 @@ fn main() {
         .collect();
 
     println!("Running");
-    let conflicts = rx.conflicting_stations(&stationen, &station_mapping, |s, m| m[&s.typ]);
+    let conflicts = rx.conflicting_elements(&stationen, |s| station_mapping[&s.typ]);
     println!(
         "Done: {:?}",
         conflicts.iter().map(|s| s.index).collect::<Vec<u32>>()

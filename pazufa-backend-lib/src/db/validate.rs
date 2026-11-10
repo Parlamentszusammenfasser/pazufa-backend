@@ -106,7 +106,7 @@ impl Tracks {
             tracing::trace!("{:?} matched like so: {:?}", p_substr, (matched, consumed));
             if !matched {
                 let conflicts: Vec<_> =
-                    regex.conflicting_stations(&p_subvec, &self.station_mapping, |s, m| m[&s.typ]);
+                    regex.conflicting_elements(&p_subvec, |s| self.station_mapping[&s.typ]);
                 let conflicts_str = conflicts.iter().fold("Conflicts:".to_owned(), |accu, s| {
                     format!("{accu}\n({} / {})", s.zp_start, s.typ)
                 });

@@ -3,7 +3,7 @@
     reason = "very confined and well reviewed"
 )]
 use crate::Regex;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 impl Regex {
     /// Does BFS for the longest substring (subarray) that satisfies the goal check
@@ -12,14 +12,13 @@ impl Regex {
     /// Example: `ABAABA` for Regex `A*BA*` could either be satisfied by removing the first or second "B":
     /// `AAABA` and `ABAAA` both are valid solutions for this.
     /// this function would return the first `B`
-    pub fn conflicting_stations<T: Sized + Clone + PartialEq, ST: Sized, F>(
+    pub fn conflicting_elements<T: Sized + Clone + PartialEq, F>(
         &self,
         s: &[T],
-        map: &BTreeMap<ST, char>,
         into_char: F,
     ) -> Vec<T>
     where
-        F: Fn(&T, &BTreeMap<ST, char>) -> char,
+        F: Fn(&T) -> char,
     {
         let mut frontier: VecDeque<(Vec<&T>, usize)> = VecDeque::new();
 
@@ -30,13 +29,10 @@ impl Regex {
                 "{}-{}, current: \n{:?}",
                 current.len(),
                 frontier.len(),
-                current
-                    .iter()
-                    .map(|&t| into_char(t, map))
-                    .collect::<String>()
+                current.iter().map(|&t| into_char(t)).collect::<String>()
             );
             // goal check
-            let chars: Vec<_> = current.iter().map(|&t| into_char(t, map)).collect();
+            let chars: Vec<_> = current.iter().map(|&t| into_char(t)).collect();
             let (b, c) = self.nfa.matches(&chars);
             tracing::trace!("matched to: {:?}", (b, c));
 
@@ -49,7 +45,7 @@ impl Regex {
             }
 
             for i in next_index..current.len() {
-                if i != 0 && into_char(current[i], map) == into_char(current[i - 1], map) {
+                if i != 0 && into_char(current[i]) == into_char(current[i - 1]) {
                     continue;
                 }
                 let mut subslice: Vec<&T> = current.clone();
@@ -125,7 +121,8 @@ mod test_regex {
             index: 0,
         }];
 
-        let csresult = rx.conflicting_stations(&stats, &station_mapping(), |s, m| m[&s.typ]);
+        let map = station_mapping();
+        let csresult = rx.conflicting_elements(&stats, |s| map[&s.typ]);
         assert_eq!(csresult.len(), 1, "{csresult:?}");
         assert_eq!(csresult[0], stats[0]);
     }

@@ -49,6 +49,23 @@ fn main() {
                     &input[..consumed],
                     &input[consumed..]
                 );
+                let enumerated_input: Vec<(usize, char)> = input.chars().enumerate().collect();
+                let conflicts = regex.conflicting_elements(&enumerated_input, |(_, c)| *c);
+                let mut conflicts: Vec<usize> = conflicts.iter().map(|(i, _)| *i).collect();
+                conflicts.sort();
+
+                let mut conflict_idx = 0;
+                let line_2: String = (0..input.len())
+                    .map(|idx| {
+                        if conflict_idx < conflicts.len() && conflicts[conflict_idx] == idx {
+                            conflict_idx += 1;
+                            '^'
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                println!("{input}\n{line_2}");
                 println!("{BACKEND_REJ}");
             } else {
                 println!(
