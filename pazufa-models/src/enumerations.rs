@@ -65,6 +65,9 @@ pub enum Doktyp {
     /// Answer to a Questioning
     #[serde(rename = "antwort")]
     Antwort,
+    /// Correction to a law text or other Documents
+    #[serde(rename = "berichtigung")]
+    Berichtigung,
     /// Some memo in the parliament
     #[serde(rename = "mitteilung")]
     Mitteilung,
@@ -255,6 +258,15 @@ pub enum Vorgangstyp {
     /// Volksgesetzgebung in den Ländern
     #[serde(rename = "gg-land-volk")]
     GgLandVolk,
+
+    /// Staatsverträge in den Ländern. Spezifisch für BY ein anderer Prozess
+    #[serde(rename = "gg-land-parl-staatsvertrag")]
+    GgLandParlStaatsvertrag,
+
+    /// Nachtragshaushalte in den Ländern. Spezifisch für SH ein anderer Prozess
+    #[serde(rename = "gg-land-parl-nachtragshaushalt")]
+    GgLandParlNachtragshaushalt,
+
     /// Veraltet: Antrag auf Einsatz der Bundeswehr
     #[serde(rename = "bw-einsatz")]
     BwEinsatz,

@@ -7,7 +7,7 @@ elastic-companion="0.1.0"
 
 test-dockerfile="1.4.0"
 # this versions the spec itself, as well as pazufa-models
-openapi-spec="0.2.8"
+openapi-spec="0.2.9"
 
 [dependency-version]
 rustc = "1.99"

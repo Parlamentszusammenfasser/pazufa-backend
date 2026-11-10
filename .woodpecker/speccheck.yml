@@ -2,9 +2,8 @@
 # are on a branch like: `spec/*`
 
 when:
-  - event: [pull_request]
-    branch: [develop]
-    ref: refs/heads/spec/*
+  - event: pull_request
+    evaluate: 'CI_COMMIT_SOURCE_BRANCH startsWith "spec/"'
 
 variables:
   - &rust_image pazufa/rust-woodpecker:1.4.0

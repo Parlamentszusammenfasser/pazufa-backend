@@ -58,7 +58,7 @@ mod openapi {
     #[derive(OpenApi)]
     #[openapi(
     info(
-        title= "LTZF API",
+        title= "Pazufa API",
         version = SPEC_VERSION,
         contact(email="info@pazufa.de"),
         license(name = "GPLv3", url = "https://www.gnu.org/licenses/gpl-3.0.en.html"),
