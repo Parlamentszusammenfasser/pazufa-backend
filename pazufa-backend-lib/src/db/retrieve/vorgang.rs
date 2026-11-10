@@ -15,6 +15,8 @@ pub struct VGGetParameters {
     pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
     pub wp: Option<i32>,
+    pub sg: Option<Sachgebiet>,
+    pub rt: Option<Ressort>,
     pub inipsn: Option<String>,
     pub iniorg: Option<String>,
     pub inifch: Option<String>,
@@ -105,13 +107,16 @@ pub async fn vorgang_fetch_dbids<'e, E: sqlx::PgExecutor<'e>>(
                     INNER JOIN gremium g ON g.id = s.gr_id
 			        INNER JOIN parlament on parlament.id = g.parl
                 ) AS ext_stat ON ext_stat.vg_id = vorgang.id
+            LEFT JOIN ressort rt           ON vorgang.ressort = rt.id
             WHERE TRUE
-            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
-            AND ($2::text IS NULL OR $2 = vt.value)
-            AND ($3::text IS NULL OR $3 = ext_stat.parl)
-			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person ILIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
-			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
-			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
+            AND  ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
+            AND  ($2::text IS NULL OR $2 = vt.value)
+            AND  ($3::text IS NULL OR $3 = ext_stat.parl)
+			AND  ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person ILIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
+			AND  ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  ILIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
+			AND  ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  ILIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
+            AND ($10::text IS NULL OR $10 = rt.value)
+            AND ($11::int4 IS NULL OR EXISTS(SELECT 1 FROM vg_sachgebiete sachgb INNER JOIN sachgebiet s ON s.id = sachgb.sg_id WHERE sachgb.vg_id = vorgang.id AND $11 = s.value))
         GROUP BY vorgang.id
         ORDER BY meta_last_modified 
         )
@@ -122,12 +127,15 @@ SELECT id FROM pre_table WHERE
 ($9::timestamptz IS NULL OR $9 >= max_start)
 
 ORDER BY pre_table.meta_last_modified ASC",
-filters.wp, filters.vgtyp.map(|x|x.to_string()),
+filters.wp,
+filters.vgtyp.map(|x|x.to_string()),
 filters.parlament.map(|p|p.to_string()),
 filters.inipsn, filters.iniorg, filters.inifch,
 filters.if_mod_since,
 filters.lower_date,
-filters.upper_date
+filters.upper_date,
+filters.rt.map(|x|x.to_string()),
+filters.sg.map(i32::from)
     )
     .fetch_all(exec).await?;
     Ok(vg_list)
@@ -198,9 +206,14 @@ pub async fn vorgang_by_id(
         ",
         id
     )
-    .map(|rec| Sachgebiet::from(rec.value))
+    .map(|rec| Sachgebiet::try_from(rec.value))
     .fetch_all(&mut **executor)
-    .await?;
+    .await?
+    .into_iter()
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|e| PazufaError::Other {
+        message: format!("unknown sachgebiet value from the database: {e}"),
+    })?;
 
     let links = sqlx::query!(
         "SELECT link FROM rel_vorgang_links WHERE vg_id = $1 ORDER BY link ASC",
@@ -501,6 +514,390 @@ mod test {
     };
     use pazufa_models::{DokumentOrApiId, params};
     use uuid::Uuid;
+
+    /// tests
+    /// `pub async fn vorgang_fetch_dbids<'e, E: sqlx::PgExecutor<'e>>(`
+    /// with all variants of failing and nonfailing inputs
+    #[tokio::test]
+    async fn filtering_vorgaenge() {
+        use super::{VGGetParameters, vorgang_dbid, vorgang_fetch_dbids};
+        use crate::api::PutResponse;
+        use pazufa_models::{
+            self as models,
+            dokument::HashWrapper,
+            enumerations::{Ressort, Sachgebiet},
+        };
+        use std::collections::HashSet;
+
+        fn ts(s: &str) -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .expect("static datetime")
+                .to_utc()
+        }
+        /// default Vorgang, made unique so it does not merge with its siblings
+        fn unique_vorgang(
+            n: u8,
+            wp: u16,
+            zp_start: &str,
+            initiatoren: Vec<models::Autor>,
+            ressort: Option<Ressort>,
+            sachgebiete: Vec<Sachgebiet>,
+        ) -> models::Vorgang {
+            let mut vg = generate::default_vorgang();
+            vg.api_id = Uuid::from_u128(0xf117_0000_0000_0000_0000_0000_0000_0000 | u128::from(n));
+            vg.wahlperiode = wp;
+            vg.initiatoren = initiatoren;
+            vg.ressort = ressort;
+            vg.sachgebiete = sachgebiete;
+            for id in &mut vg.ids {
+                id.id = format!("{}-{n}", id.id);
+            }
+            let stat = &mut vg.stationen[0];
+            stat.api_id = Some(Uuid::from_u128(
+                0xf117_5717_0000_0000_0000_0000_0000_0000 | u128::from(n),
+            ));
+            stat.gremium.wahlperiode = wp;
+            stat.zp_start = ts(zp_start);
+            for (i, d) in stat
+                .dokumente
+                .iter_mut()
+                .chain(stat.stellungnahmen.iter_mut())
+                .enumerate()
+            {
+                if let DokumentOrApiId::Dokument(d) = d {
+                    d.api_id = Some(Uuid::from_u128(
+                        0xf117_d0c0_0000_0000_0000_0000_0000_0000
+                            | (u128::from(n) << 8)
+                            | i as u128,
+                    ));
+                    d.hash = HashWrapper::Legacy(format!("f117{n:02x}{i:02x}{}", "0".repeat(40)));
+                }
+            }
+            vg
+        }
+
+        let scenario = TestSetup::new("filtering_vorgaenge").await;
+
+        let vg_a = unique_vorgang(
+            1,
+            20,
+            "1950-01-01T22:01:02+00:00",
+            vec![
+                generate::default_autor_person(),
+                generate::default_autor_institution(),
+            ],
+            None,
+            vec![],
+        );
+        let vg_b = unique_vorgang(
+            2,
+            21,
+            "2000-06-01T12:00:00+00:00",
+            vec![generate::default_autor_experte()],
+            Some(Ressort::Finanzen),
+            vec![Sachgebiet::StaatundPolitik, Sachgebiet::Wahlen],
+        );
+        let vg_c = unique_vorgang(
+            3,
+            20,
+            "2020-01-01T12:00:00+00:00",
+            vec![generate::default_autor_lobby()],
+            Some(Ressort::Bildung),
+            vec![Sachgebiet::Wahlen],
+        );
+        for vg in [&vg_a, &vg_b, &vg_c] {
+            let rsp = vorgang_put(&scenario.server, 1, &params::XScraperId(Uuid::now_v7()), vg)
+                .await
+                .expect("Failed to push Vorgang");
+            assert!(
+                matches!(rsp, PutResponse::Success),
+                "Unexpected put response for {}: {rsp:?}",
+                vg.api_id
+            );
+        }
+
+        let pool = &scenario.server.sqlx_db;
+        let mut dbid = std::collections::HashMap::new();
+        for (name, vg) in [("a", &vg_a), ("b", &vg_b), ("c", &vg_c)] {
+            let id = vorgang_dbid(vg.api_id, pool)
+                .await
+                .expect("db lookup")
+                .unwrap_or_else(|| panic!("Vorgang {name} was not inserted"));
+            dbid.insert(id, name);
+        }
+        assert_eq!(dbid.len(), 3, "Vorgänge were merged instead of inserted");
+
+        let fetch = async |filters: VGGetParameters| -> HashSet<&str> {
+            let dbg = format!("{filters:?}");
+            vorgang_fetch_dbids(filters, pool)
+                .await
+                .unwrap_or_else(|e| panic!("query failed for {dbg}: {e}"))
+                .iter()
+                .map(|id| *dbid.get(id).expect("unknown db id returned"))
+                .collect()
+        };
+        let set = |v: &[&'static str]| v.iter().copied().collect::<HashSet<&str>>();
+
+        let cases: Vec<(&str, VGGetParameters, HashSet<&str>)> = vec![
+            (
+                "no filters",
+                VGGetParameters::default(),
+                set(&["a", "b", "c"]),
+            ),
+            // wahlperiode
+            (
+                "wp 20",
+                VGGetParameters {
+                    wp: Some(20),
+                    ..Default::default()
+                },
+                set(&["a", "c"]),
+            ),
+            (
+                "wp 21",
+                VGGetParameters {
+                    wp: Some(21),
+                    ..Default::default()
+                },
+                set(&["b"]),
+            ),
+            (
+                "wp 99",
+                VGGetParameters {
+                    wp: Some(99),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // vorgangstyp
+            (
+                "vgtyp matching",
+                VGGetParameters {
+                    vgtyp: Some(models::Vorgangstyp::BuZustimmungInibreg),
+                    ..Default::default()
+                },
+                set(&["a", "b", "c"]),
+            ),
+            (
+                "vgtyp not matching",
+                VGGetParameters {
+                    vgtyp: Some(models::Vorgangstyp::BuEinspruchInibreg),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // parlament
+            (
+                "parlament matching",
+                VGGetParameters {
+                    parlament: Some(models::Parlament::Bt),
+                    ..Default::default()
+                },
+                set(&["a", "b", "c"]),
+            ),
+            (
+                "parlament not matching",
+                VGGetParameters {
+                    parlament: Some(models::Parlament::By),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // initiator person / organisation / fachgebiet (substring, case insensitive)
+            (
+                "inipsn substring",
+                VGGetParameters {
+                    inipsn: Some("töpfer".into()),
+                    ..Default::default()
+                },
+                set(&["a"]),
+            ),
+            (
+                "inipsn not matching",
+                VGGetParameters {
+                    inipsn: Some("Niemand Bekanntes".into()),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            (
+                "iniorg shared substring",
+                VGGetParameters {
+                    iniorg: Some("kachelofen".into()),
+                    ..Default::default()
+                },
+                set(&["b", "c"]),
+            ),
+            (
+                "iniorg exact",
+                VGGetParameters {
+                    iniorg: Some("Mysterium der Ministerien".into()),
+                    ..Default::default()
+                },
+                set(&["a"]),
+            ),
+            (
+                "inifch",
+                VGGetParameters {
+                    inifch: Some("ofenbau".into()),
+                    ..Default::default()
+                },
+                set(&["b"]),
+            ),
+            (
+                "inifch not matching",
+                VGGetParameters {
+                    inifch: Some("Raketenwissenschaft".into()),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // ressort
+            (
+                "ressort Finanzen",
+                VGGetParameters {
+                    rt: Some(Ressort::Finanzen),
+                    ..Default::default()
+                },
+                set(&["b"]),
+            ),
+            (
+                "ressort Bildung",
+                VGGetParameters {
+                    rt: Some(Ressort::Bildung),
+                    ..Default::default()
+                },
+                set(&["c"]),
+            ),
+            (
+                "ressort not matching",
+                VGGetParameters {
+                    rt: Some(Ressort::Arbeit),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // sachgebiet
+            (
+                "sg Wahlen",
+                VGGetParameters {
+                    sg: Some(Sachgebiet::Wahlen),
+                    ..Default::default()
+                },
+                set(&["b", "c"]),
+            ),
+            (
+                "sg StaatundPolitik",
+                VGGetParameters {
+                    sg: Some(Sachgebiet::StaatundPolitik),
+                    ..Default::default()
+                },
+                set(&["b"]),
+            ),
+            (
+                "sg not matching",
+                VGGetParameters {
+                    sg: Some(Sachgebiet::Verteidigung),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // date range on the stations' zp_start
+            (
+                "lower_date",
+                VGGetParameters {
+                    lower_date: Some(ts("1999-01-01T00:00:00+00:00")),
+                    ..Default::default()
+                },
+                set(&["b", "c"]),
+            ),
+            (
+                "upper_date",
+                VGGetParameters {
+                    upper_date: Some(ts("2010-01-01T00:00:00+00:00")),
+                    ..Default::default()
+                },
+                set(&["a", "b"]),
+            ),
+            (
+                "lower and upper date",
+                VGGetParameters {
+                    lower_date: Some(ts("1999-01-01T00:00:00+00:00")),
+                    upper_date: Some(ts("2010-01-01T00:00:00+00:00")),
+                    ..Default::default()
+                },
+                set(&["b"]),
+            ),
+            (
+                "inverted date range",
+                VGGetParameters {
+                    lower_date: Some(ts("2010-01-01T00:00:00+00:00")),
+                    upper_date: Some(ts("1999-01-01T00:00:00+00:00")),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // if_mod_since
+            (
+                "if_mod_since in the past",
+                VGGetParameters {
+                    if_mod_since: Some(ts("1900-01-01T00:00:00+00:00")),
+                    ..Default::default()
+                },
+                set(&["a", "b", "c"]),
+            ),
+            (
+                "if_mod_since in the future",
+                VGGetParameters {
+                    if_mod_since: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+            // combinations
+            (
+                "wp + ressort",
+                VGGetParameters {
+                    wp: Some(20),
+                    rt: Some(Ressort::Bildung),
+                    ..Default::default()
+                },
+                set(&["c"]),
+            ),
+            (
+                "wp + sg",
+                VGGetParameters {
+                    wp: Some(20),
+                    sg: Some(Sachgebiet::Wahlen),
+                    ..Default::default()
+                },
+                set(&["c"]),
+            ),
+            (
+                "contradicting ressort + sg",
+                VGGetParameters {
+                    rt: Some(Ressort::Bildung),
+                    sg: Some(Sachgebiet::StaatundPolitik),
+                    ..Default::default()
+                },
+                set(&[]),
+            ),
+        ];
+
+        let mut failures = vec![];
+        for (name, filters, expected) in cases {
+            let got = fetch(filters).await;
+            if got != expected {
+                failures.push(format!("{name}: expected {expected:?}, got {got:?}"));
+            }
+        }
+        scenario.teardown().await;
+        assert!(
+            failures.is_empty(),
+            "Filter mismatches:\n{}",
+            failures.join("\n")
+        );
+    }
 
     #[tokio::test]
     async fn station_doks_expanded() {

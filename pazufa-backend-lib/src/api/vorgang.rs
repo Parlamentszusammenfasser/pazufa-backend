@@ -170,15 +170,17 @@ pub async fn vorgang_get(
         None,
     ) {
         let parameters = retrieve::VGGetParameters {
-            lower_date: range.since,
-            parlament: query_params.p,
             if_mod_since: header_params.if_modified_since,
-            upper_date: range.until,
-            vgtyp: query_params.vgtyp,
-            wp: query_params.wp.map(i32::from),
             inifch: query_params.fach.clone(),
             iniorg: query_params.org.clone(),
             inipsn: query_params.person.clone(),
+            lower_date: range.since,
+            parlament: query_params.p,
+            rt: query_params.rt,
+            sg: query_params.sg,
+            upper_date: range.until,
+            vgtyp: query_params.vgtyp,
+            wp: query_params.wp.map(i32::from),
         };
         let result = retrieve::vorgang_by_parameter(
             parameters,

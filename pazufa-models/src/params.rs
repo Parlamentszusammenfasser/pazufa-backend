@@ -1,4 +1,5 @@
 use crate as models;
+use crate::enumerations::{Ressort, Sachgebiet};
 use axum::http::{HeaderValue, StatusCode, request::Parts};
 use axum::{
     extract::FromRequestParts,
@@ -347,6 +348,15 @@ pub struct VorgangGetQueryParams {
     /// Filter results to include only items updated on or before this timestamp (inclusive upper bound)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub until: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// Sachgebiete Filter. Enter the number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sg: Option<Sachgebiet>,
+
+    /// Ressort Filter: Use the variants as serialized in the enumeration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rt: Option<Ressort>,
+
     /// Filter by parliament code. Returns only items related to the specified parliament (e.g., 'BT' for Bundestag).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p: Option<models::Parlament>,
@@ -365,6 +375,7 @@ pub struct VorgangGetQueryParams {
     /// Filter by legislative process type. Returns only items of the specified process type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vgtyp: Option<models::Vorgangstyp>,
+
     /// Page number for paginated results. Starts at 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,

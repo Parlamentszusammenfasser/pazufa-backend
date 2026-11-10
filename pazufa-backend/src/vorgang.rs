@@ -170,9 +170,9 @@ async fn vorgang_bulk_delete(
     }
 
     if qparams == VorgangGetQueryParams::default() {
-        tracing::warn!(
-            "Bulk delete endpoint called without filters; This is a NO-OP to prevent accidents"
-        );
+        const WARN_EMPTY_QUERY: &str =
+            "Bulk delete endpoint called without filters; This is a NO-OP to prevent accidents";
+        tracing::warn!(WARN_EMPTY_QUERY);
         return PutResponse::Success;
     }
     let mut tx = match api_impl.sqlx_db.begin().await {
@@ -186,15 +186,17 @@ async fn vorgang_bulk_delete(
     // filter for api_ids
     let delete_set = match db::retrieve::vorgang::vorgang_fetch_dbids(
         db::retrieve::VGGetParameters {
-            parlament: qparams.p,
-            wp: qparams.wp.map(i32::from),
-            vgtyp: qparams.vgtyp,
-            inipsn: qparams.person,
-            iniorg: qparams.org,
-            lower_date: qparams.since,
-            upper_date: qparams.until,
-            inifch: qparams.fach,
             if_mod_since: None,
+            inifch: qparams.fach,
+            iniorg: qparams.org,
+            inipsn: qparams.person,
+            lower_date: qparams.since,
+            parlament: qparams.p,
+            rt: qparams.rt,
+            sg: qparams.sg,
+            upper_date: qparams.until,
+            vgtyp: qparams.vgtyp,
+            wp: qparams.wp.map(i32::from),
         },
         &mut *tx,
     )
@@ -516,7 +518,7 @@ mod test {
             params::VorgangGetQueryParams::default(),
         )
         .await;
-        assert_eq!(response, PutResponse::Success);
+        assert!(matches!(response, PutResponse::Success));
         assert!(
             vorgang_exists(&server, vorgang.api_id).await,
             "Bulk delete without filters must be a NO-OP, but the Vorgang is gone."

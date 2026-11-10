@@ -672,12 +672,12 @@ pub enum Sachgebiet {
     Unbekannt = 9900,
     OhneSystematik = 9999,
 }
-impl From<i32> for Sachgebiet {
-    fn from(value: i32) -> Self {
-        serde_json::from_value(serde_json::Value::Number(
-            serde_json::Number::from_i128(i128::from(value)).expect("number"),
-        ))
-        .expect("Expected a value that actually deserializes to Sachgebiet")
+impl TryFrom<i32> for Sachgebiet {
+    type Error = String;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        serde_json::from_value(serde_json::Value::from(value))
+            .map_err(|e| format!("{value} is not a valid Sachgebiet: {e}"))
     }
 }
 impl From<Sachgebiet> for i32 {
