@@ -374,6 +374,16 @@ mod serialization_tests {
             "Expected to fail due to duplicate api ids being in there for two differing stations"
         );
     }
+    #[test]
+    fn fails_due_to_zp_start_gt_zp_mod() {
+        let v: Result<super::Vorgang, _> = serde_json::from_str(include_str!(
+            "../../pazufa-backend-lib/tests/serialization/vorgang_zp_ordering.json"
+        ));
+        assert!(
+            v.is_err(),
+            "Expected to fail due to zp_start > zp_modifiziert"
+        );
+    }
 
     #[test]
     fn fails_due_to_apiiddoks() {

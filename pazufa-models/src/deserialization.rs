@@ -156,6 +156,18 @@ impl<'de> Deserialize<'de> for Station {
                 "gremium_federf only makes sense in stations of type parl-ausschber",
             ));
         }
+        // constraint: zp_start cannot be more than zp_modifiziert
+        if let Some(zp_mod) = unchecked.zp_modifiziert
+            && zp_mod < unchecked.zp_start
+        {
+            return Err(de::Error::custom("zp_start <= zp_modifiziert did not hold"));
+        }
+        // constraint: zp_start cannot be in the future
+        if unchecked.zp_start > chrono::Utc::now() {
+            return Err(de::Error::custom(
+                "Stations cannot happen in the past (zp_start <= now). For more Context see <https://chat.pazufa.de/parlamentszusammenfasser/pl/45jic8o6rjnk8djc1auy7s638o> or <https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues/66>",
+            ));
+        }
         Ok(unchecked)
     }
 }
