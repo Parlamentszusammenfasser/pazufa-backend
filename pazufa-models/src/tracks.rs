@@ -1,5 +1,5 @@
-use crate::Parlament;
 use crate::error::{Error, Result};
+use crate::{Parlament, Vorgangstyp};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use track_validation::Regex;
@@ -21,6 +21,15 @@ pub struct Tracks {
 fn parl_classes() -> (Box<[String]>, Box<[i32]>) {
     let (mut v1, mut v2) = (vec![], vec![]);
     for p in Parlament::all_variants() {
+        v1.push(p.to_string());
+        v2.push(i32::from(p.class()));
+    }
+    (v1.into_boxed_slice(), v2.into_boxed_slice())
+}
+#[must_use]
+pub fn vgtyp_classes() -> (Box<[String]>, Box<[i32]>) {
+    let (mut v1, mut v2) = (vec![], vec![]);
+    for p in Vorgangstyp::all_variants() {
         v1.push(p.to_string());
         v2.push(i32::from(p.class()));
     }

@@ -40,12 +40,18 @@ pub(crate) async fn vorgang_merge_candidates(
     let statlen = i32::try_from(model.stationen.len()).map_err(|e| PazufaError::Other {
         message: format!("value was unable to be converted to i32: {e}"),
     })?;
+    let (vgtyp_str, vgtyp_cls) = pazufa_models::tracks::vgtyp_classes();
     let result = sqlx::query!(
         "WITH 
         parl_class AS(
             SELECT p.id as p_id, classcode as c_id
             FROM parlament p, UNNEST($8::text[], $9::int4[]) as pinp(parlshort, classcode)
             WHERE p.value = pinp.parlshort
+        ),
+        vgtyp_class AS(
+            SELECT vt.id as t_id, classcode as c_id
+            FROM vorgangstyp vt, UNNEST($10::text[], $11::int4[]) as pinp(vgtypshort, classcode)
+            WHERE vt.value = pinp.vgtypshort
         ),
         db_id_table AS (
             SELECT rel_vorgang_ident.vg_id as vg_id, identifikator as ident, vg_ident_typ.value as idt_str
@@ -106,7 +112,8 @@ pub(crate) async fn vorgang_merge_candidates(
         model.api_id, &ident_list[..], &identtyp_list[..], i32::from(model.wahlperiode),
         srv.guard_ts(&model.typ, model.api_id, obj), &parls[..],
         statlen,
-        &srv.tracks.parl_class.0[..], &srv.tracks.parl_class.1[..]
+        &srv.tracks.parl_class.0[..], &srv.tracks.parl_class.1[..],
+        &vgtyp_str[..], &vgtyp_cls[..]
     ).fetch_all(executor).await?;
 
     tracing::debug!(

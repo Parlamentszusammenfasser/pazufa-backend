@@ -16,3 +16,4 @@ VALUES
 ('gg-land-parl-nachtragshaushalt')
 ;
 
+DROP TABLE vgtyp_class;

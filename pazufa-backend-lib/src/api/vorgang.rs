@@ -629,6 +629,10 @@ pub(crate) mod test_failed_irl_scenarios {
         };
     }
     irl_scenario!(
+        "tests/scenarios/issue227-gg-parl-haushalt.jsonl",
+        test_scenario_issue227_gg_parl_haushalt
+    );
+    irl_scenario!(
         "tests/scenarios/on_onflict_upd_nodouble.jsonl",
         test_scenario_on_onflict_upd_nodouble
     );

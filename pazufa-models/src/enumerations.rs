@@ -155,29 +155,11 @@ pub enum Parlament {
 }
 impl Parlament {
     #[must_use]
+    #[rustfmt::skip]
+    #[allow(clippy::enum_glob_use, reason = "very short variants, very long import")]
     pub fn all_variants() -> [Parlament; 20] {
-        [
-            Self::Bt,
-            Self::Br,
-            Self::Bv,
-            Self::Ek,
-            Self::Bb,
-            Self::By,
-            Self::Be,
-            Self::Hb,
-            Self::Hh,
-            Self::He,
-            Self::Mv,
-            Self::Ni,
-            Self::Nw,
-            Self::Rp,
-            Self::Sl,
-            Self::Sn,
-            Self::Th,
-            Self::Sh,
-            Self::Bw,
-            Self::St,
-        ]
+        use Parlament::*;
+        [ Bt, Br, Bv, Ek, Bb, By, Be, Hb, Hh, He, Mv, Ni, Nw, Rp, Sl, Sn, Th, Sh, Bw, St ]
     }
     #[must_use]
     pub fn class(&self) -> u8 {
@@ -276,6 +258,61 @@ pub enum Vorgangstyp {
 }
 
 string_enum_convenience!(Vorgangstyp);
+
+impl Vorgangstyp {
+    #[must_use]
+    #[rustfmt::skip]
+    #[allow(clippy::enum_glob_use, reason = "very short variants, very long import")]
+    pub fn all_variants() -> [Vorgangstyp; 18] {
+        use Vorgangstyp::*;
+        [
+            BuEinspruchInibreg,
+            BuEinspruchInibregHaushalt,
+            BuZustimmungInibreg,
+            BuZustimmungInibregHaushalt,
+            BuEinspruchInibregIntvertrag,
+            BuZustimmungInibregIntvertrag,
+            BuEinspruchInisonst,
+            BuEinspruchInisonstIntvertrag,
+            BuZustimmungInisonst,
+            BuZustimmungInisonstIntvertrag,
+            BuAntragBweinsatz,
+            GgLandParl,
+            GgLandParlHaushalt,
+            GgLandVolk,
+            BwEinsatz,
+            Sonstig,
+            GgLandParlStaatsvertrag,
+            GgLandParlNachtragshaushalt
+        ]
+    }
+    #[must_use]
+    pub fn class(&self) -> u8 {
+        match self {
+            Self::BuEinspruchInibreg
+            | Self::BuEinspruchInibregHaushalt
+            | Self::BuZustimmungInibreg
+            | Self::BuZustimmungInibregHaushalt
+            | Self::BuEinspruchInibregIntvertrag
+            | Self::BuZustimmungInibregIntvertrag => 1,
+
+            Self::BuEinspruchInisonst
+            | Self::BuEinspruchInisonstIntvertrag
+            | Self::BuZustimmungInisonst
+            | Self::BuZustimmungInisonstIntvertrag => 2,
+
+            Self::BuAntragBweinsatz => 3,
+            Self::GgLandParl => 4,
+            Self::GgLandParlHaushalt => 5,
+            Self::GgLandVolk => 6,
+            Self::BwEinsatz => 7,
+            Self::Sonstig => 8,
+
+            Self::GgLandParlNachtragshaushalt => 9,
+            Self::GgLandParlStaatsvertrag => 10,
+        }
+    }
+}
 
 /// Substantive legislative steps, that a Vorgang can pass on its way to a law or rejection or similar endings.
 /// The categorisation pre/postparl is to a degree arbitrary, these are just identifiers.
