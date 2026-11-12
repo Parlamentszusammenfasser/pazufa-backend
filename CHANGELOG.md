@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.3.6 / Spec 0.2.9] - 2026-11-12
+### Added
+- Some Enumeration Variants:
+    - Doktyp: Berichtigung
+    - Vorgangstyp: Staatsvertrag and Nachtragshaushalt
+- Endpoints for Vorgang bulk GET and vorgang bulk deletion now have
+  filters for Sachgebiet and Ressort calls `sg` and `rt` respectively
+### Changed
+#### Internal Changes
+- The data models now have their own Crate, pazufa-models. The
+  conceptual idea of that is: pazufa-models contains everything needed
+  to validate, build and read from data models, and the backend-lib is
+  there to provide support for API and Database Operations
+- Following that change, The tests now rely on the Arbitrary Trait to
+  generate random models, which makes them fit for future fuzzing tests
+- The Track-Validation crate now relies on less dependencies, and has a
+  more general interface for conflict detection.
+- Building on that change, the actual code for the validation of a
+  Vorgang was moved from the database module of backend-lib to
+  pazufa-models
+
+### Deprecated
+- the Variant `bw-einsatz` is now considered Deprecated. The next
+  release will remove it. Use `bu-antrag-bweinsatz` instead.
+### Fixed
+- Haushaltsgesetze did not have a vg_class entry in the database. The
+  class-mechanism that underlies this is very similar to
+  parliament-classes, and was thus migrated to also be maintained in
+  rust code, and removed from the database. The track now has its class, 
+  and bugs like #227 this should be easier to prevent in the future.
+
+### Security
+### Removed
+### Impact on Scraper Maintainers
+- The backend now enforces the No-Past-Stations-Rule: No station can
+  have a zp_start less than now
+- Error messages might be more clear in certain cases
+- prefixmatch shows a more localized error on where the inputs are
+  conflicting with the track
+### Impact on API Consumers
+### Impact on Hosting / Deployment
+- the changes should result in minor build time reductions
+- This contains changes to input validation, please give it a longer
+  testing period on staging and see what breaks
+
 ## [0.3.5 / Spec 0.2.8] - 2026-10-23
 ### Added
 - The deployed docker image now contains a copy of what the backend

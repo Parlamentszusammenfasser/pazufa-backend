@@ -2,7 +2,7 @@
 # these are used in various locations throughout the project
 [version]
 # this versions pazufa-backend-lib as well as pazufa-backend
-backend="0.3.5"
+backend="0.3.6"
 elastic-companion="0.1.0"
 
 test-dockerfile="1.4.0"

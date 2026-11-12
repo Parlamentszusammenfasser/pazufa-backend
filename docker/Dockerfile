@@ -50,7 +50,7 @@ ENV RUST_LOG=warn,pazufa_backend=info
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the PaZuFa"
 # backend-label
-LABEL version="0.3.5"
+LABEL version="0.3.6"
 
 ENV PAZUFA_PORT 8080
 
