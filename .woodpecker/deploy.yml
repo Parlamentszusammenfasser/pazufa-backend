@@ -7,18 +7,19 @@ variables:
   - &version "0.3.6"
   - &companion_version "0.1.0"
   - &build_cache "pazufa/backend:buildcache"
+  - &builder_plugin "docker.io/woodpeckerci/plugin-docker-buildx:6"
   - &swagger_ui_download_url "https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"
 
 labels:
   pazufa_scope: generic
-  performance: high
+  performance: deploy
 
 steps:
   # Compiles both binaries once (through the shared `builder` stage) and
   # pushes a mode=max registry cache so whichever target(s) below actually
   # build never recompile from scratch. Only skipped in the abort case above.
   - name: prebuild-cache
-    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    image: *builder_plugin 
     settings:
       repo: pazufa/backend
       dockerfile: docker/Dockerfile
@@ -39,7 +40,7 @@ steps:
       path: [elastic-companion/Cargo.toml, pazufa-backend/Cargo.toml]
 
   - name: backend-deploy
-    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    image: *builder_plugin
     depends_on: [prebuild-cache]
     settings:
       repo: pazufa/backend
@@ -63,7 +64,7 @@ steps:
       path: [pazufa-backend/Cargo.toml]
 
   - name: ec-deploy
-    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    image: *builder_plugin
     depends_on: [prebuild-cache]
     settings:
       repo: pazufa/elastic-companion
@@ -89,7 +90,7 @@ steps:
   # Builds the `release-artifacts` target out of the build cache and writes
   # the binaries to dist/linux_amd64/ and dist/linux_arm64/.
   - name: artifacts-export
-    image: docker.io/woodpeckerci/plugin-docker-buildx:6
+    image: *builder_plugin
     depends_on: [prebuild-cache]
     settings:
       repo: pazufa/release-binaries

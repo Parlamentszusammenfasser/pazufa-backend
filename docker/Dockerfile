@@ -12,8 +12,8 @@ ENV SQLX_OFFLINE=true
 
 WORKDIR /app
 
-RUN apt update \
-    &&  apt install -y --no-install-recommends git libssl-dev pkg-config libpq5 jq curl ripgrep yq\
+RUN apt-get update \
+    &&  apt-get install -y --no-install-recommends git libssl-dev pkg-config libpq5 jq curl yq\
     &&  rm -rf /var/lib/apt/lists/*
 RUN curl -o tracks.toml $TRACK_PATH
 RUN adduser \
@@ -33,6 +33,7 @@ COPY ./migrations ./migrations
 COPY ./pazufa-backend-lib ./pazufa-backend-lib
 COPY ./track-validation ./track-validation
 COPY ./pazufa-backend ./pazufa-backend
+COPY ./pazufa-models ./pazufa-models
 COPY ./elastic-companion ./elastic-companion
 
 RUN mkdir /artifacts
@@ -52,7 +53,7 @@ LABEL description="Backend for the PaZuFa"
 # backend-label
 LABEL version="0.3.6"
 
-ENV PAZUFA_PORT 8080
+ENV PAZUFA_PORT=8080
 
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
