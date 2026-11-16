@@ -293,7 +293,9 @@ impl APIKeyGenerator for NoopKeyGenerator {
 
 impl APIKeyGenerator for Sha256KeyGenerator {
     fn hash(password: &APIKey<Self>, salt: Salt) -> Result<String> {
-        Ok(sha256::digest([salt.as_ref(), password.key_material().as_bytes()].concat()))
+        Ok(sha256::digest(
+            [salt.as_ref(), password.key_material().as_bytes()].concat(),
+        ))
     }
 
     fn generate(keytag: &[char; KEYTAG_LENGTH]) -> APIKey<Self> {
