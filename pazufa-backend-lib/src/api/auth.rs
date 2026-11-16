@@ -1,7 +1,6 @@
 use crate::db::retrieve::auth::get_api_key_metadata;
 use crate::utils::as_option;
 use crate::{PazufaServer, Result, error::PazufaError};
-use argon2::password_hash::SaltString;
 use axum::extract::FromRequestParts;
 use axum::http::{StatusCode, request::Parts};
 use axum::response::{IntoResponse, Json, Response};
@@ -56,15 +55,19 @@ impl Claims {
         .fetch_optional(&server.sqlx_db)
         .await?
         {
+            let Ok(salt) = argon2::password_hash::phc::Salt::new(&salt) else
+            {
+                warn!("Could not create salt from provided bytes");
+                return Err(PazufaError::Other { message: "Could not create salt from provided bytes".to_string() });
+            };
             let incoming_hash = match algo {
                 HashAlgorithm::Sha256 => {
                     let key : APIKey<Sha256KeyGenerator> = key.clone().try_into()?;
-                    key.hash(SaltString::encode_b64(&salt)?.as_salt())?
+                    key.hash(salt)?
                 },
                 HashAlgorithm::Argon2id => {
                     let key : APIKey<Argon2KeyGenerator> = key.clone().try_into()?;
-                    key.hash(SaltString::encode_b64(&salt)?.as_salt())?
-
+                    key.hash(salt)?
                 }
             };
             if key_hash != incoming_hash {
@@ -275,9 +278,8 @@ pub async fn auth_rotate(server: &PazufaServer, claims: &Claims) -> Result<AuthR
     // new key, replacing the old one
     let api_key = pazufa_models::auth::APIKey::<pazufa_models::auth::Argon2KeyGenerator>::default();
     let new_salt = pazufa_models::auth::generate_salt();
-    let new_hash = api_key.hash(new_salt.as_salt())?;
-    let mut vec_data = vec![0; new_salt.len()];
-    let salt_bytes: Vec<_> = new_salt.decode_b64(&mut vec_data)?.into();
+    let new_hash = api_key.hash(new_salt)?;
+    let salt_bytes: Vec<_> = new_salt.as_ref().into();
 
     let new_id = sqlx::query!(
         "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag, algo)

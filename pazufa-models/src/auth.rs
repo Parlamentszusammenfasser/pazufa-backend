@@ -1,7 +1,7 @@
 use super::APIScope;
 use crate::error::{Error, Result};
 use argon2::PasswordHasher;
-use argon2::password_hash::{Salt, SaltString};
+use argon2::password_hash::phc::Salt;
 use base64::prelude::*;
 use rand::distr::Alphanumeric;
 use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
@@ -100,28 +100,6 @@ impl std::ops::DerefMut for KeyTag {
     }
 }
 
-struct CryptoRngAdapter<'a, T: rand::CryptoRng>(&'a mut T);
-impl<T: rand::CryptoRng> argon2::password_hash::rand_core::CryptoRng for CryptoRngAdapter<'_, T> {}
-impl<T: rand::CryptoRng> argon2::password_hash::rand_core::RngCore for CryptoRngAdapter<'_, T> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.fill_bytes(dest);
-    }
-    fn try_fill_bytes(
-        &mut self,
-        dest: &mut [u8],
-    ) -> std::result::Result<(), argon2::password_hash::rand_core::Error> {
-        self.0
-            .try_fill_bytes(dest)
-            .map_err(|e| unreachable!("trying to map infallible: {e}"))
-    }
-}
-
 #[must_use]
 #[allow(
     clippy::arithmetic_side_effects,
@@ -159,8 +137,8 @@ pub fn generate_keytag(prefix: Option<&str>) -> [char; KEYTAG_LENGTH] {
 }
 
 #[must_use]
-pub fn generate_salt() -> SaltString {
-    SaltString::generate(&mut CryptoRngAdapter(&mut StdRng::from_rng(&mut rng())))
+pub fn generate_salt() -> Salt {
+    Salt::from_rng(&mut rand::rng())
 }
 
 #[must_use]
@@ -315,15 +293,7 @@ impl APIKeyGenerator for NoopKeyGenerator {
 
 impl APIKeyGenerator for Sha256KeyGenerator {
     fn hash(password: &APIKey<Self>, salt: Salt) -> Result<String> {
-        let buf_len = salt.len();
-        let mut buf = vec![0u8; buf_len];
-        let Ok(salt_buf) = salt.decode_b64(&mut buf) else {
-            unreachable!("Fails due to alloc issues, which would fail on vector alloc above")
-        };
-        let mut buf: Vec<_> = salt_buf.into();
-        buf.extend_from_slice(password.key_material().as_bytes());
-
-        Ok(sha256::digest(buf))
+        Ok(sha256::digest([salt.as_ref(), password.key_material().as_bytes()].concat()))
     }
 
     fn generate(keytag: &[char; KEYTAG_LENGTH]) -> APIKey<Self> {
@@ -352,7 +322,9 @@ impl APIKeyGenerator for Argon2KeyGenerator {
     fn hash(password: &APIKey<Self>, salt: Salt) -> Result<String> {
         let ag2_context = argon2::Argon2::default();
         let raw_bytes: Vec<u8> = BASE64_URL_SAFE_NO_PAD.decode(password.key_material())?;
-        let pwh = ag2_context.hash_password(&raw_bytes, salt)?.to_string();
+        let pwh = ag2_context
+            .hash_password_with_salt(&raw_bytes, salt.as_ref())?
+            .to_string();
         Ok(pwh)
     }
     fn generate(keytag: &[char; KEYTAG_LENGTH]) -> APIKey<Self> {
@@ -412,7 +384,7 @@ impl std::fmt::Display for APIScope {
 mod test {
     use super::HashAlgorithm;
     use super::Sha256KeyGenerator;
-    use argon2::password_hash::SaltString;
+    use argon2::password_hash::phc::SaltString;
     #[allow(
         deprecated,
         reason = "used to check equality with deprecated functionality"
@@ -430,11 +402,7 @@ mod test {
         let new_key: super::APIKey<Sha256KeyGenerator> = key.clone().try_into().expect("");
 
         let new_hash = new_key
-            .hash(
-                SaltString::encode_b64(&salt.into_bytes())
-                    .expect("success")
-                    .as_salt(),
-            )
+            .hash(SaltString::from_b64(&salt).expect("success").to_salt())
             .expect("");
         assert_eq!(legacy_hash, new_hash);
     }
@@ -446,7 +414,7 @@ mod test {
             HashAlgorithm, KEY_MATERIAL_LENGTH, KEYTAG_LENGTH, SALT_LENGTH, SLUG_LENGTH,
         };
         use argon2::PasswordHasher;
-        use argon2::password_hash::SaltString;
+        use argon2::password_hash::phc::SaltString;
         use rand::distr::Alphanumeric;
         use rand::rngs::StdRng;
         use rand::{RngExt, SeedableRng, rng};
@@ -475,9 +443,9 @@ mod test {
                 }
                 HashAlgorithm::Argon2id => {
                     let argon2_params = argon2::Argon2::default();
-                    let b64_salt = SaltString::encode_b64(salt.as_bytes()).expect("");
+                    let b64_salt = SaltString::from_b64(salt).expect("");
                     argon2_params
-                        .hash_password(secret.as_bytes(), &b64_salt)
+                        .hash_password_with_salt(secret.as_bytes(), b64_salt.as_bytes())
                         .expect("")
                         .to_string()
                 }
