@@ -114,6 +114,11 @@ replace(
     r"  - &trackpath \"https://.*",
     f'  - &trackpath "{trackfile}"',
 )
+replace(
+    "README.md",
+    r"curl -o target/tracks.toml.*",
+    f"curl -o target/tracks.toml {trackfile}"
+)
 
 
 # swagger_ui download url

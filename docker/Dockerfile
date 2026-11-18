@@ -7,7 +7,7 @@ ARG RUSTFLAGS
 ARG SWAGGER_UI_DOWNLOAD_URL
 ARG RELEASE_ARTIFACTS
 
-ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.8+v0.1.3/tracks.toml"
+ENV TRACK_PATH="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.9+v0.1.4/tracks.toml"
 ENV SQLX_OFFLINE=true
 
 WORKDIR /app

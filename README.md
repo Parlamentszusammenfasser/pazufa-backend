@@ -1,38 +1,15 @@
 # Pazufa-Backend
+# Abstract
 This is the backend of the PaZuFa Project. It is responsible for merging
 and sanity-checking the data the scrapers send in. It also provides a
 public API to read the dataset of parliamentary proceedings.
 
+Feel free to open Issues or PRs, we are actively looking for contributers!
+
 # Setup Instructions
-## One-Step Setup For Scraper Development
-To just "get it up and running", e.g. locally as a counterpart during 
-scraper development, please run:
-`docker compose up -d pazufa-backend` (every time you want the service to start)
-
-`-d` is for detach, logs are then visible via 
-`docker logs -f <container>`, it can be stopped via 
-`docker stop <container>`, the `<container>` you can get via `docker ps`.
-
-It will be available on http://localhost:8080 and the api key you
-need is `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9`. 
-Note that this key has full permissions within the backend and can push 
-past some sanity checks on certain endpoints.
-If you want to specifically test with a limited scope to catch bugs in 
-your implementation, proceed as follows:
-
-- run `curl https://localhost:8080/api/v2/auth -X POST -d '{"scope": "collector"}' -H "Content-Type: application/json" -H "x-api-key: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9"`
-- take the key your client and plug it into the `x-api-key` http header
-
-Please also note that this requires port 8080 not to be occupied by any other
-program. If you wish to utilize a different port you must set it in the
-`docker-compose.yml` itself by changing this line:
-`- 8080:8080` to `-<your port>:8080`.
-
-Instead of using the pre-built image from the DockerHub, run `docker compose up -d --build` to build the image yourself.
-
-## Setting up for Development
+## Backend Development Prerequisites
 ### Setting up Rust
-Set up rustc, cargo etc as described [here](https://rustup.rs/).
+Set up rustc, cargo etc as described [on the rustup page](https://rustup.rs/).
 
 ### Database Setup
 The project currently only works with postgres. Thus, set up a postgres 
@@ -61,58 +38,75 @@ Install the Postgres C libraries and rerun the command.
 On Debian based systems this could for example be: `sudo apt install libpq-dev`.
 More information on this process can be found [here](https://sqlx.dev/article/How_to_install_SQLX.html).
 
-### Running Instructions
-If the backend detects a fresh database state it will automatically 
-apply all migrations at runtime.
-
-### Development Instructions
+#### Usage 
 SQLX does compile-time query checking. This means you will need a
 configured database state that already contains all the tables and 
 structure _before the program is run for the first time_.
-That means you need a DATABASE_URL that points to the database set up
-with the docker-compose. Currently that would be:
-`DATABASE_URL=postgres://pazufa-user:pazufa-pass@localhost:5432/pazufa` (bash)  
+You need a DATABASE_URL that points to the database previously set up 
+with docker-compose. Currently that would be:
+
+`export DATABASE_URL=postgres://pazufa-user:pazufa-pass@localhost:5432/pazufa` (bash)  
 `set -x DATABASE_URL postgres://pazufa-user:pazufa-pass@localhost:5432/pazufa` (fish)  
 
 To set up the database for development you will need to run:  
 `sqlx database setup`
 
 To reset the database to the empty-but-configured state, run:  
-`sqlx database reset -f`.
+`sqlx database reset -f`
 
 ## Building and running the project
 1. make sure your cwd is this directory
 2. fetch the track file you want to use with this server. For example: 
-   `curl -o tracks.toml https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.6+v0.0.7/tracks.tomlspec_version=0.2.6`
-   please take the latest / Docker-specified version from `variables.toml`
-3. run `sh oapigen.sh` to generate the server portion from the OpenAPI 
-   spec at https://codeberg.org/PaZuFa/parlamentszusammenfasser/src/branch/main/openapi.yml
-4. run `cargo build` to build the project
-5. run `cargo run -- --generate-key` to generate a master key with the
-   correct format and set the resulting key as env variable: `PAZUFA_KEYADDER_KEY`
-   Alternatively take the one from above: `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9`
-6. `cargo run` to run it.  Easy!
+  ```bash
+  mkdir target || true
+  curl -o target/tracks.toml https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.9+v0.1.4/tracks.toml
+  for d in ./*; do
+      if [ -f "${d}/Cargo.toml" ] && [ ! -e "${d}/tracks.toml" ]; then 
+          ln -s ../target/tracks.toml "${d}/tracks.toml"
+      fi
+  done 
+  ```
+3. run `cargo build` to build the project
+4. `cargo run --bin pazufa-backend` to run it.  Easy!
 
 You can configure the backend either via command line arguments or via 
 environment variables. This  project uses the `dotenvy` crate, so 
 configuring via .env files is very much the way to go if you have a 
 complex configuration and want to run this in your directory.
 
-## Bumping Versions and Paths
-There is a unified mechanism for setting these variables to make sure no
-important file is forgotten. The mechanism works as follows:
-1. The source of truth for these values is `variables.toml`
-2. The idempotent way of setting these is `set-version.py`
+## One-Step Setup For Scraper Development
+To just "get it up and running", i.e. locally as a counterpart during 
+scraper development, please run:
+`docker compose up -d pazufa-backend` (every time you want the service to start)
 
-That means to i.e. set a new Path to a track file which should propagate
-to all relevant files, you:  
-1. set the variable `TRACK_FILE` in `variables.toml` to your value
-2. run `python3 set-version.py`
+`-d` is for detach, logs are then visible via 
+`docker logs -f <container>`, it can be stopped via 
+`docker stop <container>`, the `<container>` you can get via `docker ps`.
 
-if you want to introduce a new value that should be set in this way:
-1. set the new variable in `variables.toml`
-2. modify `set-version.py` by specifying the affected file, the regex
-   that should be matched to replace and the value that you just set
-3. run `python3 set-version.py`
+It will be available on http://localhost:8080 and the api key you
+need is `pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9`. 
+To set the key, use: 
+- `export PAZUFA_KEYADDER_KEY=pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9` (bash)
+- `set -x PAZUFA_KEYADDER_KEY pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9` (fish)
 
-**!THIS INCLUDES THE `Cargo.toml` VERSION NUMBER!**
+Note that this key has full permissions within the backend and can push 
+past some sanity checks on certain endpoints.
+If you want to specifically test with a limited scope to catch bugs in 
+your implementation, proceed as follows:
+
+- run `curl https://localhost:8080/api/v2/auth -X POST -d '{"scope": "collector"}' -H "Content-Type: application/json" -H "x-api-key: pazufa-ABRAKADABRAHEXEN-DRACHENSCHUPPENHAARFAERBEMITTELVERORDNUNGSBLATTFASERSTRUKTURWASSERMINDESTAUFNAHMESTEMPELGESETZ1A6a3671b9"`
+- take the key your client and plug it into the `x-api-key` http header
+  of your scraper's requests
+
+Please also note that this requires port 8080 not to be occupied by any other
+program. If you wish to utilize a different port you must set it in the
+`docker-compose.yml` itself by changing this line:
+`- 8080:8080` to `-<your port>:8080`.
+
+Instead of using the pre-built image from the DockerHub, 
+Note that on newer docker versions this might fail due to some weird
+permission issues.
+The manual build command to build `pazufa/backend:testing` is: 
+`docker buildx build . --network=host --target pazufa-backend-runner -t pazufa/backend:testing -f docker/Dockerfile`
+replace `:testing` with `:version` if you want to use it in the
+docker-compose file.
