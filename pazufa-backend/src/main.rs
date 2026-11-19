@@ -7,7 +7,7 @@ use axum::{extract::DefaultBodyLimit, http::Method, routing::get};
 use clap::Parser;
 use pazufa_backend_lib::Configuration;
 use pazufa_backend_lib::api::PazufaServer;
-use pazufa_backend_lib::utils::{notify::MailBundle, shutdown_signal, tracing::Logging};
+use pazufa_backend_lib::utils::{shutdown_signal, tracing::Logging};
 use pazufa_models::auth::{APIKey, Argon2KeyGenerator, generate_salt};
 use sqlx::{PgTransaction, SqlSafeStr};
 use std::process::exit;
@@ -408,10 +408,7 @@ async fn main() -> Result<()> {
     tx.commit().await?;
     tracing::debug!("Master Key initialized");
 
-    let mailbundle = MailBundle::new(&config)?;
-    tracing::debug!("Mail Bundle Constructed");
-
-    let state = Arc::new(PazufaServer::new(sqlx_db, config, mailbundle, logging));
+    let state = Arc::new(PazufaServer::new(sqlx_db, config, logging));
     tracing::debug!("Server State Constructed");
 
     // Init Axum router

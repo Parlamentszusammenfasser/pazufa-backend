@@ -135,11 +135,6 @@ pub enum InfrastructureError {
     #[snafu(display("Hardware error: {source}"))]
     Hardware { source: std::io::Error },
 
-    #[snafu(display("Mail delivery error: {source}"))]
-    Mail {
-        source: lettre::transport::smtp::Error,
-    },
-
     #[snafu(display("Environment variable error: {source}"))]
     Environment { source: std::env::VarError },
 
@@ -156,12 +151,6 @@ error_from!(
     Infrastructure,
     InfrastructureError,
     Hardware
-);
-error_from!(
-    lettre::transport::smtp::Error,
-    Infrastructure,
-    InfrastructureError,
-    Mail
 );
 error_from!(
     std::env::VarError,

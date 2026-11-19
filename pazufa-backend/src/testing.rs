@@ -106,7 +106,6 @@ impl TestSetup {
                     track_path: "tracks.toml".to_owned(),
                     ..Default::default()
                 },
-                None,
                 logging,
             )),
         }

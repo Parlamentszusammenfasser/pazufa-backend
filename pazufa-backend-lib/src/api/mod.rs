@@ -1,5 +1,4 @@
 use crate::Configuration;
-use crate::utils::notify;
 use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -446,7 +445,6 @@ impl<T: ToSchema + Sized + Sync + Send + Serialize + PartialEq + Debug> IntoResp
 #[derive(Clone)]
 pub struct PazufaServer {
     pub sqlx_db: sqlx::PgPool,
-    pub mailbundle: Option<Arc<notify::MailBundle>>,
     pub config: Configuration,
     pub logging: Logging,
     pub statistics: Arc<Statistics>,
@@ -455,12 +453,8 @@ pub struct PazufaServer {
 }
 pub type LTZFArc = std::sync::Arc<PazufaServer>;
 impl PazufaServer {
-    pub fn new(
-        sqlx_db: sqlx::PgPool,
-        config: Configuration,
-        mailbundle: Option<notify::MailBundle>,
-        logging: Logging,
-    ) -> Self {
+    #[must_use]
+    pub fn new(sqlx_db: sqlx::PgPool, config: Configuration, logging: Logging) -> Self {
         #[cfg(feature = "track-validation")]
         let track = Tracks::new(&config.track_path);
         #[cfg(feature = "track-validation")]
@@ -472,7 +466,6 @@ impl PazufaServer {
         Self {
             config,
             sqlx_db,
-            mailbundle: mailbundle.map(Arc::new),
             logging,
             statistics: Arc::new(stats),
             #[cfg(feature = "track-validation")]

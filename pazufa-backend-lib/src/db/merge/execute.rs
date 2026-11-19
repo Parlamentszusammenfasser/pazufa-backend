@@ -252,7 +252,7 @@ pub(crate) async fn insert_or_merge_dok(
                     .map(|r| r.api_id)
                     .fetch_all(&mut **tx)
                     .await?;
-                    notify_ambiguous_match(&api_ids, &dok, "execute merge station.dokumente", srv)?;
+                    notify_ambiguous_match(&api_ids, &dok, "execute merge station.dokumente")?;
                     Err(DataValidationError::AmbiguousMatch {
                         message: "Ambiguous document match(station), see notification".to_string(),
                     }
@@ -501,7 +501,7 @@ pub(crate) async fn execute_merge_vorgang(
                 .map(|r| r.api_id)
                 .fetch_all(&mut **tx)
                 .await?;
-                notify_ambiguous_match(&mids, stat, "exec_merge_vorgang: station matching", srv)?;
+                notify_ambiguous_match(&mids, stat, "exec_merge_vorgang: station matching")?;
             }
         }
     }
@@ -619,7 +619,7 @@ pub(crate) async fn run_integration(
             )
             .fetch_all(&mut *tx)
             .await?;
-            notify_ambiguous_match(&api_ids, model, "merging vorgang", server)?;
+            notify_ambiguous_match(&api_ids, model, "merging vorgang")?;
             tx.rollback().await?;
             return Err(DataValidationError::AmbiguousMatch {
                 message: format!(
