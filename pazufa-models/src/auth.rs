@@ -38,7 +38,7 @@ impl APIKeyMetadata {
     }
 }
 
-#[derive(sqlx::Type, Clone, Copy, Serialize)]
+#[derive(sqlx::Type, Clone, Copy, Serialize, Debug)]
 #[sqlx(type_name = "\"HashAlgorithm\"")]
 pub enum HashAlgorithm {
     #[sqlx(rename = "sha256")]
@@ -323,9 +323,9 @@ impl APIKeyGenerator for Sha256KeyGenerator {
 impl APIKeyGenerator for Argon2KeyGenerator {
     fn hash(password: &APIKey<Self>, salt: Salt) -> Result<String> {
         let ag2_context = argon2::Argon2::default();
-        let raw_bytes: Vec<u8> = BASE64_URL_SAFE_NO_PAD.decode(password.key_material())?;
+        BASE64_URL_SAFE_NO_PAD.decode(password.key_material())?;
         let pwh = ag2_context
-            .hash_password_with_salt(&raw_bytes, salt.as_ref())?
+            .hash_password_with_salt(password.key_material().as_bytes(), salt.as_ref())?
             .to_string();
         Ok(pwh)
     }
@@ -386,7 +386,8 @@ impl std::fmt::Display for APIScope {
 mod test {
     use super::HashAlgorithm;
     use super::Sha256KeyGenerator;
-    use argon2::password_hash::phc::SaltString;
+    use argon2::password_hash::phc::Salt;
+
     #[allow(
         deprecated,
         reason = "used to check equality with deprecated functionality"
@@ -404,9 +405,25 @@ mod test {
         let new_key: super::APIKey<Sha256KeyGenerator> = key.clone().try_into().expect("");
 
         let new_hash = new_key
-            .hash(SaltString::from_b64(&salt).expect("success").to_salt())
-            .expect("");
+            .hash(Salt::new(salt.as_bytes()).expect("valid salt"))
+            .expect("hash");
+
         assert_eq!(legacy_hash, new_hash);
+    }
+
+    #[allow(
+        deprecated,
+        reason = "is explicitly testing equivalence with deprecated function"
+    )]
+    #[test]
+    fn legacy_hashes_verify_via_new_path() {
+        for algo in [HashAlgorithm::Sha256, HashAlgorithm::Argon2id] {
+            let (key, salt) = util_auth::new_key();
+            let stored = util_auth::hash_full_key(&salt, &key, algo);
+            // the column holds the salt's text bytes
+            let new = legacy_util_auth_functions::compute_hash(algo, key, salt.as_bytes());
+            assert_eq!(stored, new, "{algo:?}");
+        }
     }
 
     #[deprecated(since = "0.3.3")]
@@ -515,6 +532,26 @@ mod test {
             let new_salt = generate_salt();
 
             (new_key, new_salt)
+        }
+
+        // Copy of the function in pazufa-models/src/auth.rs for convenience
+        pub fn compute_hash(algo: HashAlgorithm, key: String, salt: &[u8]) -> String {
+            let Ok(salt) = argon2::password_hash::phc::Salt::new(salt) else {
+                return "error".to_string();
+            };
+
+            match algo {
+                HashAlgorithm::Sha256 => {
+                    let key: crate::APIKey<crate::auth::Sha256KeyGenerator> =
+                        key.clone().try_into().unwrap();
+                    key.hash(salt).unwrap()
+                }
+                HashAlgorithm::Argon2id => {
+                    let key: crate::APIKey<crate::auth::Argon2KeyGenerator> =
+                        key.clone().try_into().unwrap();
+                    key.hash(salt).unwrap()
+                }
+            }
         }
     }
 }
