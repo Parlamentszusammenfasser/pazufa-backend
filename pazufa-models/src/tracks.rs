@@ -76,7 +76,7 @@ impl Tracks {
     /// - there is more than one parliament of one legislative class in there
     /// - the track validation of any single-parliament track failed
     pub fn validate(&self, vg: &crate::Vorgang) -> Result<()> {
-        let mut stations = vg.stationen.clone();
+        let mut stations: Vec<&crate::Station> = vg.stationen.iter().collect();
         stations.sort_by_key(|s| (s.zp_start, s.meta_tiebreaker));
         let parls: BTreeSet<crate::Parlament> =
             stations.iter().map(|s| s.gremium.parlament).collect();
@@ -97,10 +97,10 @@ impl Tracks {
             Error::TrackValidation { error: format!("A vorgang of type {} is not specified for parliament {p}. If you believe this to be an error, open an issue: https://codeberg.org/PaZuFa/parlamentszusammenfasser/issues", vg.typ) }
             )?;
             tracing::trace!("Tracks retrieved");
-            let p_subvec: Vec<crate::Station> = stations
+            let p_subvec: Vec<&crate::Station> = stations
                 .iter()
                 .filter(|x| x.gremium.parlament == p)
-                .cloned()
+                .copied()
                 .collect();
             tracing::trace!("Subvec constructed");
             let p_substr: String = p_subvec
