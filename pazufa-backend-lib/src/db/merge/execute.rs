@@ -455,6 +455,9 @@ pub(crate) async fn execute_merge_vorgang(
     )
     .execute(&mut **tx)
     .await?;
+    // schlagworte
+    insert::vorgang::insert_schlagworte_of_vorgang(db_id, &model.schlagworte, tx).await?;
+
     // identifikatoren
     let (mut ident_list, mut identtyp_list) = (vec![], vec![]);
     for id in &model.ids {
@@ -1068,10 +1071,35 @@ mod scenariotest {
             .build()
             .await;
 
-        if let Err(e) = scenario.run().await {
-            panic!(
-                "Scenatio \"dokument_merging_on_weak_property_changes\" failed with the following error: {e}"
+        scenario.run().await.expect("Scenario \"dokument_merging_on_weak_property_changes\" failed with the following error: {e}");
+    }
+    #[tokio::test]
+    async fn vg_level_schlagworte_are_ignored_on_merge() {
+        let default_schlagworte = generate::default_vorgang().schlagworte;
+        let schlagworte = default_schlagworte
+            .into_iter()
+            .chain(
+                [
+                    "kartenspiele".to_owned(),
+                    "wolpertingerkraftbrühe".to_owned(),
+                    "nukleares-armageddon".to_owned(),
+                ]
+                .into_iter(),
             )
-        }
+            .collect();
+        let test_vorgang = models::Vorgang {
+            schlagworte,
+            ..generate::default_vorgang()
+        };
+        let scenario = Scenario::builder("vg_level_schlagworte_are_ignored_on_merge")
+            .with_context(vec![generate::default_vorgang()])
+            .with_test_object(test_vorgang.clone())
+            .with_expectation(vec![vg_to_expected_shape(&test_vorgang)])
+            .build()
+            .await;
+        scenario
+            .run()
+            .await
+            .expect("Scenario failed with the following error: {e}");
     }
 }
