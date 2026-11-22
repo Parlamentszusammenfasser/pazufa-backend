@@ -31,6 +31,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -179,7 +180,9 @@ def push_issue(
         res = _create_issue(repo, title, body, labels, token, base_url, dry_run)
         results.append(res)
         mark = "✓" if res.ok else "✗"
+        time.sleep(5)
         print(f"{mark} {repo}: {res.url if res.ok else res.error}", file=sys.stderr)
+        
     return results
 
 
