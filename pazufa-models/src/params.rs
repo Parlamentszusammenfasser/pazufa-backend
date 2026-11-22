@@ -11,6 +11,15 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema, Default)]
+pub enum ListOrder {
+    #[default]
+    #[serde(rename = "asc")]
+    Ascending,
+    #[serde(rename = "desc")]
+    Descending,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, ToSchema, IntoParams)]
 #[into_params(names("X-API-Key"), parameter_in = Header)]
 pub struct XAPIKey(pub String);
@@ -96,6 +105,7 @@ impl TryFrom<Option<&HeaderValue>> for IfModSince {
 pub struct AuthListingKeytagPathParams {
     pub keytag: String,
 }
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, IntoParams, ToSchema, Default)]
 #[into_params(parameter_in = Query)]
 pub struct ListingQueryParams {
@@ -111,6 +121,9 @@ pub struct ListingQueryParams {
     /// Number of items to return per page. Maximum value is capped at server-defined limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u32>,
+    /// The order the returned list will appear in. Can be ascending or descending
+    #[serde(default)]
+    pub order: ListOrder,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, IntoParams, ToSchema, Default)]
 #[into_params(parameter_in = Query)]
@@ -291,6 +304,7 @@ pub struct KalGetQueryParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(minimum = 1, maximum = 31)]
     pub dom: Option<u32>,
+
     /// Page number for paginated results. Starts at 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,
@@ -329,6 +343,10 @@ pub struct SGetQueryParams {
     /// Filter by legislative process type. Returns only items of the specified process type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vgtyp: Option<models::Vorgangstyp>,
+
+    /// The order the returned list will appear in. Can be ascending or descending
+    #[serde(default)]
+    pub order: ListOrder,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema, IntoParams, Default)]
@@ -382,6 +400,10 @@ pub struct VorgangGetQueryParams {
     /// Number of items to return per page. Maximum value is capped at server-defined limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u32>,
+
+    /// The order the returned list will appear in. Can be ascending or descending
+    #[serde(default)]
+    pub order: ListOrder,
 }
 
 /// Format of return of the documents. Defaults to pazufa
@@ -434,6 +456,50 @@ mod test {
     use axum::extract::Request;
     use axum::http::HeaderValue;
     use uuid::uuid;
+
+    #[test]
+    fn list_order_query_param() {
+        use super::{ListOrder, ListingQueryParams, SGetQueryParams, VorgangGetQueryParams};
+        use axum::extract::Query;
+        use axum::http::Uri;
+
+        fn parse<T: serde::de::DeserializeOwned>(q: &str) -> Option<T> {
+            let uri: Uri = format!("https://bughunt.lol/x?{q}")
+                .parse()
+                .expect("valid uri");
+            Query::<T>::try_from_uri(&uri).ok().map(|Query(x)| x)
+        }
+
+        let cases = [
+            ("", Some(ListOrder::Ascending)),
+            ("page=2", Some(ListOrder::Ascending)),
+            ("order=asc", Some(ListOrder::Ascending)),
+            ("order=desc", Some(ListOrder::Descending)),
+            ("order=desc&page=2", Some(ListOrder::Descending)),
+            ("order=DESC", None),
+            ("order=Descending", None),
+            ("order=", None),
+            ("order=sideways", None),
+        ];
+        for (q, expected) in cases {
+            assert_eq!(
+                parse::<ListingQueryParams>(q).map(|p| p.order),
+                expected,
+                "{q}"
+            );
+            assert_eq!(
+                parse::<VorgangGetQueryParams>(q).map(|p| p.order),
+                expected,
+                "{q}"
+            );
+            assert_eq!(
+                parse::<SGetQueryParams>(q).map(|p| p.order),
+                expected,
+                "{q}"
+            );
+        }
+        assert_eq!(ListOrder::default(), ListOrder::Ascending);
+    }
 
     #[test]
     fn ims_from_header_value() {

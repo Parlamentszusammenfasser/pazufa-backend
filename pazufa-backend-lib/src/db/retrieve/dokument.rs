@@ -5,6 +5,7 @@ use pazufa_models::dokument::{
     DokumentHash, HashWrapper, ZusammenfassungWrapper, Zusammenfassungstupel,
 };
 use pazufa_models::enumerations::{HashStrategy, Mime};
+use pazufa_models::params::ListOrder;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -223,6 +224,7 @@ pub struct DokumentRetrivalParameters {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
     pub if_mod_since: Option<chrono::DateTime<chrono::Utc>>,
+    pub order: ListOrder,
 }
 
 /// Fetch a document by a set of parameters
@@ -258,20 +260,25 @@ pub async fn get_dokument_by_parameter(
     if dokument_count == 0 {
         return Ok((prp, vec![]));
     }
-    let dok_ids = sqlx::query!(
+    let dok_ids = sqlx::query_scalar!(
         "SELECT id FROM dokument WHERE
         ($1::timestamptz is NULL OR $1 <= meta_last_modified) AND
         ($2::timestamptz is NULL OR $2 <= zp_referenz) AND
         ($3::timestamptz is NULL OR $3 >= zp_referenz)
+        ORDER BY 
+            CASE WHEN     $6 THEN meta_last_modified END ASC,
+            CASE WHEN     $6 THEN id END ASC,
+            CASE WHEN NOT $6 THEN meta_last_modified END DESC,
+            CASE WHEN NOT $6 THEN id END DESC
         LIMIT $4 
         OFFSET $5",
         parameters.if_mod_since,
         parameters.since,
         parameters.until,
         prp.limit(),
-        prp.offset()
+        prp.offset(),
+        parameters.order == ListOrder::Ascending
     )
-    .map(|r| r.id)
     .fetch_all(&mut **tx)
     .await?;
 

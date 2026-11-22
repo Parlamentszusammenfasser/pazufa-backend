@@ -2,6 +2,7 @@ use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
 use crate::error::{DataValidationError, PazufaError, Result};
 use pazufa_models::enumerations::{Ressort, Sachgebiet};
+use pazufa_models::params::ListOrder;
 use pazufa_models::{self as models, Zusammenfassungstupel};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -21,6 +22,7 @@ pub struct VGGetParameters {
     pub iniorg: Option<String>,
     pub inifch: Option<String>,
     pub vgtyp: Option<models::Vorgangstyp>,
+    pub ord: ListOrder,
 }
 
 async fn lobbyreg_of_vorgang(
@@ -98,9 +100,12 @@ pub async fn vorgang_fetch_dbids<'e, E: sqlx::PgExecutor<'e>>(
     filters: VGGetParameters,
     exec: E,
 ) -> Result<Vec<i32>> {
-    let vg_list: Vec<i32> = sqlx::query_scalar!(
+    let mut vg_list: Vec<i32> = sqlx::query_scalar!(
         "WITH pre_table AS (
-        SELECT vorgang.id, meta_last_modified, MIN(ext_stat.zp_start) as min_start, MAX(ext_stat.zp_start) as max_start FROM vorgang
+        SELECT vorgang.id, meta_last_modified, 
+            MIN(ext_stat.zp_start) as min_start, 
+            MAX(ext_stat.zp_start) as max_start
+            FROM vorgang
             INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
             LEFT JOIN (
                     SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
@@ -126,7 +131,7 @@ SELECT id FROM pre_table WHERE
 ($8::timestamptz IS NULL OR $8 <= min_start) AND
 ($9::timestamptz IS NULL OR $9 >= max_start)
 
-ORDER BY pre_table.meta_last_modified ASC",
+ORDER BY pre_table.meta_last_modified ASC, pre_table.id ASC",
 filters.wp,
 filters.vgtyp.map(|x|x.to_string()),
 filters.parlament.map(|p|p.to_string()),
@@ -138,6 +143,9 @@ filters.rt.map(|x|x.to_string()),
 filters.sg.map(i32::from)
     )
     .fetch_all(exec).await?;
+    if filters.ord == ListOrder::Descending {
+        vg_list.reverse();
+    }
     Ok(vg_list)
 }
 

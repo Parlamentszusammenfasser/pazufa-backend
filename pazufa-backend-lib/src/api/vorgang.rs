@@ -181,6 +181,7 @@ pub async fn vorgang_get(
             upper_date: range.until,
             vgtyp: query_params.vgtyp,
             wp: query_params.wp.map(i32::from),
+            ord: query_params.order,
         };
         let result = retrieve::vorgang_by_parameter(
             parameters,
@@ -229,6 +230,68 @@ mod test_endpoints {
     use chrono::Utc;
     use pazufa_models::{self as models, params};
     use uuid::Uuid;
+
+    /// Collects the api ids of all pages of a `vorgang_get` call with the given order.
+    async fn vorgang_ids_all_pages(
+        server: &crate::PazufaServer,
+        order: params::ListOrder,
+        per_page: u32,
+    ) -> Vec<Vec<Uuid>> {
+        let mut pages = vec![];
+        for page in 1.. {
+            let response = super::vorgang_get(
+                server,
+                &params::IfModSince::default(),
+                &params::VorgangGetQueryParams {
+                    page: Some(page),
+                    per_page: Some(per_page),
+                    order,
+                    ..Default::default()
+                },
+                false,
+            )
+            .await
+            .expect("Failed to get Vorgang listing");
+            let ListingGetResponse::Success { body, prp, .. } = response else {
+                panic!("Expected success on page {page}, got {response:?}");
+            };
+            pages.push(body.iter().map(|v| v.api_id).collect());
+            if page >= prp.x_total_pages {
+                break;
+            }
+        }
+        pages
+    }
+
+    #[tokio::test]
+    async fn vorgang_get_order() {
+        let scenario = TestSetup::new("vorgang_get_order").await;
+        let server = &scenario.server;
+        let vorgaenge: Vec<_> = (1..=3).map(generate::distinct_vorgang).collect();
+        for vg in &vorgaenge {
+            super::vorgang_put(server, 1, &params::XScraperId(vg.api_id), vg)
+                .await
+                .expect("Failed to create Vorgang.");
+        }
+        let inserted: Vec<Uuid> = vorgaenge.iter().map(|v| v.api_id).collect();
+        let reversed: Vec<Uuid> = inserted.iter().rev().copied().collect();
+
+        // default is ascending (oldest modification first)
+        let default = vorgang_ids_all_pages(server, params::ListOrder::default(), 32).await;
+        assert_eq!(default, vec![inserted.clone()]);
+        let asc = vorgang_ids_all_pages(server, params::ListOrder::Ascending, 32).await;
+        assert_eq!(asc, vec![inserted.clone()]);
+        let desc = vorgang_ids_all_pages(server, params::ListOrder::Descending, 32).await;
+        assert_eq!(desc, vec![reversed.clone()]);
+
+        // ordering applies to the whole result set, not to each page
+        let asc = vorgang_ids_all_pages(server, params::ListOrder::Ascending, 2).await;
+        assert_eq!(asc, vec![inserted[..2].to_vec(), inserted[2..].to_vec()]);
+        let desc = vorgang_ids_all_pages(server, params::ListOrder::Descending, 2).await;
+        assert_eq!(desc, vec![reversed[..2].to_vec(), reversed[2..].to_vec()]);
+
+        scenario.teardown().await;
+    }
 
     // Procedure (Vorgang) tests
     #[tokio::test]

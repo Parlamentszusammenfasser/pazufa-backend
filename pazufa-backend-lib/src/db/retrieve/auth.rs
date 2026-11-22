@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::api::PaginationResponsePart;
-use pazufa_models::{self as models, APIScope, auth::APIKeyMetadata};
+use pazufa_models::{self as models, APIScope, KeyTag, auth::APIKeyMetadata, params::ListOrder};
 use sqlx::{PgExecutor, PgTransaction};
 
 /// Retrieves a full Metadata row for any API Key.
@@ -30,6 +30,7 @@ pub async fn get_api_key_metadata<'e, E: PgExecutor<'e>>(
 pub async fn get_paginated_keytags(
     page: Option<u32>,
     per_page: Option<u32>,
+    order: ListOrder,
     tx: &mut PgTransaction<'_>,
 ) -> Result<(PaginationResponsePart, Vec<models::KeyTag>)> {
     let total_count: i64 = sqlx::query_scalar!(
@@ -45,11 +46,20 @@ pub async fn get_paginated_keytags(
 
     let prp = PaginationResponsePart::new(total_count, page, per_page);
     let body = sqlx::query!(
-            "SELECT keytag FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW() ORDER BY expires_at DESC
+        "SELECT keytag FROM api_keys 
+            WHERE deleted_by IS NULL AND expires_at > NOW()
+            ORDER BY 
+                CASE WHEN     $3 THEN expires_at END DESC,
+                CASE WHEN NOT $3 THEN expires_at END ASC
             OFFSET $1
-            LIMIT $2", prp.offset(), prp.limit())
-        .map(|r| models::KeyTag::from(r.keytag))
-        .fetch_all(&mut **tx).await?;
+            LIMIT $2",
+        prp.offset(),
+        prp.limit(),
+        order == ListOrder::Descending
+    )
+    .map(|r| KeyTag(r.keytag))
+    .fetch_all(&mut **tx)
+    .await?;
 
     Ok((prp, body))
 }

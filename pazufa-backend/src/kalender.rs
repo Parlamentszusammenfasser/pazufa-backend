@@ -9,7 +9,7 @@ use pazufa_backend_lib::api::sitzung::{
 };
 use pazufa_backend_lib::api::{PutResponse, find_applicable_date_range};
 use pazufa_backend_lib::db::retrieve::SitzungFilterParameters;
-use pazufa_models::params::{self, HeaderParams, XScraperId};
+use pazufa_models::params::{self, HeaderParams, ListOrder, XScraperId};
 use pazufa_models::{self as models, APIScope};
 use std::sync::Arc;
 use tracing::{info, instrument, warn};
@@ -115,6 +115,7 @@ async fn kal_date_get(
             if_mod_since: ims.if_modified_since,
             vgid: None,
             wp: None,
+            ord: ListOrder::default(),
         };
         let mut tx = server.sqlx_db.begin().await?;
         Ok(get_sitzung_by_parameter(
@@ -202,6 +203,7 @@ async fn kal_get(
             wp: qparams.wp,
             since: result.since,
             until: result.until,
+            ord: ListOrder::default(),
         };
 
         Ok(get_sitzung_by_parameter(

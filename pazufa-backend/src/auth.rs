@@ -212,6 +212,7 @@ async fn auth_listing(
         let (prp, body) = pazufa_backend_lib::db::retrieve::auth::get_paginated_keytags(
             qp.page,
             qp.per_page,
+            qp.order,
             &mut tx,
         )
         .await?;
@@ -599,12 +600,7 @@ mod test {
         // ------------------------------------------------------------------------------------------------------------
         let response = super::auth_listing(
             Claims(APIScope::KeyAdder, 1),
-            axum::extract::Query(ListingQueryParams {
-                page: None,
-                per_page: None,
-                since: None,
-                until: None,
-            }),
+            axum::extract::Query(ListingQueryParams::default()),
             axum::extract::State(Arc::clone(&server)),
         )
         .await;
@@ -631,6 +627,88 @@ mod test {
             }
             _ => unreachable!("unreachable"),
         }
+
+        let mut server = Arc::into_inner(server);
+        scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    // GET /auth/keys?order=...
+    #[tokio::test]
+    async fn test_list_keys_order() {
+        let mut scenario = TestSetup::new("test_list_keys_order").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+
+        // created in reverse expiry order, so creation order and expiry order disagree
+        let now = chrono::Utc::now();
+        let mut by_expiry = vec![];
+        for days in [30u64, 20, 10] {
+            let key: APIKey<Argon2KeyGenerator> = create_apikey(
+                1,
+                APIScope::Collector,
+                now.checked_add_days(chrono::Days::new(days)),
+                None,
+                &server.sqlx_db,
+            )
+            .await
+            .expect("Failed to create key");
+            by_expiry.insert(0, key.keytag().to_owned());
+        }
+
+        let list = |order: params::ListOrder, per_page: u32| {
+            let server = Arc::clone(&server);
+            async move {
+                let mut pages: Vec<Vec<String>> = vec![];
+                for page in 1.. {
+                    let response = super::auth_listing(
+                        Claims(APIScope::KeyAdder, 1),
+                        axum::extract::Query(ListingQueryParams {
+                            page: Some(page),
+                            per_page: Some(per_page),
+                            order,
+                            ..Default::default()
+                        }),
+                        axum::extract::State(Arc::clone(&server)),
+                    )
+                    .await;
+                    let AuthListingGetResponse::Success { body, prp, .. } = response else {
+                        panic!("Expected success on page {page}, got {response:?}");
+                    };
+                    pages.push(
+                        body.iter()
+                            .map(|x| x.as_str().trim_matches('"').to_owned())
+                            .collect(),
+                    );
+                    if page >= prp.x_total_pages {
+                        break;
+                    }
+                }
+                pages
+            }
+        };
+
+        // ascending: soonest expiry first
+        let asc = list(params::ListOrder::Ascending, 256).await;
+        assert_eq!(asc.len(), 1);
+        let asc = asc.concat();
+        let mine: Vec<_> = asc
+            .iter()
+            .filter(|k| by_expiry.contains(k))
+            .cloned()
+            .collect();
+        assert_eq!(mine, by_expiry);
+        assert_eq!(list(params::ListOrder::default(), 256).await.concat(), asc);
+
+        let desc = list(params::ListOrder::Descending, 256).await.concat();
+        let reversed: Vec<_> = asc.iter().rev().cloned().collect();
+        assert_eq!(desc, reversed);
+
+        // ordering applies to the whole result set, not to each page
+        assert_eq!(list(params::ListOrder::Ascending, 2).await.concat(), asc);
+        assert_eq!(
+            list(params::ListOrder::Descending, 2).await.concat(),
+            reversed
+        );
 
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();

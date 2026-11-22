@@ -52,6 +52,7 @@ mod openapi {
     use super::sitzung;
     use super::vorgang;
     use pazufa_backend_lib::utils::status::SPEC_VERSION;
+    use pazufa_models::params::ListOrder;
     use utoipa::OpenApi;
     use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
     // initialize OpenAPI
@@ -94,6 +95,7 @@ mod openapi {
          (name= "Authentifizierung",        description= "Endpoints related to API key management"),
          (name= "Miscellaneous",            description= "Endpoints managing objects which cannot exist without a more higher-up object (Documents, Enumeration values etc)")
     ),
+    components(schemas(ListOrder))
 )]
     pub struct PazufAPI;
     struct Security;

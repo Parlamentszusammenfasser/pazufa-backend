@@ -2,6 +2,7 @@ use super::dokument::dokument_by_id;
 use crate::api::PaginationResponsePart;
 use crate::error::{PazufaError, Result};
 use pazufa_models as models;
+use pazufa_models::params::ListOrder;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -217,6 +218,7 @@ pub struct SitzungFilterParameters {
     pub wp: Option<u16>,
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
+    pub ord: ListOrder,
 }
 
 /// Fetches Sitzung by a set of parameters
@@ -257,7 +259,10 @@ WHERE
 ($4::timestamptz IS NULL OR $4 <= termin)  AND
 ($5::timestamptz IS NULL OR $5 >= termin)  AND
 ($7::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($7, vgref.api_id)))
-ORDER BY pre_table.lastmod ASC",
+
+ORDER BY
+    pre_table.lastmod ASC, pre_table.id ASC
+",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(i32::from),
         params.if_mod_since,
@@ -268,6 +273,10 @@ ORDER BY pre_table.lastmod ASC",
     )
     .fetch_all(&mut **tx)
     .await?;
+
+    if params.ord == ListOrder::Descending {
+        as_list.reverse();
+    }
     let prp = PaginationResponsePart::new(
         u32::try_from(as_list.len()).map_err(|e| PazufaError::Other {
             message: format!(
@@ -291,5 +300,6 @@ ORDER BY pre_table.lastmod ASC",
     for id in as_list {
         vector.push(sitzung_by_id(id, expand, tx).await?);
     }
+
     Ok((prp, vector))
 }

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
+### Added
+- There is an `order` parameter on the GET endpoints for vorgang and
+  sitzung, but not calendar endpoints. The parameter can take the values
+  asc and desc
+### Changed
+- The order in which keys are returned is now in order of expiry, with
+  first expiry coming first
+
 
 ## [0.3.6 / Spec 0.2.9] - 2026-11-12
 ### Added

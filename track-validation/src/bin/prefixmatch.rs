@@ -52,13 +52,13 @@ fn main() {
                 let enumerated_input: Vec<(usize, char)> = input.chars().enumerate().collect();
                 let conflicts = regex.conflicting_elements(&enumerated_input, |(_, c)| *c);
                 let mut conflicts: Vec<usize> = conflicts.iter().map(|(i, _)| *i).collect();
-                conflicts.sort();
+                conflicts.sort_unstable();
 
                 let mut conflict_idx = 0;
                 let line_2: String = (0..input.len())
                     .map(|idx| {
                         if conflict_idx < conflicts.len() && conflicts[conflict_idx] == idx {
-                            conflict_idx += 1;
+                            conflict_idx = conflict_idx.saturating_add(1);
                             '^'
                         } else {
                             '-'

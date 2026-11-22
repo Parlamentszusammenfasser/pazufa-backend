@@ -130,6 +130,7 @@ async fn s_get(
             return Ok(SitzungListingResponse::BadReq);
         };
         let params = retrieve::SitzungFilterParameters {
+            ord: query_params.order,
             gremium_like: query_params.gr.clone(),
             parlament: query_params.p,
             if_mod_since: header_params.if_modified_since,
@@ -485,6 +486,67 @@ mod test {
         let rsp = client.get("/api/v2/sitzung?p=XX", &[]).await;
         assert_eq!(rsp.status, 400, "{rsp:?}");
         let rsp = client.get("/api/v2/sitzung?vgid=keine-uuid", &[]).await;
+        assert_eq!(rsp.status, 400, "{rsp:?}");
+
+        drop(client);
+        scenario.teardown().await;
+    }
+
+    /// Collects the session numbers of all pages of `url` (which must already contain a query string).
+    async fn nummern_all_pages(client: &TestClient, url: &str, per_page: u32) -> Vec<Vec<u16>> {
+        let mut pages = vec![];
+        for page in 1.. {
+            let rsp = client
+                .get(&format!("{url}&per_page={per_page}&page={page}"), &[])
+                .await;
+            assert_eq!(rsp.status, 200, "{rsp:?}");
+            let total_pages: u32 = rsp
+                .header("x-total-pages")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("Missing x-total-pages header: {rsp:?}"));
+            pages.push(
+                rsp.json::<Vec<models::Sitzung>>()
+                    .iter()
+                    .map(|s| s.nummer)
+                    .collect(),
+            );
+            if page >= total_pages {
+                break;
+            }
+        }
+        pages
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_s_get_order() {
+        let mut scenario = TestSetup::new("test_s_get_order").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let client = TestClient::new(Arc::clone(&server)).await;
+
+        let now = chrono::Utc::now();
+        let sessions = [
+            test_sitzung(now, 1),
+            test_sitzung(now, 2),
+            test_sitzung(now, 3),
+        ];
+        seed_sitzungen(&client, &server, &sessions).await;
+
+        let base = "/api/v2/sitzung";
+        let asc = nummern_all_pages(&client, &format!("{base}?expand=false"), 32).await;
+        assert_eq!(asc, vec![vec![1, 2, 3]]);
+        let asc = nummern_all_pages(&client, &format!("{base}?order=asc"), 32).await;
+        assert_eq!(asc, vec![vec![1, 2, 3]]);
+        let desc = nummern_all_pages(&client, &format!("{base}?order=desc"), 32).await;
+        assert_eq!(desc, vec![vec![3, 2, 1]]);
+
+        // ordering applies to the whole result set, not to each page
+        let asc = nummern_all_pages(&client, &format!("{base}?order=asc"), 2).await;
+        assert_eq!(asc, vec![vec![1, 2], vec![3]]);
+        let desc = nummern_all_pages(&client, &format!("{base}?order=desc"), 2).await;
+        assert_eq!(desc, vec![vec![3, 2], vec![1]]);
+
+        let rsp = client.get(&format!("{base}?order=sideways"), &[]).await;
         assert_eq!(rsp.status, 400, "{rsp:?}");
 
         drop(client);

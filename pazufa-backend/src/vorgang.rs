@@ -5,8 +5,9 @@ use pazufa_backend_lib::api::auth::Claims;
 use pazufa_backend_lib::api::{
     DeleteResponse, GetSingleResponse, ListingGetResponse, PutResponse, vorgang as libvg,
 };
-use pazufa_models::params::HeaderParams;
-use pazufa_models::params::{IfModSince, VorgangGetQueryParams, XScraperId};
+use pazufa_models::params::{
+    HeaderParams, IfModSince, ListOrder, VorgangGetQueryParams, XScraperId,
+};
 use pazufa_models::{self as models, APIScope, params};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -186,6 +187,7 @@ async fn vorgang_bulk_delete(
     // filter for api_ids
     let delete_set = match db::retrieve::vorgang::vorgang_fetch_dbids(
         db::retrieve::VGGetParameters {
+            ord: ListOrder::default(),
             if_mod_since: None,
             inifch: qparams.fach,
             iniorg: qparams.org,
@@ -619,6 +621,31 @@ mod test {
             "Deletion by parliament also removed the Vorgang of another parliament."
         );
 
+        let mut server = Arc::into_inner(server);
+        scenario.server = server.take();
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_vorgang_get_order_param_parsing() {
+        let mut scenario = TestSetup::new("test_vorgang_get_order_param_parsing").await;
+        let server = Arc::new(scenario.server.take().expect("Expected a server value"));
+        let client = crate::testing::TestClient::new(Arc::clone(&server)).await;
+
+        for order in ["asc", "desc"] {
+            let rsp = client
+                .get(&format!("/api/v2/vorgang?order={order}"), &[])
+                .await;
+            assert_eq!(rsp.status, 204, "order={order}: {rsp:?}");
+        }
+        for order in ["sideways", "ASC", "Descending", ""] {
+            let rsp = client
+                .get(&format!("/api/v2/vorgang?order={order}"), &[])
+                .await;
+            assert_eq!(rsp.status, 400, "order={order}: {rsp:?}");
+        }
+
+        drop(client);
         let mut server = Arc::into_inner(server);
         scenario.server = server.take();
         scenario.teardown().await;

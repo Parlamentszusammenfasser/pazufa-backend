@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT g.link, g.name, g.wp, p.value as parl FROM gremium g\n            INNER JOIN parlament p ON p.id = g.parl\n            WHERE g.id = ANY($1::int4[])",
+  "query": "SELECT g.link, g.name, g.wp, p.value as parl FROM gremium g\n            INNER JOIN parlament p ON p.id = g.parl\n            WHERE g.id = ANY($1::int4[])\n            ORDER BY g.id DESC",
   "describe": {
     "columns": [
       {
@@ -60,5 +60,5 @@
       false
     ]
   },
-  "hash": "9afb542bdededb4f3a8e9ab13f8ec037515f2ffaaf833ab8997c573bce142f60"
+  "hash": "6470c49febc2331c402f430c5e65daa39dae2f1b984f49a4e307873d10a7fd0c"
 }

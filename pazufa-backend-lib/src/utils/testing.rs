@@ -426,4 +426,35 @@ pub(crate) mod generate {
             }],
         }
     }
+
+    /// A Vorgang with exactly one Station holding exactly one Dokument, where every
+    /// identifying value is derived from `n`. Different `n` never get merged into each other.
+    pub(crate) fn distinct_vorgang(n: u8) -> models::Vorgang {
+        let n128 = u128::from(n);
+        let dokument = models::Dokument {
+            api_id: Some(uuid::Uuid::from_u128(0xd0c0_0000 + n128)),
+            hash: HashWrapper::Legacy(format!("{n:02x}{}", "0".repeat(44))),
+            drucksnr: Some(format!("20/{n}")),
+            titel: format!("Dokument {n}"),
+            ..default_dokument()
+        };
+        models::Vorgang {
+            api_id: uuid::Uuid::from_u128(0x0a00_0000 + n128),
+            titel: format!("Vorgang {n}"),
+            kurztitel: None,
+            ids: vec![models::VgIdent {
+                id: format!("distinct-{n}"),
+                typ: "initdrucks".to_owned(),
+            }],
+            lobbyregister: vec![],
+            stationen: vec![models::Station {
+                api_id: Some(uuid::Uuid::from_u128(0x5a00_0000 + n128)),
+                titel: Some(format!("Station {n}")),
+                stellungnahmen: vec![],
+                dokumente: vec![models::DokumentOrApiId::Dokument(Box::new(dokument))],
+                ..default_station()
+            }],
+            ..default_vorgang()
+        }
+    }
 }

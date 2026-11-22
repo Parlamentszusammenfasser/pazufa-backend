@@ -29,6 +29,7 @@ pub async fn dokumente_get_by_params(
             since: lp.since,
             until: lp.until,
             if_mod_since: ims,
+            order: lp.order,
         },
         &mut tx,
     )
@@ -59,7 +60,7 @@ pub async fn autoren_get(
     query_params: &params::AutorenGetQueryParams,
 ) -> Result<ListingGetResponse<models::Autor>> {
     let mut tx = server.sqlx_db.begin().await?;
-    let result = sqlx::query!(
+    let result = sqlx::query_scalar!(
         "SELECT a.id FROM autor a WHERE
             ($1::text IS NULL AND person IS NULL OR person ILIKE CONCAT('%',$1,'%')) AND
             organisation ILIKE CONCAT('%',$2::text,'%') AND
@@ -68,7 +69,6 @@ pub async fn autoren_get(
         query_params.org,
         query_params.fach,
     )
-    .map(|r| r.id)
     .fetch_all(&mut *tx)
     .await?;
 
@@ -89,7 +89,7 @@ pub async fn autoren_get(
     }
     let result = &result[prp.start()..prp.end()];
     let output = sqlx::query!(
-        "SELECT * FROM autor WHERE id = ANY($1::int4[])",
+        "SELECT * FROM autor WHERE id = ANY($1::int4[]) ORDER BY id DESC",
         &result[..]
     )
     .map(|r| models::Autor {
@@ -124,7 +124,7 @@ pub async fn gremien_get(
     query_params: &params::GremienGetQueryParams,
 ) -> Result<ListingGetResponse<models::Gremium>> {
     let mut tx = server.sqlx_db.begin().await?;
-    let mut result = sqlx::query!(
+    let mut result = sqlx::query_scalar!(
         "SELECT g.id FROM gremium g
             INNER JOIN parlament p ON p.id = g.parl 
             WHERE p.value = COALESCE($1, p.value) AND
@@ -134,7 +134,6 @@ pub async fn gremien_get(
         query_params.wp.map(i32::from),
         query_params.gr
     )
-    .map(|r| r.id)
     .fetch_all(&mut *tx)
     .await?;
     if result.is_empty() {
@@ -160,7 +159,8 @@ pub async fn gremien_get(
     let result = sqlx::query!(
         "SELECT g.link, g.name, g.wp, p.value as parl FROM gremium g
             INNER JOIN parlament p ON p.id = g.parl
-            WHERE g.id = ANY($1::int4[])",
+            WHERE g.id = ANY($1::int4[])
+            ORDER BY g.id DESC",
         &selected_ids[..]
     )
     .fetch_all(&mut *tx)
@@ -256,7 +256,7 @@ pub async fn enum_get(
     )]
     let values: Vec<String> = sqlx::query(
         sqlx::AssertSqlSafe(format!(
-            "SELECT v.value FROM {} v WHERE v.id = ANY($1::int4[])",
+            "SELECT v.value FROM {} v WHERE v.id = ANY($1::int4[]) ORDER BY id DESC",
             enum_tables[&path_params.name]
         ))
         .into_sql_str(),
@@ -320,6 +320,74 @@ mod test_unauthorisiert {
     use pazufa_models::params;
     use uuid::uuid;
 
+    /// Collects the api ids of all pages of a `dokumente_get_by_params` call with the given order.
+    async fn dokument_ids_all_pages(
+        server: &crate::PazufaServer,
+        order: params::ListOrder,
+        per_page: u32,
+    ) -> Vec<Vec<uuid::Uuid>> {
+        let mut pages = vec![];
+        for page in 1.. {
+            let response = super::dokumente_get_by_params(
+                server,
+                models::enumerations::DokumentFormat::Pazufa,
+                params::ListingQueryParams {
+                    page: Some(page),
+                    per_page: Some(per_page),
+                    order,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .expect("Failed to get Dokument listing");
+            let ListingGetResponse::Success { body, prp, .. } = response else {
+                panic!("Expected success on page {page}, got {response:?}");
+            };
+            pages.push(
+                body.iter()
+                    .map(|d| d.api_id.expect("Dokument without api_id"))
+                    .collect(),
+            );
+            if page >= prp.x_total_pages {
+                break;
+            }
+        }
+        pages
+    }
+
+    #[tokio::test]
+    async fn dokumente_get_order() {
+        let scenario = TestSetup::new("dokumente_get_order").await;
+        let server = &scenario.server;
+        // one Vorgang (and thus one transaction) per Dokument, so modification times differ
+        let mut inserted = vec![];
+        for n in 1..=3 {
+            let vg = generate::distinct_vorgang(n);
+            let models::DokumentOrApiId::Dokument(dok) = &vg.stationen[0].dokumente[0] else {
+                unreachable!("distinct_vorgang contains a full Dokument")
+            };
+            inserted.push(dok.api_id.expect("Dokument with api_id"));
+            libvg::vorgang_put(server, 1, &params::XScraperId(vg.api_id), &vg)
+                .await
+                .expect("Failed to create Vorgang.");
+        }
+        let reversed: Vec<_> = inserted.iter().rev().copied().collect();
+
+        let default = dokument_ids_all_pages(server, params::ListOrder::default(), 32).await;
+        assert_eq!(default, vec![inserted.clone()]);
+        let desc = dokument_ids_all_pages(server, params::ListOrder::Descending, 32).await;
+        assert_eq!(desc, vec![reversed.clone()]);
+
+        // ordering applies to the whole result set, not to each page
+        let asc = dokument_ids_all_pages(server, params::ListOrder::Ascending, 2).await;
+        assert_eq!(asc, vec![inserted[..2].to_vec(), inserted[2..].to_vec()]);
+        let desc = dokument_ids_all_pages(server, params::ListOrder::Descending, 2).await;
+        assert_eq!(desc, vec![reversed[..2].to_vec(), reversed[2..].to_vec()]);
+
+        scenario.teardown().await;
+    }
+
     #[tokio::test]
     async fn autoren_get_nocontent_on_page_overflow() {
         let scenario = TestSetup::new("autoren_get_nocontent_page_overflow").await;
@@ -352,18 +420,9 @@ mod test_unauthorisiert {
     #[tokio::test]
     async fn autor_get_nocontent() {
         let scenario = TestSetup::new("autor_get_nocontent").await;
-        let r = super::autoren_get(
-            &scenario.server,
-            &params::AutorenGetQueryParams {
-                fach: None,
-                org: None,
-                person: None,
-                page: None,
-                per_page: None,
-            },
-        )
-        .await
-        .expect("Failed to get Autor.");
+        let r = super::autoren_get(&scenario.server, &params::AutorenGetQueryParams::default())
+            .await
+            .expect("Failed to get Autor.");
         assert!(matches!(r, ListingGetResponse::NoContent));
         scenario.teardown().await;
     }
@@ -384,18 +443,9 @@ mod test_unauthorisiert {
         .await
         .expect("Failed to create Autor.");
 
-        let r = super::autoren_get(
-            &scenario.server,
-            &params::AutorenGetQueryParams {
-                fach: None,
-                org: None,
-                person: None,
-                page: None,
-                per_page: None,
-            },
-        )
-        .await
-        .expect("Failed to get Autor.");
+        let r = super::autoren_get(&scenario.server, &params::AutorenGetQueryParams::default())
+            .await
+            .expect("Failed to get Autor.");
         assert!(
             matches!( &r,
                 ListingGetResponse::Success { body, .. } if !body.is_empty()),
@@ -437,18 +487,10 @@ mod test_unauthorisiert {
     #[tokio::test]
     async fn gremien_get_nocontent() {
         let scenario = TestSetup::new("test_gremien_get_nocontent").await;
-        let result = super::gremien_get(
-            &scenario.server,
-            &params::GremienGetQueryParams {
-                gr: None,
-                p: None,
-                page: None,
-                per_page: None,
-                wp: None,
-            },
-        )
-        .await
-        .expect("Failed to get Gremium.");
+        let result =
+            super::gremien_get(&scenario.server, &params::GremienGetQueryParams::default())
+                .await
+                .expect("Failed to get Gremium.");
         assert!(
             matches!(result, ListingGetResponse::NoContent),
             "Expected to find no entries"
@@ -471,17 +513,8 @@ mod test_unauthorisiert {
         .await
         .expect("Failed to create Vorgang.");
 
-        let result = super::gremien_get(
-            &scenario.server,
-            &params::GremienGetQueryParams {
-                gr: None,
-                p: None,
-                page: None,
-                per_page: None,
-                wp: None,
-            },
-        )
-        .await;
+        let result =
+            super::gremien_get(&scenario.server, &params::GremienGetQueryParams::default()).await;
 
         assert!(
             matches!(&result, Ok(ListingGetResponse::Success { body, prp,  .. })
@@ -493,10 +526,7 @@ mod test_unauthorisiert {
             &scenario.server,
             &params::GremienGetQueryParams {
                 gr: Some("Inneres".to_string()),
-                p: None,
-                page: None,
-                per_page: None,
-                wp: None,
+                ..Default::default()
             },
         )
         .await;
@@ -509,11 +539,8 @@ mod test_unauthorisiert {
         let result = super::gremien_get(
             &scenario.server,
             &params::GremienGetQueryParams {
-                gr: None,
                 p: Some(dft_gremium.parlament),
-                page: None,
-                per_page: None,
-                wp: None,
+                ..Default::default()
             },
         )
         .await;
@@ -526,11 +553,8 @@ mod test_unauthorisiert {
         let result = super::gremien_get(
             &scenario.server,
             &params::GremienGetQueryParams {
-                gr: None,
-                p: None,
-                page: None,
-                per_page: None,
                 wp: Some(20),
+                ..Default::default()
             },
         )
         .await;
@@ -543,11 +567,8 @@ mod test_unauthorisiert {
         let result = super::gremien_get(
             &scenario.server,
             &params::GremienGetQueryParams {
-                gr: None,
                 p: Some(models::Parlament::Be),
-                page: None,
-                per_page: None,
-                wp: None,
+                ..Default::default()
             },
         )
         .await;
@@ -767,12 +788,7 @@ mod test_unauthorisiert {
         let result = super::dokumente_get_by_params(
             &scenario.server,
             models::enumerations::DokumentFormat::Pazufa,
-            params::ListingQueryParams {
-                since: None,
-                until: None,
-                page: None,
-                per_page: None,
-            },
+            params::ListingQueryParams::default(),
             None,
         )
         .await;
@@ -806,9 +822,7 @@ mod test_unauthorisiert {
                         .expect("static str")
                         .to_utc(),
                 ),
-                until: None,
-                page: None,
-                per_page: None,
+                ..Default::default()
             },
             None,
         )
