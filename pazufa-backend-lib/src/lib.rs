@@ -40,6 +40,9 @@ pub struct Configuration {
     )]
     pub db_url: String,
 
+    #[arg(long, short, env = "PUBLIC_URL")]
+    pub public_url: Option<String>,
+
     #[arg(
         long,
         env = "PAZUFA_RO_DBPASS",
@@ -114,4 +117,7 @@ pub struct Configuration {
         help = "Generates a Key that conforms to pazufa's format, then exits with success"
     )]
     pub generate_key: bool,
+}
+impl Configuration {
+    pub const PUBLIC_URL_DEFAULT: &str = "http://localhost:80";
 }

@@ -385,6 +385,19 @@ async fn main() -> Result<()> {
     tracing::debug!("Logging initialized");
     tracing::debug!("Configuration: {:?}", &config);
 
+    if config.public_url.is_none() {
+        tracing::warn!(
+            "No public URL was specified. This is needed to create full URLs for RSS and Atom feeds. If this application runs behind a reverse proxy, provide a base URL X such that the / endpoint is reachable via X/ publicly."
+        );
+    }
+    tracing::info!(
+        "Public URL will be: {}",
+        config
+            .public_url
+            .as_ref()
+            .unwrap_or(&Configuration::PUBLIC_URL_DEFAULT.to_string())
+    );
+
     let Some(ka_key) = &config.keyadder_key else {
         eprintln!(
             "Unable to start service without a master key. Please provide one via `--keyadder-key` or via PAZUFA_KEYADDER_KEY"
