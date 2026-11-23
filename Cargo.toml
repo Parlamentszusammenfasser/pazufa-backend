@@ -7,6 +7,11 @@ codegen-units = 1
 lto = "fat"
 strip = true
 
+[profile.profile-release]
+inherits = "release"
+strip = false
+debug = true
+
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
