@@ -834,16 +834,16 @@ pub async fn dokument_put_id(
     body: &models::Dokument,
 ) -> Result<PutResponse> {
     let mut tx = server.sqlx_db.begin().await?;
-    let did = sqlx::query!(
+    let body = body.clone().into_rounded();
+    let did = sqlx::query_scalar!(
         "SELECT id FROM dokument WHERE api_id = $1",
         path_params.api_id
     )
-    .map(|r| r.id)
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(did) = did {
         let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
-        if dok.with_round_timestamps() == body.with_round_timestamps() {
+        if dok.into_rounded() == body {
             info!("Dokument was not modified");
             return Ok(PutResponse::NotMod);
         }
@@ -851,8 +851,9 @@ pub async fn dokument_put_id(
             .execute(&mut *tx)
             .await?;
     }
-    let id = crate::db::insert::insert_dokument(body, Uuid::nil(), creator_keyidx, &mut tx, server)
-        .await?;
+    let id =
+        crate::db::insert::insert_dokument(&body, Uuid::nil(), creator_keyidx, &mut tx, server)
+            .await?;
     let api_id = sqlx::query!("SELECT api_id FROM dokument WHERE id= $1", id)
         .map(|r| r.api_id)
         .fetch_one(&mut *tx)

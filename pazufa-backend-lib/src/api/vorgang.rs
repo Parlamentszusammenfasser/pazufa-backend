@@ -24,12 +24,13 @@ pub async fn vorgang_id_put(
 ) -> Result<PutResponse> {
     let mut tx = server.sqlx_db.begin().await?;
     let api_id = path_params.api_id;
+    let body = body.clone().into_rounded();
     let db_id = retrieve::vorgang_dbid(api_id, &mut *tx).await?;
     if let Some(db_id) = db_id {
         debug!("Match found: {db_id}");
         let db_cmpvg = retrieve::vorgang_by_id(db_id, false, &mut tx).await?;
 
-        if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
+        if body == db_cmpvg.into_rounded() {
             return Ok(PutResponse::NotMod);
         }
         debug!("Found to be different enough to not be exactly the same. Deleting...");
@@ -38,7 +39,7 @@ pub async fn vorgang_id_put(
     } else {
         debug!("No Match found");
     }
-    match insert::insert_vorgang(body, Uuid::nil(), creator_index, &mut tx, server).await {
+    match insert::insert_vorgang(&body, Uuid::nil(), creator_index, &mut tx, server).await {
         Ok(_) => {
             info!(target: "obj", "PUT by ID Vorgang {}", path_params.api_id);
             info!("Successful insert or replace");
@@ -873,10 +874,7 @@ pub(crate) mod test_failed_irl_scenarios {
             panic!()
         };
 
-        assert_eq!(
-            vorgang.with_round_timestamps(),
-            fetched_vorgang.with_round_timestamps()
-        );
+        assert_eq!(vorgang.into_rounded(), fetched_vorgang.into_rounded());
     }
 
     #[tokio::test]

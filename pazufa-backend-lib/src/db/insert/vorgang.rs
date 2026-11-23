@@ -448,9 +448,6 @@ mod test {
         let out_vorgang = crate::db::retrieve::vorgang::vorgang_by_id(inserted, true, &mut tx)
             .await
             .unwrap();
-        assert_eq!(
-            vorgang.with_round_timestamps(),
-            out_vorgang.with_round_timestamps()
-        );
+        assert_eq!(vorgang.into_rounded(), out_vorgang.into_rounded());
     }
 }

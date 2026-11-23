@@ -59,9 +59,8 @@ impl<'de> Deserialize<'de> for Vorgang {
     where
         D: serde::Deserializer<'de>,
     {
-        let unchecked = Self::deserialize(deserializer)?;
+        let unchecked = Self::deserialize(deserializer)?.into_rounded();
         // check that no two stations have the exact same zp_start, rounded
-        let unchecked = unchecked.with_round_timestamps();
         let mut fails = vec![];
         for i in 0..unchecked.stationen.len() {
             #[allow(

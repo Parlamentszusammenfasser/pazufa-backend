@@ -208,14 +208,7 @@ pub async fn sid_put(
         .await?;
     if let Some(db_id) = db_id {
         let db_cmpvg = retrieve::sitzung_by_id(db_id, false, &mut tx).await?;
-        debug!(
-            "odb: {}\nonew: {}",
-            serde_json::to_string(&db_cmpvg.with_round_timestamps())
-                .unwrap_or_else(|_| format!("{:?}", db_cmpvg.with_round_timestamps())),
-            serde_json::to_string(&st_to_uuiddoks(body).with_round_timestamps())
-                .unwrap_or_else(|_| format!("{:?}", st_to_uuiddoks(body).with_round_timestamps()))
-        );
-        if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(body).with_round_timestamps() {
+        if db_cmpvg.into_rounded() == st_to_uuiddoks(body).into_rounded() {
             info!("Sitzung has the same state as the input object");
             return Ok(PutResponse::NotMod);
         }

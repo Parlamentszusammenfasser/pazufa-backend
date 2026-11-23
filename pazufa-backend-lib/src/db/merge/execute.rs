@@ -195,7 +195,7 @@ pub(crate) async fn execute_merge_dokument(
     .execute(&mut **tx)
     .await?;
     let merged_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
-    if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
+    if original_state.into_rounded() != merged_state.into_rounded() {
         sqlx::query!(
             "UPDATE dokument SET meta_last_modified = NOW() WHERE id = $1",
             db_id
@@ -553,7 +553,9 @@ pub(crate) async fn execute_merge_vorgang(
     let merged_state = crate::db::retrieve::vorgang_by_id(candidate, true, &mut *tx).await?;
     #[cfg(feature = "track-validation")]
     srv.tracks.validate(&merged_state)?;
-    if original_state.with_round_timestamps() != merged_state.with_round_timestamps() {
+
+    let merged_apiid = merged_state.api_id;
+    if original_state.into_rounded() != merged_state.into_rounded() {
         sqlx::query!(
             "UPDATE vorgang
                 SET meta_last_modified = NOW() WHERE id = $1",
@@ -564,12 +566,8 @@ pub(crate) async fn execute_merge_vorgang(
     }
 
     info!(
-        "Merging of Vg Successful: Merged `{}`(ext) with  `{}`(db)",
-        model.api_id,
-        sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", candidate)
-            .map(|r| r.api_id)
-            .fetch_one(&mut **tx)
-            .await?
+        "Merging of Vg Successful: Merged `{}`(ext) with  `{merged_apiid}`(db)",
+        model.api_id
     );
     Ok(())
 }
@@ -643,7 +641,7 @@ mod scenariotest {
     use crate::api::SortArrays;
     use crate::utils::testing::{TestSetup, generate, generate::random};
     use crate::{PazufaServer, Result, api::PaginationResponsePart, db::retrieve};
-    use pazufa_models::{self as models, DokumentOrApiId};
+    use pazufa_models::{self as models, DokumentOrApiId, RoundTimestamp};
     use uuid::Uuid;
 
     struct Scenario {
@@ -666,7 +664,10 @@ mod scenariotest {
             self
         }
         fn with_expectation(mut self, expectation: Vec<models::Vorgang>) -> Self {
-            self.expected = expectation;
+            self.expected = expectation
+                .into_iter()
+                .map(RoundTimestamp::into_rounded)
+                .collect();
             self.expected
                 .iter_mut()
                 .for_each(crate::api::SortArrays::sort_arrays);
@@ -731,7 +732,8 @@ mod scenariotest {
                 .begin()
                 .await
                 .expect("Failed to create database transaction.");
-            let mut db_vorgangs = retrieve::vorgang_by_parameter(
+            // contains(results, prp)
+            let (_db_prp, db_contents) = retrieve::vorgang_by_parameter(
                 paramock,
                 None,
                 Some(PaginationResponsePart::MAX_PER_PAGE),
@@ -740,24 +742,18 @@ mod scenariotest {
             )
             .await
             .expect("Failed to get valid server response when trying to get vorgang by id.");
-            db_vorgangs
-                .1
+            let mut db_contents: Vec<_> = db_contents
+                .into_iter()
+                .map(RoundTimestamp::into_rounded)
+                .collect();
+            db_contents
                 .iter_mut()
                 .for_each(crate::api::SortArrays::sort_arrays);
-            db_vorgangs.1.sort_by_key(|a| a.api_id);
+            db_contents.sort_by_key(|a| a.api_id);
 
             tx.commit().await?;
-            let equality = self
-                .expected
-                .iter()
-                .map(pazufa_models::RoundTimestamp::with_round_timestamps)
-                .collect::<Vec<_>>()
-                == db_vorgangs
-                    .1
-                    .iter()
-                    .map(pazufa_models::RoundTimestamp::with_round_timestamps)
-                    .collect::<Vec<_>>();
-            if !equality && !self.shouldfail {
+            // if the scenario failed, but should not fail
+            if self.expected != db_contents && !self.shouldfail {
                 let exp_content = self
                     .expected
                     .iter()
@@ -767,8 +763,7 @@ mod scenariotest {
                     })
                     .collect::<Vec<_>>()
                     .join(",");
-                let dbv_content = db_vorgangs
-                    .1
+                let dbv_content = db_contents
                     .iter()
                     .map(|x| {
                         serde_json::to_string_pretty(x)
@@ -788,7 +783,8 @@ mod scenariotest {
                     ),
                 });
             }
-            if equality && self.shouldfail {
+            // if on the scenario worked out as naively expected, but should have failed
+            if self.expected == db_contents && self.shouldfail {
                 return Err(crate::error::PazufaError::Other {
                     message: "Expected Case to fail, but actual output was equal to expectation"
                         .to_owned(),

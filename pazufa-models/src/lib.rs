@@ -71,9 +71,9 @@ pub struct ReplacementPutRequestInner<T: ToSchema> {
 /// very very margins differ by a few nanosecs.
 /// Using this trait the thing can round its dates to a precision of 1 second
 /// We do not really need more
-pub trait RoundTimestamp: Clone {
+pub trait RoundTimestamp {
     #[must_use]
-    fn with_round_timestamps(&self) -> Self;
+    fn into_rounded(self) -> Self;
 }
 
 fn round_to_second(datetime: DateTime<Utc>) -> DateTime<Utc> {
@@ -92,74 +92,74 @@ fn round_to_second(datetime: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 impl RoundTimestamp for Dokument {
-    fn with_round_timestamps(&self) -> Self {
+    fn into_rounded(self) -> Self {
         Self {
             zp_referenz: round_to_second(self.zp_referenz),
             zp_erstellt: self.zp_erstellt.map(round_to_second),
             zp_modifiziert: round_to_second(self.zp_modifiziert),
-            ..self.clone()
+            ..self
         }
     }
 }
 
 impl RoundTimestamp for Station {
-    fn with_round_timestamps(&self) -> Self {
+    fn into_rounded(self) -> Self {
         Self {
             zp_modifiziert: self.zp_modifiziert.map(round_to_second),
             zp_start: round_to_second(self.zp_start),
             stellungnahmen: self
                 .stellungnahmen
-                .iter()
+                .into_iter()
                 .map(|sn| match sn {
                     DokumentOrApiId::Dokument(d) => {
-                        DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                        DokumentOrApiId::Dokument(Box::new(d.into_rounded()))
                     }
-                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(*x),
+                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(x),
                 })
                 .collect(),
             dokumente: self
                 .dokumente
-                .iter()
+                .into_iter()
                 .map(|sn| match sn {
                     DokumentOrApiId::Dokument(d) => {
-                        DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                        DokumentOrApiId::Dokument(Box::new(d.into_rounded()))
                     }
-                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(*x),
+                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(x),
                 })
                 .collect(),
 
-            ..self.clone()
+            ..self
         }
     }
 }
 
 impl RoundTimestamp for Vorgang {
-    fn with_round_timestamps(&self) -> Self {
+    fn into_rounded(self) -> Self {
         Self {
             stationen: self
                 .stationen
-                .iter()
-                .map(RoundTimestamp::with_round_timestamps)
+                .into_iter()
+                .map(RoundTimestamp::into_rounded)
                 .collect(),
-            ..self.clone()
+            ..self
         }
     }
 }
 impl RoundTimestamp for Sitzung {
-    fn with_round_timestamps(&self) -> Self {
+    fn into_rounded(self) -> Self {
         Self {
             dokumente: self
                 .dokumente
-                .iter()
+                .into_iter()
                 .map(|sn| match sn {
                     DokumentOrApiId::Dokument(d) => {
-                        DokumentOrApiId::Dokument(Box::new(d.with_round_timestamps()))
+                        DokumentOrApiId::Dokument(Box::new(d.into_rounded()))
                     }
-                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(*x),
+                    DokumentOrApiId::ApiId(x) => DokumentOrApiId::ApiId(x),
                 })
                 .collect(),
             termin: round_to_second(self.termin),
-            ..self.clone()
+            ..self
         }
     }
 }
