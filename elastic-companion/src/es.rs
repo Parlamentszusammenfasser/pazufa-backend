@@ -5,6 +5,8 @@ use base64::prelude::*;
 use pazufa_models as models;
 use serde::Serialize;
 use std::io::Write;
+use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 
 pub struct EsClient {
     client: reqwest::Client,
@@ -48,7 +50,7 @@ impl EsClient {
     }
     pub async fn batch_index<T: Serialize + Sized + Sync + Send + FetchId>(
         &self,
-        index_name: &'static str,
+        index_name: &str,
         batch: Vec<T>,
     ) -> Result<()> {
         tracing::info!("Submitting batch to elasticsearch, index `{index_name}`");
@@ -80,6 +82,17 @@ impl EsClient {
         // send
         Ok(())
     }
+}
+
+pub async fn receive_batches<T: Serialize + Sized + Sync + Send + FetchId>(
+    index_name: String,
+    mut rx: Receiver<Vec<T>>,
+    es_client: Arc<EsClient>,
+) -> Result<()> {
+    while let Some(batch) = rx.recv().await {
+        es_client.batch_index(&index_name, batch).await?;
+    }
+    Ok(())
 }
 
 impl FetchId for models::Vorgang {
