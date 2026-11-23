@@ -4,6 +4,7 @@ use clap::{Parser, value_parser};
 use fetch::{sync_dokument, sync_sitzung, sync_vorgang};
 use std::sync::Arc;
 
+mod diffs;
 mod es;
 mod fetch;
 
