@@ -110,9 +110,7 @@ mod openapi {
                             "
         API key of the Collector.
         - Expires based on 'expires_at' field when created (if not specified, defaults to 1 year)
-        - Subject to rate limiting of 256 requests per second across all endpoints
-        - Subject to body size limit of 512 MB
-        - Tokens can be revoked at any time by administrators
+        - Can be revoked at any time by Authentication Admins (=keyadder level)
 
         API Key Rotation Policy:
         - Keys should be rotated at least every 90 days (recommended)
@@ -253,8 +251,11 @@ fn initialize_router(state: &Arc<PazufaServer>) -> axum::Router {
     );
 
     let governor_config = GovernorConfigBuilder::default()
-        .const_per_second(iv)
+        .const_per_millisecond(iv)
         .const_burst_size(cnt)
+        // NOTE: If anything that maintains more keys would be used, it would have to be
+        // periodically cleaned up in a separate thread using
+        // governer_config.limiter().retain_recent()
         .key_extractor(GlobalKeyExtractor)
         .finish();
 
@@ -269,15 +270,6 @@ fn initialize_router(state: &Arc<PazufaServer>) -> axum::Router {
             "Unexpected error. GovernorConfig did not build correctly, even though config seems valid."
         )
     };
-    let limiter = Arc::clone(rl_config.limiter());
-    let interval = std::time::Duration::from_mins(1);
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(interval).await;
-            tracing::debug!("rate limiting storage size: {}", limiter.len());
-            limiter.retain_recent();
-        }
-    });
     let rate_limiter = GovernorLayer::new(rl_config);
     let body_size_limit = 1024 * 1024 * 512; // 512 MB
     let request_size_limit = limit::RequestBodyLimitLayer::new(body_size_limit);

@@ -63,15 +63,15 @@ pub struct Configuration {
     #[arg(
         long,
         env = "REQUEST_LIMIT_COUNT",
-        help = "global request count that is per interval",
-        default_value = "4096"
+        help = "Global Request Bucket Size",
+        default_value = "512"
     )]
     pub req_limit_count: u32,
     #[arg(
         long,
         env = "REQUEST_LIMIT_INTERVAL",
-        help = "(whole) number of seconds",
-        default_value = "2"
+        help = "(whole) number of milliseconds, after which the request bucket gets replenished by 1 token",
+        default_value = "10"
     )]
     pub req_limit_interval: u32,
     #[arg(
