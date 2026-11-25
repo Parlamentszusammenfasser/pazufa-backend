@@ -30,7 +30,7 @@ steps:
         - linux/aarch64
       dry_run: true
       build_args:
-        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+        - SWAGGER_UI: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -54,7 +54,7 @@ steps:
         - *version
         - latest
       build_args:
-        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+        - SWAGGER_UI: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -78,7 +78,7 @@ steps:
         - *companion_version
         - latest
       build_args:
-        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+        - SWAGGER_UI: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -101,7 +101,7 @@ steps:
         - linux/amd64
         - linux/aarch64
       build_args:
-        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+        - SWAGGER_UI: *swagger_ui_download_url
       cache_images:
         - *build_cache
       tags: 

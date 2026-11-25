@@ -12,6 +12,14 @@ openapi-spec="0.2.9"
 [dependency-version]
 rustc = "1.99"
 
+# Base images of docker/Dockerfile, pinned by their multi-platform INDEX digest
+# (`docker buildx imagetools inspect <image> --format '{{.Manifest.Digest}}'`),
+# never by a single platform's manifest digest.
+# builder: rust:<rustc>-slim-bookworm -> update together with rustc
+builder-image-digest = "sha256:f2c004e3d2d8b547e8cf7ffbc29205385f4e71d23e53e4e383065db5e9f822cd"
+# runners: keep the Debian release in line with the builder (bookworm = debian12)
+runtime-image-digest = "sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f"
+
 [resources]
 trackfile="https://codeberg.org/PaZuFa/parlamentszusammenfasser/raw/tag/v0.2.9+v0.1.4/tracks.toml"
 cached-swagger-ui="https://drive.usercontent.google.com/download?id=1GHIMYle518Qy8aB-AuqasCUYSKN_XRpw&export=download"

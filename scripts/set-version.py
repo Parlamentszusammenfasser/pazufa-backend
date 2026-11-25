@@ -35,6 +35,15 @@ spec_version = file["version"]["openapi-spec"]
 wp_dockerfile_version = file["version"]["test-dockerfile"]
 
 rust_version = file["dependency-version"]["rustc"]
+builder_image_digest = file["dependency-version"]["builder-image-digest"]
+runtime_image_digest = file["dependency-version"]["runtime-image-digest"]
+for name, digest in [
+    ("builder-image-digest", builder_image_digest),
+    ("runtime-image-digest", runtime_image_digest),
+]:
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        print(f"Error: {name} `{digest}` in variables.toml is not a sha256 digest")
+        sys.exit(2)
 
 trackfile = file["resources"]["trackfile"]
 swagger_ui_download_url = file["resources"]["cached-swagger-ui"]
@@ -62,8 +71,8 @@ replace(
 )
 replace(
     "docker/Dockerfile",
-    '# backend-label[\n\r \v\t\f]+LABEL version="\\d+\\.\\d+\\.\\d+"',
-    f'# backend-label\nLABEL version="{version}"',
+    '# backend-label[\n\r \v\t\f]+LABEL org.opencontainers.image.version="\\d+\\.\\d+\\.\\d+"',
+    f'# backend-label\nLABEL org.opencontainers.image.version="{version}"',
 )
 replace(
     "pazufa-backend/Cargo.toml",
@@ -94,8 +103,8 @@ replace(
 )
 replace(
     "docker/Dockerfile",
-    '# ec-label[\n\r \v\t\f]+LABEL version="\\d+\\.\\d+\\.\\d+"',
-    f'# ec-label\nLABEL version="{ec_version}"',
+    '# ec-label[\n\r \v\t\f]+LABEL org.opencontainers.image.version="\\d+\\.\\d+\\.\\d+"',
+    f'# ec-label\nLABEL org.opencontainers.image.version="{ec_version}"',
 )
 replace(
     ".woodpecker/deploy.yml",
@@ -106,8 +115,8 @@ replace(
 # track file
 replace(
     "docker/Dockerfile",
-    r"ENV TRACK_PATH=\"https://.*\"",
-    f'ENV TRACK_PATH="{trackfile}"',
+    r"ARG TRACK_PATH=\"https://.*\"",
+    f'ARG TRACK_PATH="{trackfile}"',
 )
 replace(
     ".woodpecker/testing.yml",
@@ -180,10 +189,16 @@ replace(
     f"FROM rust:{rust_version}-bookworm AS base",
 )
 
+# base images used in docker/Dockerfile, pinned by digest
 replace(
     "docker/Dockerfile",
-    r"FROM rust:.*-slim-bookworm AS builder",
-    f"FROM rust:{rust_version}-slim-bookworm AS builder",
+    r"FROM --platform=\$BUILDPLATFORM rust:\S+ AS base",
+    f"FROM --platform=$BUILDPLATFORM rust:{rust_version}-slim-bookworm@{builder_image_digest} AS base",
+)
+replace(
+    "docker/Dockerfile",
+    r"FROM gcr.io/distroless/cc-debian12:nonroot@\S+ AS (pazufa-backend-runner|elastic-companion-runner)",
+    f"FROM gcr.io/distroless/cc-debian12:nonroot@{runtime_image_digest} AS \\1",
 )
 
 # deployment artifacts

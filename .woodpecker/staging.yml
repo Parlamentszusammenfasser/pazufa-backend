@@ -1,6 +1,7 @@
 when:
   - event: [pull_request]
     branch: [main]
+  - event: manual
 
 variables:
   - &build_cache "pazufa/backend:buildcache-staging"
@@ -28,9 +29,10 @@ steps:
       target: builder
       platforms:
         - linux/amd64
+        - linux/arm64
       dry_run: true
       build_args:
-        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+        - SWAGGER_UI: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
@@ -48,6 +50,7 @@ steps:
       context: .
       platforms:
         - linux/amd64
+        - linux/arm64
       dry_run: true
       cache_images:
         - *build_cache
@@ -66,9 +69,10 @@ steps:
       context: .
       platforms:
         - linux/amd64
+        - linux/arm64
       dry_run: true
       build_args:
-        - SWAGGER_UI_DOWNLOAD_URL: *swagger_ui_download_url
+        - SWAGGER_UI: *swagger_ui_download_url
       cache_images:
         - *build_cache
       username: pazufa
