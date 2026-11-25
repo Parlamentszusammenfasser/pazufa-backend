@@ -40,6 +40,11 @@ pub struct Configuration {
     )]
     pub db_url: String,
 
+    #[arg(long, env = "DATABASE_CONNECTIONS_MAX", default_value = "100")]
+    pub db_connections_max: u32,
+    #[arg(long, env = "DATABASE_CONNECTIONS_MIN", default_value = "5")]
+    pub db_connections_min: u32,
+
     #[arg(long, short, env = "PUBLIC_URL")]
     pub public_url: Option<String>,
 

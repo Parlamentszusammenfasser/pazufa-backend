@@ -131,10 +131,11 @@ async fn handle_root() -> impl axum::response::IntoResponse {
     (axum::http::StatusCode::OK, axum::response::Html(s))
 }
 
-async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
+async fn init_db_conn(config: &Configuration) -> Result<sqlx::PgPool> {
     let sqlx_db = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(db_url)
+        .max_connections(config.db_connections_max)
+        .min_connections(config.db_connections_min)
+        .connect(&config.db_url)
         .await?;
 
     let mut available = false;
@@ -146,7 +147,7 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
                 break;
             }
             Err(sqlx::Error::PoolTimedOut) => {
-                tracing::warn!("Connection to Database `{}` timed out", db_url);
+                tracing::warn!("Connection to Database `{}` timed out", config.db_url);
             }
             _ => {
                 let _ = r?;
@@ -159,7 +160,11 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
     if !available {
         bail!("Server Connection failed after 10 retries");
     }
-    tracing::debug!("Started Database Pool");
+    tracing::debug!(
+        "Started Database Pool (min {} / max {} connections)",
+        config.db_connections_min,
+        config.db_connections_max
+    );
     sqlx::migrate!("../migrations/").run(&sqlx_db).await?;
     let record =
         sqlx::query!("SELECT current_database() as \"curr_db!\", current_user as \"curr_user!\"")
@@ -405,7 +410,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("Tried to bind to {}:{}", config.host, config.port))?;
 
     tracing::debug!("TCP Listener Started");
-    let sqlx_db = init_db_conn(&config.db_url).await?;
+    let sqlx_db = init_db_conn(&config).await?;
 
     // Run Key Administrative Functions
 
