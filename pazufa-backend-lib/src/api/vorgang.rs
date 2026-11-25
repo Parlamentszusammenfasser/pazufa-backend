@@ -90,6 +90,18 @@ pub async fn vorgang_put(
                     }
                     _ => Err(e),
                 },
+                PazufaError::Database { source } => match &(**source) {
+                    crate::error::DatabaseError::Sqlx { source } => match &source {
+                        sqlx::Error::Database(db_err)
+                            if db_err.to_string().contains("constraint")
+                                && db_err.to_string().contains("violates") =>
+                        {
+                            Ok(PutResponse::Conflict)
+                        }
+                        _ => Err(e),
+                    },
+                    _ => Err(e),
+                },
                 _ => Err(e),
             }
         }
@@ -708,6 +720,16 @@ pub(crate) mod test_failed_irl_scenarios {
         "tests/scenarios/500_on_rel_station_merge.jsonl",
         sqlx_500_on_rel_station_merge
     );
+    async fn insert(scenario: &TestSetup, vorgang: &models::Vorgang) -> super::PutResponse {
+        super::vorgang_put(
+            &scenario.server,
+            1,
+            &pazufa_models::params::XScraperId(Uuid::nil()),
+            vorgang,
+        )
+        .await
+        .expect("Expected no internal failure after put")
+    }
 
     /// This test does not assert anything, and crashes as failure case.
     /// this reproduces #110, where a null byte in the full text caused issues when retrieving it
@@ -764,14 +786,7 @@ pub(crate) mod test_failed_irl_scenarios {
                     continue;
                 }
             };
-            super::vorgang_put(
-                &test_setup.server,
-                1,
-                &pazufa_models::params::XScraperId(Uuid::nil()),
-                &vg,
-            )
-            .await
-            .expect("Expected no internal failure after put");
+            let _ = insert(&test_setup, &vg).await;
             let _obj = super::vorgang_get_by_id(
                 &test_setup.server,
                 &models::params::IfModSince::default(),
@@ -819,6 +834,33 @@ pub(crate) mod test_failed_irl_scenarios {
             v.sachgebiete.contains(&Sachgebiet::Normung) &&
             v.sachgebiete.contains(&Sachgebiet::JagdFischerei)
         ));
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn issue261_track_change_prevented() {
+        let scenario = TestSetup::new("test_issue261_track_change_prevented").await;
+        let api_id = uuid!("06836a6d-30e6-4200-b968-ca362af92d2e");
+        let vorgang1 = models::Vorgang {
+            api_id,
+            typ: models::Vorgangstyp::GgLandParl,
+            stationen: vec![models::Station {
+                gremium: models::Gremium {
+                    parlament: models::Parlament::Bw,
+                    ..Default::default()
+                },
+                typ: models::Stationstyp::ParlInitiativ,
+                ..generate::default_station()
+            }],
+            ..generate::default_vorgang()
+        };
+        let vorgang2 = models::Vorgang {
+            api_id,
+            typ: models::Vorgangstyp::GgLandParlHaushalt,
+            ..vorgang1.clone()
+        };
+        let _ = insert(&scenario, &vorgang1).await;
+        let response = insert(&scenario, &vorgang2).await;
+        assert_eq!(response, super::PutResponse::Conflict);
         scenario.teardown().await;
     }
     #[tokio::test]
