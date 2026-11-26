@@ -60,6 +60,13 @@ impl<'de> Deserialize<'de> for Vorgang {
         D: serde::Deserializer<'de>,
     {
         let unchecked = Self::deserialize(deserializer)?.into_rounded();
+        // check that no deprecated variants of typ are used
+        if [crate::Vorgangstyp::BwEinsatz].contains(&unchecked.typ) {
+            return Err(de::Error::custom(format!(
+                "Variant {} of Vorgangstyp is deprecated",
+                unchecked.typ
+            )));
+        }
         // check that no two stations have the exact same zp_start, rounded
         let mut fails = vec![];
         for i in 0..unchecked.stationen.len() {
