@@ -1,9 +1,11 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
 use crate::error::DataValidationError;
+use crate::utils::tracing::{Action, LoggedObject};
 use crate::{PazufaServer, Result};
 use pazufa_models::{self as models, Zusammenfassungstupel};
 use sqlx::PgTransaction;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 /// updates and cycles the records of which scraper touched which vorgang
@@ -213,14 +215,13 @@ pub async fn insert(
     tx: &mut sqlx::PgTransaction<'_>,
     server: &PazufaServer,
 ) -> Result<i32> {
-    tracing::info!("Inserting Complete Vorgang into the database");
     #[cfg(feature = "track-validation")]
     server.tracks.validate(vg)?;
     tracing::trace!("Validation successful");
 
     let obj = "vorgang";
     // master insert
-    let vg_id = sqlx::query!(
+    let vg_id = sqlx::query_scalar!(
         "INSERT INTO vorgang(api_id, titel, kurztitel, verfaend, wahlperiode, typ, ressort)
     VALUES
     ($1, $2, $3, $4, $5, (SELECT id FROM vorgangstyp WHERE value=$6), (SELECT id from ressort WHERE value = $7))
@@ -233,7 +234,6 @@ pub async fn insert(
         server.guard_ts(&vg.typ, vg.api_id, obj),
         vg.ressort.map(|x| x.to_string())
     )
-    .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
     update_scraper_touched_vorgang(
@@ -247,7 +247,7 @@ pub async fn insert(
     // insert schlagworte
     insert_schlagworte_of_vorgang(vg_id, &vg.schlagworte, tx).await?;
     // insert sachgebiete
-    let sg_numbers: Vec<_> = vg.sachgebiete.iter().map(|x| i32::from(*x)).collect();
+    let sg_numbers: Vec<_> = vg.sachgebiete.iter().copied().map(i32::from).collect();
     sqlx::query!(
         "INSERT INTO vg_sachgebiete(vg_id, sg_id)
         SELECT $1, s.id FROM UNNEST($2::int4[]) as i, sachgebiet s
@@ -318,7 +318,14 @@ pub async fn insert(
     // insert summaries
     insert_zusammenf_for_vorgang(vg_id, &vg.zusammenfassung, tx).await?;
 
-    tracing::info!("Vorgang Insertion Successful with ID: {}", vg_id);
+    debug!(api_id = %vg_id, "Vorgang Insertion Successful");
+    info!(
+    target: "obj",
+    action = %Action::Create,
+    object = %LoggedObject::Vorgang,
+    api_id = %vg.api_id,
+    scraper_id = %scraper_id
+    );
     Ok(vg_id)
 }
 
@@ -336,7 +343,6 @@ pub async fn insert_station(
     // master insert
     let sapi = stat.api_id.unwrap_or(gen_identifier(scraper_id));
     tracing::trace!("Station has api id {sapi}");
-    let obj = "station";
     if sqlx::query!("SELECT 1 as id FROM station WHERE api_id = $1", sapi)
         .fetch_optional(&mut **tx)
         .await?
@@ -344,12 +350,12 @@ pub async fn insert_station(
     {
         return Err(DataValidationError::DuplicateApiId {
             id: sapi,
-            object: obj.to_owned(),
+            object: "station".to_owned(),
         }
         .into());
     }
     let gr_id = super::insert_or_retrieve_gremium(&stat.gremium, tx).await?;
-    let stat_id = sqlx::query!(
+    let stat_id = sqlx::query_scalar!(
         "INSERT INTO station 
         (api_id, gr_id, link, titel, trojanergefahr, typ, 
         zp_start, vg_id, zp_modifiziert, gremium_isff, tiebreak_ordering)
@@ -363,14 +369,13 @@ pub async fn insert_station(
         stat.link,
         stat.titel,
         stat.trojanergefahr.map(i32::from),
-        srv.guard_ts(&stat.typ, sapi, obj),
+        srv.guard_ts(&stat.typ, sapi, "station"),
         stat.zp_start,
         vg_id,
         stat.zp_modifiziert,
         stat.gremium_federf,
         stat.meta_tiebreaker.map(i32::from)
     )
-    .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
 
@@ -422,6 +427,13 @@ pub async fn insert_station(
     // schlagworte, inserted on a vorgang level, see #54 for details
     insert_schlagworte_of_vorgang(vg_id, &stat.schlagworte, tx).await?;
 
+    info!(
+    target: "obj",
+    action = %Action::Create,
+    object = %LoggedObject::Station,
+    api_id = ?sapi,
+    scraper_id = %scraper_id
+    );
     Ok(stat_id)
 }
 

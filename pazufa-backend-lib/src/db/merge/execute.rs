@@ -17,10 +17,11 @@ use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor, update_scraper_touched_vorgang};
 use crate::error::DataValidationError;
 use crate::utils::notify::notify_ambiguous_match;
+use crate::utils::tracing::{Action, LoggedObject};
 use crate::{PazufaServer, Result};
 use pazufa_models::enumerations::{HashStrategy, Mime};
 use pazufa_models::{self as models, RoundTimestamp};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 async fn merge_hashes_of_dok(
@@ -119,7 +120,9 @@ pub(crate) async fn execute_merge_dokument(
     srv: &PazufaServer,
 ) -> Result<()> {
     let db_id = candidate;
-    let original_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
+    let original_state = crate::db::retrieve::dokument_by_id(db_id, tx)
+        .await?
+        .into_rounded();
     // master update
     sqlx::query!(
         "UPDATE dokument SET
@@ -195,7 +198,8 @@ pub(crate) async fn execute_merge_dokument(
     .execute(&mut **tx)
     .await?;
     let merged_state = crate::db::retrieve::dokument_by_id(db_id, tx).await?;
-    if original_state.into_rounded() != merged_state.into_rounded() {
+    let merged_state = merged_state.into_rounded();
+    if original_state != merged_state {
         sqlx::query!(
             "UPDATE dokument SET meta_last_modified = NOW() WHERE id = $1",
             db_id
@@ -203,9 +207,26 @@ pub(crate) async fn execute_merge_dokument(
         .execute(&mut **tx)
         .await?;
     }
-    info!("Merging Dokument into Database successful");
+    debug!(
+        api_id_in = ?model.api_id,
+        api_id_db = ?merged_state.api_id,
+        "Merging Dokument into Database successful"
+    );
+
+    info!(
+    target: "obj",
+    action = %Action::Update,
+    object = %LoggedObject::Dokument,
+    api_id_in = ?model.api_id,
+    api_id_db = ?merged_state.api_id,
+    scraper_id = %scraper_id
+    );
     Ok(())
 }
+
+/// if id & not in database: fail.
+/// if id & in database: add to list of associated documents
+/// if document: match & integrate or insert.
 pub(crate) async fn insert_or_merge_dok(
     dok: &models::DokumentOrApiId,
     scraper_id: Uuid,
@@ -236,25 +257,26 @@ pub(crate) async fn insert_or_merge_dok(
                     Ok(Some(did))
                 }
                 MatchState::ExactlyOne(matchmod) => {
-                    debug!(
-                        "Found exactly one Dokument with db id: {}. Merging...",
-                        matchmod
-                    );
+                    debug!(api_id = ?dok.api_id, db_id = matchmod, "Found exactly one matching Dokument",);
                     execute_merge_dokument(dok, matchmod, scraper_id, collector_key, tx, srv)
                         .await?;
                     Ok(None)
                 }
                 MatchState::Ambiguous(matches) => {
-                    let api_ids = sqlx::query!(
+                    let api_ids = sqlx::query_scalar!(
                         "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
                         &matches[..]
                     )
-                    .map(|r| r.api_id)
                     .fetch_all(&mut **tx)
                     .await?;
+                    debug!(api_id = ?dok.api_id, matches = ?matches, "Ambiguous Dokument Match");
                     notify_ambiguous_match(&api_ids, &dok, "execute merge station.dokumente")?;
                     Err(DataValidationError::AmbiguousMatch {
-                        message: "Ambiguous document match(station), see notification".to_string(),
+                        message: format!(
+                            "Ambiguous document match: Dokument with api_id {:?} had {} matches",
+                            dok.api_id,
+                            matches.len()
+                        ),
                     }
                     .into())
                 }
@@ -272,7 +294,6 @@ pub(crate) async fn execute_merge_station(
     srv: &PazufaServer,
 ) -> Result<()> {
     let db_id = candidate;
-    let obj = "merge station";
     let sapi: uuid::Uuid = sqlx::query_scalar!("SELECT api_id FROM station WHERE id = $1", db_id)
         .fetch_one(&mut **tx)
         .await?;
@@ -294,7 +315,7 @@ pub(crate) async fn execute_merge_station(
         WHERE station.id = $1",
         db_id,
         gr_id,
-        srv.guard_ts(&model.typ, sapi, obj),
+        srv.guard_ts(&model.typ, sapi, "merge station"),
         model.titel,
         model.zp_start,
         model.zp_modifiziert,
@@ -323,9 +344,6 @@ pub(crate) async fn execute_merge_station(
     let mut insert_ids = vec![];
 
     for dok in &model.dokumente {
-        // if id & not in database: fail.
-        // if id & in database: add to list of associated documents
-        // if document: match & integrate or insert.
         if let Some(id) = insert_or_merge_dok(dok, scraper_id, collector_key, tx, srv).await? {
             insert_ids.push(id);
         }
@@ -384,7 +402,14 @@ pub(crate) async fn execute_merge_station(
     )
     .execute(&mut **tx)
     .await?;
-    info!("Merging Station into Database successful");
+    info!(
+    target: "obj",
+    action = %Action::Update,
+    object = %LoggedObject::Station,
+    api_id_in = ?model.api_id,
+    api_id_db = %sapi,
+    scraper_id = %scraper_id
+    );
     Ok(())
 }
 
@@ -419,7 +444,7 @@ pub(crate) async fn execute_merge_vorgang(
     .execute(&mut **tx)
     .await?;
     // sachgebiete
-    let sg: Vec<_> = model.sachgebiete.iter().map(|x| *x as i32).collect();
+    let sg: Vec<_> = model.sachgebiete.iter().copied().map(i32::from).collect();
     sqlx::query!(
         "INSERT INTO vg_sachgebiete (vg_id, sg_id) 
         SELECT $1, id FROM sachgebiet
@@ -493,18 +518,26 @@ pub(crate) async fn execute_merge_vorgang(
                 insert::insert_station(stat, db_id, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::ExactlyOne(statid) => {
-                debug!("Found exactly one Station with db id: {statid}. Merging...");
+                debug!(api_id = ?stat.api_id, db_id = statid, "Unique Match, merging...");
                 execute_merge_station(stat, statid, scraper_id, collector_key, tx, srv).await?;
             }
             MatchState::Ambiguous(matches) => {
-                let mids = sqlx::query!(
+                let mids = sqlx::query_scalar!(
                     "SELECT api_id FROM station WHERE id = ANY($1::int4[]);",
                     &matches[..]
                 )
-                .map(|r| r.api_id)
                 .fetch_all(&mut **tx)
                 .await?;
+                debug!(api_id = ?stat.api_id, matches = ?matches, "Ambiguous Station Match");
                 notify_ambiguous_match(&mids, stat, "exec_merge_vorgang: station matching")?;
+                return Err(DataValidationError::AmbiguousMatch {
+                    message: format!(
+                        "Ambiguous Station match: Station with api_id {:?} had {} matches",
+                        stat.api_id,
+                        matches.len()
+                    ),
+                }
+                .into());
             }
         }
     }
@@ -556,9 +589,9 @@ pub(crate) async fn execute_merge_vorgang(
 
     let merged_apiid = merged_state.api_id;
     if original_state.into_rounded() != merged_state.into_rounded() {
+        debug!(input = %model.api_id,existing = %merged_apiid, "Vorgang was changed; updating meta_last_modified");
         sqlx::query!(
-            "UPDATE vorgang
-                SET meta_last_modified = NOW() WHERE id = $1",
+            "UPDATE vorgang SET meta_last_modified = NOW() WHERE id = $1",
             db_id
         )
         .execute(&mut **tx)
@@ -566,8 +599,12 @@ pub(crate) async fn execute_merge_vorgang(
     }
 
     info!(
-        "Merging of Vg Successful: Merged `{}`(ext) with  `{merged_apiid}`(db)",
-        model.api_id
+    target: "obj",
+    action = %Action::Update,
+    object = %LoggedObject::Vorgang,
+    api_id_in = %model.api_id,
+    api_id_db = %merged_apiid,
+    scraper_id = %scraper_id
     );
     Ok(())
 }
@@ -579,41 +616,17 @@ pub(crate) async fn run_integration(
     server: &PazufaServer,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
-    debug!(
-        "Looking for Merge Candidates for Vorgang with api_id: {:?}",
-        model.api_id
-    );
     let candidates = vorgang_merge_candidates(model, &mut *tx, server).await?;
     match candidates {
         MatchState::NoMatch => {
-            info!(
-                "No Merge Candidate found, Inserting Complete Vorgang with api_id: {:?}",
-                model.api_id
-            );
-            let model = model.clone();
-            info!(target: "obj", "Merge(Insert New) Vorgang {}", model.api_id);
-            insert::insert_vorgang(&model, scraper_id, collector_key, &mut tx, server).await?;
+            insert::insert_vorgang(model, scraper_id, collector_key, &mut tx, server).await?;
         }
         MatchState::ExactlyOne(one) => {
-            let api_id = sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", one)
-                .map(|r| r.api_id)
-                .fetch_one(&mut *tx)
-                .await?;
-            info!(
-                "Matching Vorgang in the DB has api_id: {}, Updating with data from: {}",
-                api_id, model.api_id
-            );
-            info!(target: "obj", "Merge(merge) new Vorgang {} into Vorgang {}", model.api_id, api_id);
-            let model = model.clone();
-            execute_merge_vorgang(&model, one, scraper_id, collector_key, &mut tx, server).await?;
+            debug!(api_id = %model.api_id, db_id = one, "Unique Match, merging...");
+            execute_merge_vorgang(model, one, scraper_id, collector_key, &mut tx, server).await?;
         }
         MatchState::Ambiguous(many) => {
-            warn!(
-                "Ambiguous matches for Vorgang with api_id: {:?}",
-                model.api_id
-            );
-            warn!("Transaction not committed, administrators notified");
-            debug!("Details:  {:?} \n\n {:?}", model, many);
+            debug!(api_id = %model.api_id, matches = ?many, "Ambiguous match for Vorgang");
             let api_ids = sqlx::query_scalar!(
                 "SELECT api_id FROM vorgang WHERE id=ANY($1::int4[])",
                 &many[..]

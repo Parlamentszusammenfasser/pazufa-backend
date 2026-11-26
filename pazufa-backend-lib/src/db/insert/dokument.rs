@@ -2,10 +2,12 @@ use super::KeyIndex;
 use crate::db::gen_identifier;
 use crate::db::merge::MatchState;
 use crate::db::merge::candidates::dokument_merge_candidates;
+use crate::utils::tracing::{Action, LoggedObject};
 use crate::{PazufaServer, Result};
 use pazufa_models as models;
 use pazufa_models::enumerations::{HashStrategy, Mime};
 use sqlx::PgTransaction;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 async fn insert_hashes_of_dok(
@@ -91,6 +93,11 @@ async fn insert_zusammenfassung_of_dok(
     Ok(())
 }
 /// Inserts a document into the database, returning its db id
+/// Documents may belong to any number of different entities, so every insert is actually more
+/// of a merge.
+/// Currently, when called like this, instead of inserting the new document it returns the old one,
+/// and it errors on an ambiguous match.
+///
 /// # Errors
 /// Can fail due to database errors
 #[tracing::instrument(skip_all)]
@@ -116,8 +123,7 @@ pub async fn insert_dokument(
         }
         MatchState::NoMatch => {}
     }
-    let obj = "Dokument";
-    let did = sqlx::query!(
+    let did = sqlx::query_scalar!(
         "INSERT INTO dokument(api_id, drucksnr, typ, titel, kurztitel, vorwort, 
         volltext, zp_lastmod, link, zp_referenz, zp_created, meinung, subdoc_id)
         VALUES(
@@ -126,7 +132,7 @@ pub async fn insert_dokument(
         )RETURNING id",
         dapi,
         dok.drucksnr,
-        srv.guard_ts(&dok.typ, dapi, obj),
+        srv.guard_ts(&dok.typ, dapi, "dokument"),
         dok.titel,
         dok.kurztitel,
         dok.vorwort,
@@ -138,7 +144,6 @@ pub async fn insert_dokument(
         dok.meinung.map(i32::from),
         dok.subdoc_id.map(i32::from)
     )
-    .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
     // hash
@@ -192,6 +197,13 @@ pub async fn insert_dokument(
     )
     .execute(&mut **tx)
     .await?;
+    info!(
+    target: "obj",
+    action = %Action::Create,
+    object = %LoggedObject::Dokument,
+    api_id = ?dapi,
+    scraper_id = %scraper_id
+    );
     Ok(did)
 }
 

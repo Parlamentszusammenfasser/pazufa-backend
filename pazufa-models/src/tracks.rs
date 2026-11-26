@@ -126,7 +126,7 @@ impl Tracks {
                     "The Vorgang with this station ordering: {station_ordering} has at least one station that is not adhering to the track for parliament {p} and vgtyp {}: {conflicts_str}",
                     vg.typ
                 );
-                tracing::warn!("{reason}");
+                tracing::debug!("{reason}");
                 validation_errors.push(reason);
             }
         }
@@ -153,7 +153,7 @@ impl Tracks {
                 let reason = format!(
                     "The Vorgang contains Stations from more than one legislative class (parliament) in it's body: {s_parls:?}, which invalidates it"
                 );
-                tracing::warn!("{reason}");
+                tracing::debug!("{reason}");
                 return Err(Error::TrackValidation { error: reason });
             }
         }

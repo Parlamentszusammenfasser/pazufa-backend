@@ -35,7 +35,7 @@ pub async fn hashes_of_dok(id: i32, executor: &mut sqlx::PgTransaction<'_>) -> R
     .await?;
     if recs.is_empty() {
         tracing::warn!(
-            "Found Corrupted Database State: Document without hash was supplied at some point"
+            "Bad database state detected: Document without hash was supplied at some point"
         );
         return Ok(HashWrapper::Future(vec![]));
     } else if recs.len() == 1

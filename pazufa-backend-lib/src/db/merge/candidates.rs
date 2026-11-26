@@ -126,7 +126,7 @@ pub(crate) async fn vorgang_merge_candidates(
         0 => MatchState::NoMatch,
         1 => MatchState::ExactlyOne(result[0].id),
         _ => {
-            tracing::warn!(
+            tracing::debug!(
                 "Mehrere Vorgänge gefunden, die als Kandidaten für Merge infrage kommen für den Vorgang `{}`:\n{:?}",
                 model.api_id,
                 result.iter().map(|r| r.api_id).collect::<Vec<_>>()
@@ -143,6 +143,7 @@ pub(crate) async fn vorgang_merge_candidates(
 ///  (typ, gremium)_old == (typ, gremium)_new AND
 ///     (one matching document exists OR both are empty)
 /// )
+#[tracing::instrument(skip_all, fields(api_id = ?model.api_id))]
 pub(crate) async fn station_merge_candidates(
     model: &models::Station,
     vorgang: i32,
@@ -152,14 +153,12 @@ pub(crate) async fn station_merge_candidates(
     let obj = "merged station";
     let api_id = model.api_id.unwrap_or(uuid::Uuid::now_v7());
 
-    let conflict: Vec<uuid::Uuid> = sqlx::query!(
-        "SELECT v.api_id vapi FROM station s, vorgang v
-            WHERE
-            s.api_id = $1 AND s.vg_id <> $2",
+    let conflict: Vec<uuid::Uuid> = sqlx::query_scalar!(
+        "SELECT v.api_id FROM station s, vorgang v
+            WHERE s.api_id = $1 AND s.vg_id <> $2",
         model.api_id,
         vorgang
     )
-    .map(|r| r.vapi)
     .fetch_all(&mut **executor)
     .await?;
 
@@ -169,7 +168,7 @@ pub(crate) async fn station_merge_candidates(
             This always indicates an error.",
             conflict[0],
         );
-        tracing::error!("{}", &err);
+        tracing::debug!("{}", &err);
         return Err(DataValidationError::Conflict { reason: err }.into());
     }
     // now check for similar stations
@@ -248,10 +247,10 @@ pub(crate) async fn station_merge_candidates(
         0 => MatchState::NoMatch,
         1 => MatchState::ExactlyOne(result[0].id),
         _ => {
-            tracing::warn!(
-                "Found multiple Stations that are merge candidates for Station `{}`:\n{:?}",
-                api_id,
-                result.iter().map(|r| r.api_id).collect::<Vec<_>>()
+            tracing::debug!(
+                api_id= %api_id,
+                matches = ?result.iter().map(|r| r.api_id).collect::<Vec<_>>(),
+                "Multiple Merge Candidates Found",
             );
             MatchState::Ambiguous(result.iter().map(|x| x.id).collect())
         }
@@ -391,7 +390,7 @@ mod candid_test {
         }];
         // insert vorgang 1,2,3, ...
         for vg in &vgs {
-            tracing::info!("Inserting {}", vg.api_id);
+            tracing::info!(api_id = %vg.api_id, "Inserting");
             let r = vorgang_id_put(srv, 1, &params::ApiIdPathParam { api_id: vg.api_id }, vg).await;
             assert!(
                 matches!(r, Ok(crate::api::PutResponse::Success)),

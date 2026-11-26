@@ -12,6 +12,47 @@ use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::{Layer, registry::LookupSpan};
 
+#[derive(Clone, Copy, Debug)]
+pub enum Action {
+    Delete,
+    Update,
+    Create,
+}
+impl std::fmt::Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Delete => "delete",
+                Self::Update => "update",
+                Self::Create => "create",
+            }
+        )
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub enum LoggedObject {
+    Vorgang,
+    Station,
+    Dokument,
+    Sitzung,
+}
+impl std::fmt::Display for LoggedObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Sitzung => "sitzung",
+                Self::Station => "station",
+                Self::Vorgang => "vorgang",
+                Self::Dokument => "dokument",
+            }
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Logging {
     error_log: PathBuf,
@@ -45,7 +86,7 @@ impl Logging {
         if let Some(parent) = self.error_log.parent()
             && !parent.exists()
         {
-            info!("{} does not exist, creating...", parent.display());
+            info!("Directory {} does not exist, creating...", parent.display());
             if let Err(e) = std::fs::create_dir_all(parent) {
                 panic!(
                     "Insufficient permissions to create error log directory at {}: {}",
@@ -90,7 +131,7 @@ impl Logging {
             if let Some(parent) = object_log.parent()
                 && !parent.exists()
             {
-                info!("{} does not exist, creating...", parent.display());
+                info!("Directory {} does not exist, creating...", parent.display());
                 if let Err(e) = std::fs::create_dir_all(parent) {
                     panic!(
                         "Insufficient permissions to create object log directory at {}: {}",

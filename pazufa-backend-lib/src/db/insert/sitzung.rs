@@ -1,8 +1,10 @@
 use super::KeyIndex;
 use crate::db::gen_identifier;
+use crate::utils::tracing::{Action, LoggedObject};
 use crate::{PazufaServer, Result};
 use pazufa_models as models;
 use sqlx::PgTransaction;
+use tracing::info;
 use uuid::Uuid;
 
 /// Inserts a full Sitzung object into the database as new object
@@ -20,7 +22,7 @@ pub async fn insert_sitzung(
     // gremium insert or fetch
     let gr_id = super::insert_or_retrieve_gremium(&ass.gremium, tx).await?;
     // master insert
-    let id = sqlx::query!(
+    let id = sqlx::query_scalar!(
         "INSERT INTO sitzung 
         (api_id, termin, public, gr_id, link, nummer, titel)
         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
@@ -32,7 +34,6 @@ pub async fn insert_sitzung(
         i32::from(ass.nummer),
         ass.titel
     )
-    .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
     // insert tops
@@ -99,10 +100,12 @@ pub async fn insert_sitzung(
     )
     .execute(&mut **tx)
     .await?;
-    tracing::info!(
-        "Neue Sitzung angelegt am {} im Parlament {}",
-        ass.termin,
-        ass.gremium.parlament
+    info!(
+    target: "obj",
+    action = %Action::Create,
+    object = %LoggedObject::Sitzung,
+    api_id = %api_id,
+    scraper_id = %scraper_id
     );
     Ok(id)
 }
@@ -116,13 +119,12 @@ pub(crate) async fn insert_top(
     srv: &PazufaServer,
 ) -> Result<i32> {
     // master insert
-    let tid = sqlx::query!(
+    let tid = sqlx::query_scalar!(
         "INSERT INTO top(titel, nummer, sid) VALUES($1, $2, $3) RETURNING id;",
         top.titel,
         i32::from(top.nummer),
         sid
     )
-    .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
 

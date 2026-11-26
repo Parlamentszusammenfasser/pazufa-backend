@@ -27,7 +27,7 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(new_entry: &T, simila
         .fold(String::new(), |a, n| format!("{a}\n{n}"));
 
     let body = format!("Es gibt {} ähnliche Einträge: {simstr}", similarity.len());
-    tracing::warn!("Notify: New Enum Entry: {subject}\n{body}!");
+    tracing::debug!("Notify: New Enum Entry: {subject}\n{body}!");
 }
 
 /// Notifies of a match that has more than one candidate
@@ -48,7 +48,7 @@ pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
         })?,
         api_ids
     );
-    tracing::error!("Notify: Ambiguous Match: {subject}\n{body}");
+    tracing::info!("Notify: Ambiguous Match: {subject}\n{body}");
     Ok(())
 }
 
@@ -57,5 +57,5 @@ pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str) {
         "Für {object} `{api_id}` wurde `sonstig` angegeben als Wert für `{}`",
         std::any::type_name::<T>()
     );
-    tracing::warn!("Notify: Unknown Variant in Guarded Enumeration Field: {subject}");
+    tracing::debug!("Notify: Unknown Variant in Guarded Enumeration Field: {subject}");
 }
