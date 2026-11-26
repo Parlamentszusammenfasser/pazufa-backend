@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT api_id FROM vorgang WHERE id = $1",
+  "query": "SELECT v.api_id FROM station s, vorgang v\n            WHERE s.api_id = $1 AND s.vg_id <> $2",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,7 @@
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Int4"
       ]
     },
@@ -24,5 +25,5 @@
       false
     ]
   },
-  "hash": "f8244fd8efe1329b120386fa43e8a2587b3468016396831353a77f3ba8d0dc0d"
+  "hash": "780229cb68641709b8e01a8c8e06ec5a8309b215da399099b44fe63eb9a074bd"
 }

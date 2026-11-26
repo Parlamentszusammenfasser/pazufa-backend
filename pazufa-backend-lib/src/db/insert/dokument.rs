@@ -7,7 +7,7 @@ use crate::{PazufaServer, Result};
 use pazufa_models as models;
 use pazufa_models::enumerations::{HashStrategy, Mime};
 use sqlx::PgTransaction;
-use tracing::{debug, info};
+use tracing::info;
 use uuid::Uuid;
 
 async fn insert_hashes_of_dok(
