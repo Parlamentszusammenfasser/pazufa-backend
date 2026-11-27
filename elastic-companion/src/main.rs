@@ -1,24 +1,18 @@
 #![forbid(unsafe_code)]
 use anyhow::{Result, bail};
 use clap::{Parser, value_parser};
-use es::FetchId;
-use serde::Serialize;
-use std::{path::PathBuf, str::FromStr, sync::Arc};
-use tokio::sync::mpsc::Receiver;
+use fetch::{sync_dokument, sync_sitzung, sync_vorgang};
+use std::sync::Arc;
 
 mod es;
-mod sync;
+mod fetch;
 
-const DEFAULT_TIMESTAMP_PATH: &str = "./.last_es_sync";
-const CHANNEL_BUFFER_SIZE: usize = 100;
+/// Directory of run record for our indices
+const LAST_RUN_RECORD_PATH: &str = ".last_run";
 const MAX_HALVED: i64 = (u32::MAX / 2) as i64;
 
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "Is a config struct, all combinations are valuable"
-)]
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Syncs pazufa-backend data to Elasticsearch")]
+#[command(author, version, about = "Syncs pazufa-backend Data to Elasticsearch")]
 pub struct Config {
     #[arg(long, env = "DATABASE_URL")]
     pub db_url: String,
@@ -37,19 +31,14 @@ pub struct Config {
     #[arg(long, env = "ELASTICSEARCH_PASS")]
     pub es_pass: Option<String>,
 
-    #[arg(
-        long("iv"),
-        default_value = "false",
-        help = "Index Vorgang Objects into index `vorgang`"
-    )]
-    pub index_vorgang: bool,
+    #[arg(long("iv"), help = "Index Vorgang Objects into the named index")]
+    pub index_vorgang: Option<String>,
 
-    #[arg(
-        long("is"),
-        default_value = "false",
-        help = "Index Sitzung Objects into index `sitzung`"
-    )]
-    pub index_sitzungen: bool,
+    #[arg(long("is"), help = "Index Sitzungen Objects into the named index")]
+    pub index_sitzungen: Option<String>,
+
+    #[arg(long("id"), help = "Index Dokument Objects into the named index")]
+    pub index_documents: Option<String>,
 
     #[arg(long, help = "Reindex as-if run last at the supplied timestamp")]
     pub reindex_since: Option<chrono::DateTime<chrono::Utc>>,
@@ -61,13 +50,6 @@ pub struct Config {
     pub timestamp_store: Option<std::path::PathBuf>,
 
     #[arg(
-        long("id"),
-        default_value = "false",
-        help = "Index Document Objects into index `dokument`"
-    )]
-    pub index_documents: bool,
-
-    #[arg(
         long,
         value_parser = value_parser!(u32).range(0i64..=MAX_HALVED),
         env = "REINDEX_SECONDS",
@@ -75,94 +57,6 @@ pub struct Config {
     )]
     pub reindex_seconds: Option<u32>,
 }
-
-fn store_last_synced(
-    path: Option<&std::path::PathBuf>,
-    last_run_start: chrono::DateTime<chrono::Utc>,
-) -> Result<()> {
-    let default = std::path::PathBuf::from_str(DEFAULT_TIMESTAMP_PATH)?;
-    let path = path.unwrap_or(&default);
-    let Some(parent) = path.parent() else {
-        bail!("Path {} does not have a parent", path.display());
-    };
-    if parent.exists() {
-        std::fs::write(path, last_run_start.to_rfc3339())?;
-    } else {
-        bail!("Directory {:?} does not exist", path.parent())
-    }
-    Ok(())
-}
-
-fn fetch_last_synced(
-    path: Option<&std::path::PathBuf>,
-    default: Option<chrono::DateTime<chrono::Utc>>,
-) -> Result<chrono::DateTime<chrono::Utc>> {
-    let default_path = std::path::PathBuf::from_str(DEFAULT_TIMESTAMP_PATH)?;
-    let path = path.unwrap_or(&default_path);
-    if !path.exists() {
-        tracing::info!("Last timestamp marker was not found");
-        return Ok(default
-            .unwrap_or(chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")?.to_utc()));
-    }
-    let contents = std::fs::read_to_string(path)?;
-    let timestamp = chrono::DateTime::parse_from_rfc3339(&contents)?.to_utc();
-    Ok(timestamp)
-}
-async fn handle_batches<T: Serialize + Sized + Sync + Send + FetchId>(
-    index_name: &'static str,
-    mut rx: Receiver<Vec<T>>,
-    es_client: Arc<es::EsClient>,
-) -> Result<()> {
-    while let Some(batch) = rx.recv().await {
-        es_client.batch_index(index_name, batch).await?;
-    }
-    Ok(())
-}
-async fn sync(config: &Config) -> Result<()> {
-    let last_synced = fetch_last_synced(config.timestamp_store.as_ref(), config.reindex_since)?;
-    let es_client = Arc::new(es::EsClient::new(&config.es_url, config).await?);
-    let db_pool: Arc<sqlx::PgPool> = Arc::new(sqlx::PgPool::connect(&config.db_url).await?);
-
-    tracing::info!(
-        "Run Started. Syncing since last mod > {}",
-        last_synced.to_rfc3339()
-    );
-    let run_start = chrono::Utc::now();
-    if config.index_vorgang {
-        tracing::info!("Indexing Vorgang Objects");
-        let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_BUFFER_SIZE);
-        // vorgang fetch join handle
-        let vfetchjh = tokio::spawn(sync::index_vorgang(last_synced, tx, Arc::clone(&db_pool)));
-        // vorgang index join handle
-        let vindexjh = tokio::spawn(handle_batches("vorgang", rx, Arc::clone(&es_client)));
-        tokio::join!(vfetchjh, vindexjh).1??;
-        tracing::info!("Indexing finished");
-    }
-
-    if config.index_sitzungen {
-        tracing::info!("Indexing Sitzungen Objects");
-        let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_BUFFER_SIZE);
-        // sitzung fetch join handle
-        let sfetchjh = tokio::spawn(sync::index_sitzung(last_synced, tx, Arc::clone(&db_pool)));
-        // sitzung index join handle
-        let sindexjh = tokio::spawn(handle_batches("sitzung", rx, Arc::clone(&es_client)));
-        tokio::join!(sfetchjh, sindexjh).1??;
-        tracing::info!("Indexing finished");
-    }
-    if config.index_documents {
-        tracing::info!("Indexing Dokument Objects");
-        let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_BUFFER_SIZE);
-        // dokument fetch join handle
-        let dfetchjh = tokio::spawn(sync::index_dokument(last_synced, tx, Arc::clone(&db_pool)));
-        // dokument index join handle
-        let dindexjh = tokio::spawn(handle_batches("dokument", rx, Arc::clone(&es_client)));
-        tokio::join!(dfetchjh, dindexjh).1??;
-        tracing::info!("Indexing finished");
-    }
-    store_last_synced(config.timestamp_store.as_ref(), run_start)?;
-    Ok(())
-}
-
 #[allow(clippy::cast_sign_loss, reason = "is checked and floored")]
 #[allow(clippy::cast_possible_truncation, reason = "is checked")]
 #[allow(clippy::cast_precision_loss, reason = "is checked")]
@@ -202,23 +96,42 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let config = Config::parse();
-    // if some timestamp is supplied, remove the last stored if exists
-    // and force reindexing since supplied timestamp on first run
-    if config.reindex_since.is_some() {
-        if let Some(ref f) = config.timestamp_store
-            && f.exists()
-        {
-            std::fs::remove_file(f)?;
-        } else if PathBuf::from(DEFAULT_TIMESTAMP_PATH).exists() {
-            std::fs::remove_file(PathBuf::from(DEFAULT_TIMESTAMP_PATH))?;
-        }
-    }
+    let config = Box::new(Config::parse());
+    let config = Box::leak(config);
+    let mut last_mod = config
+        .reindex_since
+        .unwrap_or(chrono::DateTime::parse_from_rfc3339("1940-01-01T00:00:00Z")?.to_utc());
+    let es_client = Arc::new(es::EsClient::new(&config.es_url, config).await?);
+    let db_pool: Arc<sqlx::PgPool> = Arc::new(sqlx::PgPool::connect(&config.db_url).await?);
     let start = chrono::Utc::now();
-
     loop {
-        sync(&config).await?;
+        tracing::info!(
+            "Run Started. Syncing since last mod > {}",
+            last_mod.to_rfc3339()
+        );
+        tokio::join!(
+            tokio::spawn(sync_vorgang(
+                config,
+                last_mod,
+                Arc::clone(&es_client),
+                Arc::clone(&db_pool)
+            )),
+            tokio::spawn(sync_sitzung(
+                config,
+                last_mod,
+                Arc::clone(&es_client),
+                Arc::clone(&db_pool)
+            )),
+            tokio::spawn(sync_dokument(
+                config,
+                last_mod,
+                Arc::clone(&es_client),
+                Arc::clone(&db_pool)
+            )),
+        )
+        .1??;
         let now = chrono::Utc::now();
+        last_mod = now;
         if let Some(rs) = config.reindex_seconds {
             let (epoch, next_occ) = next_occurrence(start, now, rs)?;
             let sleep_time = next_occ - now;
@@ -229,6 +142,7 @@ async fn main() -> Result<()> {
             );
             tokio::time::sleep(sleep_time.to_std()?).await;
         } else {
+            tracing::info!("Single run finished, exiting");
             return Ok(());
         }
     }
