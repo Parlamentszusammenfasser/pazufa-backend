@@ -138,6 +138,9 @@ services:
       ELASTICSEARCH_USER: "elastic"
       ELASTICSEARCH_PASS: "elastic-testpassword"
       ELASTICSEARCH_URL: "http://pazufa-elastic:9200"
+      PAZUFA_ELASTIC_COMPANION_INDEX_VORGANG: "dev-vorgang"
+      PAZUFA_ELASTIC_COMPANION_INDEX_SITZUNG: "dev-sitzung"
+      PAZUFA_ELASTIC_COMPANION_INDEX_DOKUMENT: "dev-dokument"
       REINDEX_SECONDS: 60
       RUST_LOG: "warn,elastic_companion=info"                                         # optional
 

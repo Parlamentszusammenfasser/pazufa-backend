@@ -154,7 +154,7 @@ WORKDIR /app
 
 USER 65532:65532
 
-ENTRYPOINT ["./elastic-companion", "--iv", "vorgang_test_index", "--id", "dokument_test_index", "--is", "sitzung_test_index", "--timestamp-store", "/var/lib/elastic-companion/last_es_sync"]
+ENTRYPOINT ["./elastic-companion", "--timestamp-store", "/var/lib/elastic-companion/last_es_sync"]
 
 # RELEASE ARTIFACTS
 # Not meant to be run: exported with `--output type=local` by the deploy pipeline
