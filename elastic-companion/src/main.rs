@@ -31,13 +31,25 @@ pub struct Config {
     #[arg(long, env = "ELASTICSEARCH_PASS")]
     pub es_pass: Option<String>,
 
-    #[arg(long("iv"), help = "Index Vorgang Objects into the named index")]
+    #[arg(
+        long("iv"),
+        env = "PAZUFA_ELASTIC_COMPANION_INDEX_VORGANG",
+        help = "Index Vorgang Objects into the named index"
+    )]
     pub index_vorgang: Option<String>,
 
-    #[arg(long("is"), help = "Index Sitzungen Objects into the named index")]
+    #[arg(
+        long("is"),
+        env = "PAZUFA_ELASTIC_COMPANION_INDEX_SITZUNG",
+        help = "Index Sitzungen Objects into the named index"
+    )]
     pub index_sitzungen: Option<String>,
 
-    #[arg(long("id"), help = "Index Dokument Objects into the named index")]
+    #[arg(
+        long("id"),
+        env = "PAZUFA_ELASTIC_COMPANION_INDEX_DOKUMENT",
+        help = "Index Dokument Objects into the named index"
+    )]
     pub index_documents: Option<String>,
 
     #[arg(long, help = "Reindex as-if run last at the supplied timestamp")]
